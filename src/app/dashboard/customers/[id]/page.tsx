@@ -1,14 +1,28 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useParams, useRouter, useSearchParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import { Loader2, ArrowLeft, Star, Phone, MessageCircle, PhoneCall, ThumbsUp, ShoppingCart, Lock } from 'lucide-react'
-import { Customer, Order, OrderStep, Interaction, Package as Pkg, MONTH_CODES, TIME_SLOT_LABELS } from '@/types'
-import { fmtDate, fmtTime, buildWaLink, WA, getDaysLeft } from '@/lib/utils'
+import { Customer, Order, OrderStep, Interaction, Package as Pkg, MONTH_CODES } from '@/types'
+import { fmtDate, fmtTime, buildWaLink, WA } from '@/lib/utils'
+
+const SLOT_LABELS: Record<string, string> = { W: '6:30am', X: '11:30am', Y: '3:30pm', Z: '8:30pm' }
+const SLOTS = ['W', 'X', 'Y', 'Z'] as const
+const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+function getNext14Days(): string[] {
+  const days: string[] = []
+  for (let i = 0; i < 14; i++) {
+    const d = new Date()
+    d.setDate(d.getDate() + i)
+    days.push(d.toISOString().split('T')[0])
+  }
+  return days
+}
 
 export default function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -16,7 +30,6 @@ export default function CustomerDetailPage() {
   const router = useRouter()
 
   const [customer, setCustomer] = useState<Customer | null>(null)
-  const [orders, setOrders] = useState<Order[]>([])
   const [interactions, setInteractions] = useState<Interaction[]>([])
   const [packages, setPackages] = useState<Pkg[]>([])
   const [activeOrder, setActiveOrder] = useState<Order | null>(null)
@@ -40,28 +53,29 @@ export default function CustomerDetailPage() {
   const [extendReason, setExtendReason] = useState('')
   const [extendDays, setExtendDays] = useState(1)
 
-  // Brief & meeting
+  // Counselor
   const [brief, setBrief] = useState('')
   const [meetingDate, setMeetingDate] = useState('')
   const [meetingTime, setMeetingTime] = useState('')
   const [customerApproved, setCustomerApproved] = useState(false)
 
   // Manager reject
-  const [rejectReason, setRejectReason] = useState('')
   const [showReject, setShowReject] = useState(false)
+  const [rejectReason, setRejectReason] = useState('')
   const [rejectAssignee, setRejectAssignee] = useState('')
 
-  // Designer
-  const [postDate, setPostDate] = useState('')
-  const [timeSlot, setTimeSlot] = useState<'W' | 'X' | 'Y' | 'Z'>('W')
+  // Designer calendar
+  const [showCalendar, setShowCalendar] = useState(false)
+  const [calendarDates] = useState<string[]>(getNext14Days())
+  const [takenSlots, setTakenSlots] = useState<Record<string, boolean>>({})
+  const [selectedCell, setSelectedCell] = useState<string | null>(null)
   const [expiryDate, setExpiryDate] = useState('')
-  const [postCode, setPostCode] = useState('')
 
-  // Partner link (back office)
+  // Partner link
   const [partnerLink, setPartnerLink] = useState('')
   const [showPartnerLink, setShowPartnerLink] = useState(false)
 
-  // Countdown ticker
+  // Countdown
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30000)
@@ -77,16 +91,18 @@ export default function CustomerDetailPage() {
     return () => clearTimeout(t)
   }, [timerActive, orderTimer])
 
-  // Auto-generate post code when date/slot changes
-  useEffect(() => {
-    if (!postDate || !orderCreator) return
-    const d = new Date(postDate)
-    const year = String(d.getFullYear()).slice(-2)
-    const month = MONTH_CODES[d.getMonth() + 1] || '?'
-    const day = d.getDate()
-    const agentCode = orderCreator?.agent_code || 'X'
-    setPostCode(`L/${year}/${agentCode}/${month}${day}/${timeSlot}`)
-  }, [postDate, timeSlot, orderCreator])
+  const fetchCalendarSlots = async () => {
+    const { data } = await supabase
+      .from('calendar_slots')
+      .select('slot_date, slot_time')
+      .gte('slot_date', calendarDates[0])
+      .lte('slot_date', calendarDates[calendarDates.length - 1])
+    if (data) {
+      const taken: Record<string, boolean> = {}
+      data.forEach((s: any) => { taken[`${s.slot_date}-${s.slot_time}`] = true })
+      setTakenSlots(taken)
+    }
+  }
 
   const fetchAll = async () => {
     setLoading(true)
@@ -101,14 +117,11 @@ export default function CustomerDetailPage() {
     if (custRes.data) setCustomer(custRes.data)
     if (workersRes.data) setWorkers(workersRes.data)
     if (ordersRes.data) {
-      setOrders(ordersRes.data as any)
       const active = (ordersRes.data as any[]).find((o: Order) => o.status === 'active')
       if (active) {
         setActiveOrder(active)
-        // Fetch order creator agent code
         const { data: creatorData } = await supabase.from('users').select('agent_code, full_name').eq('id', active.created_by).single()
         if (creatorData) setOrderCreator(creatorData)
-
         const { data: stepData } = await supabase
           .from('order_steps')
           .select('*, assigned_user:users!assigned_to(full_name, role, meeting_link)')
@@ -119,10 +132,13 @@ export default function CustomerDetailPage() {
           .single()
         if (stepData) {
           setActiveStep(stepData as any)
-          if (stepData?.description) setBrief(stepData.description)
+          if (stepData.description) setBrief(stepData.description)
         } else {
           setActiveStep(null)
         }
+      } else {
+        setActiveOrder(null)
+        setActiveStep(null)
       }
     }
     if (interactionsRes.data) setInteractions(interactionsRes.data as any)
@@ -133,26 +149,33 @@ export default function CustomerDetailPage() {
   const logAction = async (description: string) => {
     if (!customer || !user) return
     await supabase.from('interactions').insert({
-      customer_id: customer.id,
-      type: 'order',
-      description,
-      created_by: user.id,
+      customer_id: customer.id, type: 'order', description, created_by: user.id,
     })
   }
 
   const openOrderTab = () => { setShowOrderForm(true); setTimerActive(true); setOrderTimer(600) }
   const fmtTimer = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+  const openWa = (url: string) => window.open(url, '_blank')
 
   const getCountdown = (deadline?: string, extended?: string) => {
     const target = extended || deadline
     if (!target) return null
     const diff = new Date(target).getTime() - now
-    if (diff <= 0) return '⚠️ Overdue'
+    if (diff <= 0) return 'Overdue'
     const h = Math.floor(diff / 3600000)
     const m = Math.floor((diff % 3600000) / 60000)
     if (h >= 48) return `${Math.floor(h / 24)}d ${h % 24}h remaining`
     if (h >= 1) return `${h}h ${m}m remaining`
     return `${m}m remaining`
+  }
+
+  const generatePostCode = (date: string, slot: string) => {
+    const d = new Date(date)
+    const year = String(d.getFullYear()).slice(-2)
+    const month = MONTH_CODES[d.getMonth() + 1] || '?'
+    const day = d.getDate()
+    const agentCode = orderCreator?.agent_code || 'X'
+    return `L/${year}/${agentCode}/${month}${day}/${slot}`
   }
 
   const canAct = () => {
@@ -165,6 +188,8 @@ export default function CustomerDetailPage() {
   const myStep = activeStep?.step_number
   const isExpired = !!(activeOrder?.validity_expires_at && new Date(activeOrder.validity_expires_at) < new Date())
   const stepAccepted = activeStep?.status === 'in_progress'
+  const isActiveStep = canAct()
+  const countdown = activeStep ? getCountdown(activeStep.deadline, activeStep.extended_deadline) : null
 
   const doAccept = async () => {
     if (!activeStep) return
@@ -176,23 +201,17 @@ export default function CustomerDetailPage() {
       deadline: new Date(Date.now() + deadlineHours * 3600000).toISOString()
     }).eq('id', activeStep.id)
     const labels: Record<number, string> = {
-      3: '✅ Back Office accepted — onboarding started',
-      4: '✅ Counselor accepted — session started',
-      5: '✅ Manager accepted — reviewing brief',
-      6: '✅ Designer accepted — planning post',
+      3: 'Back Office accepted — onboarding started',
+      4: 'Counselor accepted — session started',
+      5: 'Manager accepted — reviewing brief',
+      6: 'Designer accepted',
     }
-    await logAction(labels[myStep!] || '✅ Step accepted')
+    await logAction(labels[myStep!] || 'Step accepted')
     await fetchAll()
     setActionLoading(false)
   }
 
-  const doComplete = async (
-    nextStep: number,
-    data?: Partial<OrderStep>,
-    assignTo?: string,
-    logMsg?: string,
-    nextDescription?: string
-  ) => {
+  const doComplete = async (nextStep: number, data?: Partial<OrderStep>, assignTo?: string, logMsg?: string, nextDescription?: string) => {
     if (!activeStep || !activeOrder) return
     setActionLoading(true)
     await supabase.from('order_steps').update({
@@ -222,38 +241,74 @@ export default function CustomerDetailPage() {
     await supabase.from('order_steps').update({
       extended_deadline: newDeadline, extension_reason: extendReason, extended_by_days: extendDays,
     }).eq('id', activeStep.id)
-    await logAction(`⏱ Extension requested: "${extendReason}" — +${extendDays} day${extendDays > 1 ? 's' : ''} granted`)
+    await logAction(`Extension requested — ${extendReason} (+${extendDays} day${extendDays > 1 ? 's' : ''})`)
     setShowExtend(false); setExtendReason('')
     await fetchAll()
     setActionLoading(false)
   }
 
-  const openWa = (url: string) => window.open(url, '_blank')
-
   const handleConfirmMeeting = async () => {
     if (!meetingDate || !meetingTime || !customer) return
     const link = (user as any)?.meeting_link || 'https://meet.google.com'
-    const msg = `ආයුබෝවන් ${customer.name || customer.phone}! 🌸\n\nඔබේ Emma Thinking counselling session confirm කර ඇත.\n\n📅 දිනය: ${meetingDate}\n⏰ වේලාව: ${meetingTime}\n🔗 Google Meet: ${link}\n\nThank you for choosing Emma Thinking! 💗`
+    const msg = `Ayubowan ${customer.name || customer.phone}!\n\nYour Emma Thinking counselling session has been confirmed.\n\nDate: ${meetingDate}\nTime: ${meetingTime}\nGoogle Meet: ${link}\n\nThank you for choosing Emma Thinking!`
     openWa(buildWaLink(customer.phone, msg))
-    await logAction(`📅 Meeting confirmed — ${meetingDate} at ${meetingTime}`)
+    await logAction(`Meeting confirmed — ${meetingDate} at ${meetingTime}`)
     await fetchAll()
+  }
+
+  const handlePlanSlot = async () => {
+    if (!selectedCell || !activeOrder || !activeStep || !customer) return
+    setActionLoading(true)
+    const [date, slot] = selectedCell.split('-')
+    const code = generatePostCode(date, slot)
+    await supabase.from('calendar_slots').insert({
+      order_id: activeOrder.id,
+      order_step_id: activeStep.id,
+      slot_date: date,
+      slot_time: slot,
+      post_id_code: code,
+      assigned_to: user?.id,
+      planned_at: new Date().toISOString(),
+    })
+    await supabase.from('orders').update({ planned_post_date: new Date(date).toISOString() }).eq('id', activeOrder.id)
+    await logAction(`Post planned — ${date} at ${SLOT_LABELS[slot]} | Post ID: ${code}`)
+    const msg = `Ayubowan ${customer.name || customer.phone}!\n\nYour Emma Thinking profile post has been planned!\n\nPost Date: ${date}\nTime: ${SLOT_LABELS[slot]}\nPost ID: ${code}\n\nThank you for choosing Emma Thinking!`
+    openWa(buildWaLink(customer.phone, msg))
+    setSelectedCell(null); setShowCalendar(false)
+    await fetchCalendarSlots(); await fetchAll()
+    setActionLoading(false)
+  }
+
+  const handleSetExpiry = async () => {
+    if (!expiryDate || !activeOrder) return
+    setActionLoading(true)
+    await supabase.from('orders').update({ validity_expires_at: new Date(expiryDate).toISOString() }).eq('id', activeOrder.id)
+    await logAction(`Validity expiry set — expires ${expiryDate}`)
+    await fetchAll()
+    setActionLoading(false)
+  }
+
+  const handleMarkPublished = async () => {
+    if (!activeOrder || !activeStep) return
+    setActionLoading(true)
+    await supabase.from('orders').update({ published_at: new Date().toISOString() }).eq('id', activeOrder.id)
+    await supabase.from('order_steps').update({ status: 'done', completed_at: new Date().toISOString() }).eq('id', activeStep.id)
+    await logAction('Post published')
+    await fetchAll()
+    setActionLoading(false)
   }
 
   const handleSendPartnerLink = async () => {
     if (!partnerLink || !customer) return
-    const msg = `Welcome to Emma Thinking! 💗\n\nYour Matched Partner's profile link is:\n\n1️⃣ ${partnerLink}\n\n*How to Get Started:*\n1. Click the link above\n2. View their detailed profile\n3. Browse photo galleries\n\nIf you are interested, we can share their contact details.\n\nThank you for choosing Emma Thinking! 🌸`
+    const msg = `Welcome to Emma Thinking!\n\nYour Matched Partner's link is:\n\n   1. ${partnerLink}\n\nHow to Get Started:\n1. Click the website link above\n2. View detailed profiles and information\n3. Browse photo galleries\n\nIf you are interested we can send their phone numbers.\n\nThank you for choosing Emma Thinking!`
     openWa(buildWaLink(customer.phone, msg))
-    await logAction(`💌 Partner profile link sent via WhatsApp`)
+    await logAction(`Partner profile link sent to customer`)
     setPartnerLink(''); setShowPartnerLink(false)
     await fetchAll()
   }
 
   if (loading) return <div className="h-screen flex items-center justify-center bg-white"><Loader2 className="animate-spin text-pink-600" size={28} /></div>
-  if (!customer) return <div className="h-screen flex items-center justify-center bg-white"><p className="text-gray-400 text-sm font-medium">Customer not found</p></div>
-
-  const isActiveStep = canAct()
-  const countdown = activeStep ? getCountdown(activeStep.deadline, activeStep.extended_deadline) : null
-  const slotLabels: Record<string, string> = { W: '6:30am', X: '11:30am', Y: '3:30pm', Z: '8:30pm' }
+  if (!customer) return <div className="h-screen flex items-center justify-center bg-white"><p className="text-gray-400 text-sm">Customer not found</p></div>
 
   return (
     <div className="h-screen flex flex-col bg-white overflow-hidden">
@@ -316,12 +371,12 @@ export default function CustomerDetailPage() {
                   <div>
                     <p className={`text-[9px] font-bold uppercase tracking-wide ${isActiveStep ? 'text-pink-600' : 'text-gray-400'}`}>
                       {isActiveStep
-                        ? stepAccepted ? 'In progress — your turn' : 'New assignment — action required'
-                        : `Waiting · Step ${activeStep.step_number}${(activeStep as any).assigned_user ? ` · ${(activeStep as any).assigned_user.full_name}` : ' · Unassigned'}`}
+                        ? stepAccepted ? 'In progress — your turn' : 'New assignment — accept to begin'
+                        : `Waiting — Step ${activeStep.step_number}${(activeStep as any).assigned_user ? ` · ${(activeStep as any).assigned_user.full_name}` : ' · Unassigned'}`}
                     </p>
                     {countdown && (
-                      <p className={`text-[8px] font-bold mt-0.5 ${countdown.includes('Overdue') ? 'text-red-500' : 'text-amber-500'}`}>
-                        ⏱ {countdown}
+                      <p className={`text-[8px] font-bold mt-0.5 ${countdown === 'Overdue' ? 'text-red-500' : 'text-amber-500'}`}>
+                        {countdown}
                       </p>
                     )}
                   </div>
@@ -331,7 +386,7 @@ export default function CustomerDetailPage() {
                 </div>
               </div>
 
-              {/* ── STEP 3 — Back Office ── */}
+              {/* STEP 3 — Back Office */}
               {isActiveStep && myStep === 3 && (
                 <div className="p-4 space-y-2">
                   {!stepAccepted && (
@@ -342,14 +397,14 @@ export default function CustomerDetailPage() {
                   )}
                   <button disabled={!stepAccepted} onClick={async () => {
                     openWa(buildWaLink(customer.phone, WA.greeting(customer.name || customer.phone)))
-                    await logAction('👋 Greeting sent via WhatsApp')
+                    await logAction('Greeting sent via WhatsApp')
                     await fetchAll()
                   }} className={`w-full flex items-center gap-3 border rounded-xl px-4 py-3 text-xs font-semibold transition-all ${stepAccepted ? 'bg-white border-green-100 text-green-700' : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'}`}>
                     <span className={`w-2 h-2 rounded-full ${stepAccepted ? 'bg-green-500' : 'bg-gray-300'}`} />Send greeting
                   </button>
                   <button disabled={!stepAccepted} onClick={async () => {
                     openWa(buildWaLink(customer.phone, WA.sendInvoice(customer.name || customer.phone, `${process.env.NEXT_PUBLIC_APP_URL}/invoice/${activeOrder.id}`)))
-                    await logAction('🧾 Invoice sent via WhatsApp')
+                    await logAction('Invoice sent via WhatsApp')
                     await fetchAll()
                   }} className={`w-full flex items-center gap-3 border rounded-xl px-4 py-3 text-xs font-semibold transition-all ${stepAccepted ? 'bg-white border-green-100 text-green-700' : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'}`}>
                     <span className={`w-2 h-2 rounded-full ${stepAccepted ? 'bg-green-500' : 'bg-gray-300'}`} />Send invoice
@@ -366,7 +421,7 @@ export default function CustomerDetailPage() {
                       </div>
                       <button onClick={() => {
                         const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'counselor'
-                        doComplete(4, {}, selectedAssignee, `➡️ Assigned to counselor: ${name}`)
+                        doComplete(4, {}, selectedAssignee, `Assigned to counselor: ${name}`)
                       }} disabled={!selectedAssignee || actionLoading}
                         className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
                         {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Assign to counselor →'}
@@ -376,7 +431,7 @@ export default function CustomerDetailPage() {
                 </div>
               )}
 
-              {/* ── STEP 4 — Counselor ── */}
+              {/* STEP 4 — Counselor */}
               {isActiveStep && myStep === 4 && (
                 <div className="p-4 space-y-2">
                   {!stepAccepted && (
@@ -409,27 +464,25 @@ export default function CustomerDetailPage() {
                       <div>
                         <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Creative brief</label>
                         <textarea value={brief} onChange={e => setBrief(e.target.value)}
-                          placeholder="Paste or type the full brief here..."
-                          rows={12}
+                          placeholder="Paste or type the full brief here..." rows={12}
                           className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none resize-y leading-relaxed" />
                       </div>
                       {activeOrder.step_variant === 'standard' && (
                         <button disabled={!brief} onClick={async () => {
                           openWa(buildWaLink(customer.phone, WA.sendBriefToCustomer(customer.name || customer.phone, brief)))
-                          await logAction('📋 Brief sent to customer via WhatsApp')
+                          await logAction('Brief sent to customer via WhatsApp')
                           await fetchAll()
                         }} className={`w-full flex items-center gap-3 border rounded-xl px-4 py-3 text-xs font-semibold transition-all ${brief ? 'bg-white border-green-100 text-green-700' : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'}`}>
-                          <span className={`w-2 h-2 rounded-full ${brief ? 'bg-green-500' : 'bg-gray-300'}`} />
-                          Send brief to customer
+                          <span className={`w-2 h-2 rounded-full ${brief ? 'bg-green-500' : 'bg-gray-300'}`} />Send brief to customer
                         </button>
                       )}
                       <button onClick={async () => {
                         setCustomerApproved(true)
-                        await logAction('✅ Customer approved the brief')
+                        await logAction('Customer approved the brief')
                         await fetchAll()
                       }} disabled={customerApproved}
                         className={`w-full rounded-xl px-4 py-3 text-xs font-bold transition-all ${customerApproved ? 'bg-green-50 border border-green-200 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
-                        {customerApproved ? '✅ Customer approved' : 'Mark customer approved'}
+                        {customerApproved ? 'Customer approved' : 'Mark customer approved'}
                       </button>
                       {customerApproved && activeOrder.step_variant === 'standard' && (
                         <>
@@ -443,7 +496,7 @@ export default function CustomerDetailPage() {
                           </div>
                           <button onClick={() => {
                             const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'manager'
-                            doComplete(5, { description: brief }, selectedAssignee, `➡️ Brief submitted to manager: ${name}`, brief)
+                            doComplete(5, { description: brief }, selectedAssignee, `Brief submitted to manager: ${name}`, brief)
                           }} disabled={!selectedAssignee || actionLoading}
                             className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
                             {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Submit to manager →'}
@@ -462,7 +515,7 @@ export default function CustomerDetailPage() {
                           </div>
                           <button onClick={() => {
                             const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'back office'
-                            doComplete(3, { description: brief, sub_step: 'customer_facing' }, selectedAssignee, `↩️ Returned to back office: ${name}`, brief)
+                            doComplete(3, { description: brief, sub_step: 'customer_facing' }, selectedAssignee, `Returned to back office: ${name}`, brief)
                           }} disabled={!selectedAssignee || actionLoading}
                             className="w-full bg-purple-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
                             Return to Back Office →
@@ -470,7 +523,9 @@ export default function CustomerDetailPage() {
                         </>
                       )}
                       {!showExtend ? (
-                        <button onClick={() => setShowExtend(true)} className="w-full border border-red-100 text-red-400 rounded-xl px-4 py-2.5 text-xs font-semibold">Request extension</button>
+                        <button onClick={() => setShowExtend(true)} className="w-full border border-red-100 text-red-400 rounded-xl px-4 py-2.5 text-xs font-semibold">
+                          Request extension
+                        </button>
                       ) : (
                         <div className="bg-red-50 border border-red-100 rounded-xl p-3 space-y-2">
                           <input value={extendReason} onChange={e => setExtendReason(e.target.value)} placeholder="Reason for extension"
@@ -490,22 +545,20 @@ export default function CustomerDetailPage() {
                 </div>
               )}
 
-              {/* ── STEP 5 — Manager ── */}
+              {/* STEP 5 — Manager */}
               {isActiveStep && myStep === 5 && (
                 <div className="p-4 space-y-2">
                   {!stepAccepted && (
                     <button onClick={doAccept} disabled={actionLoading}
                       className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
-                      {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Accept & review brief'}
+                      {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Accept and review brief'}
                     </button>
                   )}
                   {stepAccepted && (
                     <>
                       <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
                         <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1.5">Brief from counselor</p>
-                        <p className="text-xs text-gray-700 font-medium leading-relaxed whitespace-pre-wrap">
-                          {activeStep.description || 'No brief provided'}
-                        </p>
+                        <p className="text-xs text-gray-700 font-medium leading-relaxed whitespace-pre-wrap">{activeStep.description || 'No brief provided'}</p>
                       </div>
                       <div>
                         <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign designer</label>
@@ -517,10 +570,10 @@ export default function CustomerDetailPage() {
                       </div>
                       <button onClick={() => {
                         const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'designer'
-                        doComplete(6, {}, selectedAssignee, `✅ Manager approved. Assigned to designer: ${name}`, activeStep.description || '')
+                        doComplete(6, {}, selectedAssignee, `Manager approved. Assigned to designer: ${name}`, activeStep.description || '')
                       }} disabled={!selectedAssignee || actionLoading}
                         className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
-                        {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Approve & assign to designer →'}
+                        {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Approve and assign to designer →'}
                       </button>
                       <div className="border-t border-gray-100 pt-2">
                         {!showReject ? (
@@ -540,9 +593,9 @@ export default function CustomerDetailPage() {
                               </select>
                             </div>
                             <button onClick={() => {
-                              const counselorName = workers.find(w => w.id === rejectAssignee)?.full_name || 'counselor'
-                              const briefWithFeedback = `${activeStep.description || ''}\n\n---\n❌ Manager feedback: ${rejectReason}`
-                              doComplete(4, {}, rejectAssignee, `❌ Rejected by manager — returned to ${counselorName}: "${rejectReason}"`, briefWithFeedback)
+                              const name = workers.find(w => w.id === rejectAssignee)?.full_name || 'counselor'
+                              const briefWithFeedback = `${activeStep.description || ''}\n\n---\nManager feedback: ${rejectReason}`
+                              doComplete(4, {}, rejectAssignee, `Rejected by manager. Returned to ${name}: "${rejectReason}"`, briefWithFeedback)
                             }} disabled={!rejectReason || !rejectAssignee || actionLoading}
                               className="w-full bg-red-400 text-white rounded-lg px-3 py-2 text-xs font-bold disabled:opacity-40">
                               Send back to counselor
@@ -555,7 +608,7 @@ export default function CustomerDetailPage() {
                 </div>
               )}
 
-              {/* ── STEP 6 — Designer ── */}
+              {/* STEP 6 — Designer */}
               {isActiveStep && myStep === 6 && (
                 <div className="p-4 space-y-2">
                   {!stepAccepted && (
@@ -570,60 +623,91 @@ export default function CustomerDetailPage() {
                         <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1">Creative brief</p>
                         <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap">{activeStep.description}</p>
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Post date</label>
-                          <input type="date" value={postDate} onChange={e => setPostDate(e.target.value)}
-                            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs font-medium outline-none" />
-                        </div>
-                        <div>
-                          <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Time slot</label>
-                          <select value={timeSlot} onChange={e => setTimeSlot(e.target.value as any)}
-                            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs font-medium outline-none">
-                            <option value="W">W — 6:30am</option>
-                            <option value="X">X — 11:30am</option>
-                            <option value="Y">Y — 3:30pm</option>
-                            <option value="Z">Z — 8:30pm</option>
-                          </select>
-                        </div>
-                      </div>
-                      {postCode && (
-                        <div className="bg-pink-50 border border-pink-100 rounded-xl px-4 py-2.5 flex items-center justify-between">
-                          <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wide">Post ID code</p>
-                          <p className="text-xs font-bold text-pink-600">{postCode}</p>
+
+                      {/* Calendar Planner */}
+                      {!showCalendar ? (
+                        <button onClick={async () => {
+                          await fetchCalendarSlots()
+                          setShowCalendar(true)
+                        }} className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold">
+                          Open calendar planner →
+                        </button>
+                      ) : (
+                        <div className="border border-gray-100 rounded-xl overflow-hidden">
+                          <div className="bg-gray-50 px-3 py-2 flex items-center justify-between">
+                            <p className="text-[9px] font-bold text-gray-500 uppercase tracking-wide">Select a slot</p>
+                            <button onClick={() => setShowCalendar(false)} className="text-[9px] text-gray-400 font-medium">Close</button>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-[8px]">
+                              <thead>
+                                <tr>
+                                  <th className="bg-gray-50 px-2 py-1.5 text-left font-bold text-gray-400 sticky left-0"></th>
+                                  {calendarDates.map(d => {
+                                    const date = new Date(d)
+                                    return (
+                                      <th key={d} className="bg-gray-50 px-1 py-1.5 text-center font-bold text-gray-600 min-w-[36px]">
+                                        <div>{date.getDate()}</div>
+                                        <div className="text-gray-400 font-medium">{DAY_LABELS[date.getDay()]}</div>
+                                      </th>
+                                    )
+                                  })}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {SLOTS.map(slot => (
+                                  <tr key={slot}>
+                                    <td className="bg-gray-50 px-2 py-1.5 font-bold text-gray-500 sticky left-0 whitespace-nowrap">
+                                      {slot}<br /><span className="font-medium text-gray-400">{SLOT_LABELS[slot]}</span>
+                                    </td>
+                                    {calendarDates.map(d => {
+                                      const key = `${d}-${slot}`
+                                      const taken = takenSlots[key]
+                                      const selected = selectedCell === key
+                                      return (
+                                        <td key={key}
+                                          onClick={() => !taken && setSelectedCell(selected ? null : key)}
+                                          className={`text-center py-2 border border-gray-50 transition-all ${taken ? 'bg-gray-100 cursor-not-allowed' : selected ? 'bg-pink-600 cursor-pointer' : 'bg-white cursor-pointer hover:bg-pink-50'}`}>
+                                          <span className={`text-[10px] font-bold ${taken ? 'text-gray-300' : selected ? 'text-white' : 'text-gray-200'}`}>
+                                            {taken ? '●' : selected ? '✓' : '○'}
+                                          </span>
+                                        </td>
+                                      )
+                                    })}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          {selectedCell && (
+                            <div className="p-3 bg-pink-50 border-t border-pink-100">
+                              <p className="text-[9px] font-bold text-pink-600 mb-1">
+                                Selected: {selectedCell.split('-').slice(0, 3).join('-')} at {SLOT_LABELS[selectedCell.split('-')[3]]}
+                              </p>
+                              <p className="text-[9px] font-bold text-gray-500 mb-2">
+                                Post ID: {generatePostCode(selectedCell.split('-').slice(0, 3).join('-'), selectedCell.split('-')[3])}
+                              </p>
+                              <button onClick={handlePlanSlot} disabled={actionLoading}
+                                className="w-full bg-pink-600 text-white rounded-lg py-2 text-[10px] font-bold disabled:opacity-40">
+                                {actionLoading ? <Loader2 size={12} className="animate-spin mx-auto" /> : 'Plan this slot + send WA'}
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )}
-                      <button onClick={async () => {
-                        if (!postDate || !customer) return
-                        const msg = `ආයුබෝවන් ${customer.name || customer.phone}! 🌸\n\nඔබේ Emma Thinking profile post plan confirm කර ඇත!\n\n📅 Post Date: ${postDate}\n⏰ Time: ${slotLabels[timeSlot]}\n📌 Post ID: ${postCode}\n\nThank you for choosing Emma Thinking! 💗`
-                        openWa(buildWaLink(customer.phone, msg))
-                        await supabase.from('orders').update({ planned_post_date: new Date(postDate).toISOString() }).eq('id', activeOrder.id)
-                        await logAction(`📅 Post planned — ${postDate} at ${slotLabels[timeSlot]} | Code: ${postCode}`)
-                        await fetchAll()
-                      }} disabled={!postDate}
-                        className={`w-full flex items-center gap-3 border rounded-xl px-4 py-3 text-xs font-semibold transition-all ${postDate ? 'bg-white border-green-100 text-green-700' : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'}`}>
-                        <span className={`w-2 h-2 rounded-full ${postDate ? 'bg-green-500' : 'bg-gray-300'}`} />
-                        Send planning confirmation
+
+                      <button onClick={handleMarkPublished} disabled={actionLoading}
+                        className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
+                        {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Mark published'}
                       </button>
-                      <button onClick={async () => {
-                        await supabase.from('orders').update({ published_at: new Date().toISOString() }).eq('id', activeOrder.id)
-                        await logAction('🚀 Post published successfully')
-                        await fetchAll()
-                      }} className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold">
-                        Mark published
-                      </button>
+
                       <div>
                         <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Validity expiry date</label>
                         <input type="date" value={expiryDate} onChange={e => setExpiryDate(e.target.value)}
                           className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none" />
                       </div>
-                      <button onClick={async () => {
-                        if (!expiryDate || !activeOrder) return
-                        await supabase.from('orders').update({ validity_expires_at: new Date(expiryDate).toISOString() }).eq('id', activeOrder.id)
-                        await logAction(`📆 Validity set — expires ${expiryDate}`)
-                        await fetchAll()
-                      }} disabled={!expiryDate}
-                        className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
+                      <button onClick={handleSetExpiry} disabled={!expiryDate || actionLoading}
+                        className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
                         Set validity expiry — finalise
                       </button>
                     </>
@@ -633,13 +717,13 @@ export default function CustomerDetailPage() {
             </div>
           )}
 
-          {/* PARTNER LINK — back office can send anytime */}
+          {/* PARTNER LINK — back office */}
           {(role === 'back_office' || role === 'admin') && activeOrder && (
             <div>
               {!showPartnerLink ? (
                 <button onClick={() => setShowPartnerLink(true)}
                   className="w-full border border-pink-200 text-pink-600 rounded-2xl py-3 text-xs font-bold">
-                  💌 Send partner profile link
+                  Send partner profile link
                 </button>
               ) : (
                 <div className="border border-pink-200 rounded-2xl p-4 space-y-3">
@@ -703,7 +787,7 @@ export default function CustomerDetailPage() {
                     </div>
                     <div>
                       <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Payment slip</label>
-                      <div className="border-2 border-dashed border-gray-200 rounded-xl p-4 text-center text-xs text-gray-400 font-medium cursor-pointer">
+                      <div className="border-2 border-dashed border-gray-200 rounded-xl p-4 text-center text-xs text-gray-400 font-medium">
                         Tap to upload slip image
                       </div>
                     </div>
@@ -733,8 +817,8 @@ export default function CustomerDetailPage() {
                         })
                         const assignedWorker = workers.find(w => w.id === selectedAssignee)
                         await supabase.from('interactions').insert([
-                          { customer_id: customer?.id, type: 'order', description: `🎉 Order created: ${pkg?.name} — LKR ${amountPaid}`, created_by: user.id },
-                          { customer_id: customer?.id, type: 'order', description: `➡️ Assigned to back office: ${assignedWorker?.full_name || 'unassigned'}`, created_by: user.id },
+                          { customer_id: customer?.id, type: 'order', description: `Order created: ${pkg?.name} — LKR ${amountPaid}`, created_by: user.id },
+                          { customer_id: customer?.id, type: 'order', description: `Assigned to back office: ${assignedWorker?.full_name || 'unassigned'}`, created_by: user.id },
                         ])
                       }
                       setShowOrderForm(false); setTimerActive(false); setSelectedAssignee('')
@@ -795,14 +879,12 @@ function LogInteractionForm({ customerId, userId, onSaved }: { customerId: strin
   const [type, setType] = useState<'message' | 'call' | 'feedback'>('message')
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
-
   const save = async () => {
     if (!notes.trim()) return
     setSaving(true)
     await supabase.from('interactions').insert({ customer_id: customerId, type, description: notes, created_by: userId })
     setNotes(''); setSaving(false); onSaved()
   }
-
   return (
     <div className="bg-gray-50 border border-gray-100 rounded-2xl p-3 space-y-2">
       <div className="flex gap-1.5">

@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --pk: #EA1E63;
+  --pk50: #FFF0F5;
+  --pk100: #FFE1EC;
+  --pk200: #FFC5D9;
+  --pk300: #FF92BA;
+  --pk700: #C4155A;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #E5E7EB; border-radius: 4px; }
+
+/* Input focus ring */
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--pk300) !important;
+}
+
+/* Pink button base */
+.btn-emma {
+  @apply bg-pink-600 text-white font-semibold rounded-full px-4 py-2 text-sm
+         hover:bg-pink-700 active:scale-95 transition-all;
+}
+
+/* Safe area for iOS */
+.pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }

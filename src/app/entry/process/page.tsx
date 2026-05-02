@@ -1,0 +1,158 @@
+'use client'
+
+import { useEffect, useState, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { supabase } from '@/lib/supabase'
+import { useAuthStore } from '@/store/auth'
+import { Loader2, ArrowLeft } from 'lucide-react'
+import TopNav from '@/components/shared/TopNav'
+import BottomNav from '@/components/shared/BottomNav'
+
+function ProcessContent() {
+  const router = useRouter()
+  const params = useSearchParams()
+  const { user } = useAuthStore()
+  const phone = params.get('phone') || ''
+  const [loading, setLoading] = useState(false)
+  const [interactionType, setInteractionType] = useState<'message' | 'call' | 'feedback'>('message')
+  const [notes, setNotes] = useState('')
+  const [customerName, setCustomerName] = useState('')
+  const [existingId, setExistingId] = useState<string | null>(null)
+  const [isPriority, setIsPriority] = useState(false)
+
+  useEffect(() => {
+    if (!phone) { router.replace('/entry'); return }
+    // Check if customer exists
+    supabase.from('customers').select('*').eq('phone', phone).single()
+      .then(({ data }) => {
+        if (data) {
+          setExistingId(data.id)
+          setCustomerName(data.name || '')
+          setIsPriority(data.is_priority)
+        }
+      })
+  }, [phone])
+
+  const handleSave = async () => {
+    if (!user) return
+    setLoading(true)
+
+    let customerId = existingId
+
+    // Create customer if new
+    if (!customerId) {
+      const { data } = await supabase
+        .from('customers')
+        .insert({ phone, name: customerName || null, created_by: user.id })
+        .select('id')
+        .single()
+      customerId = data?.id
+    } else if (customerName) {
+      await supabase.from('customers').update({ name: customerName }).eq('id', customerId)
+    }
+
+    if (!customerId) { setLoading(false); return }
+
+    // Log interaction
+    if (notes) {
+      await supabase.from('interactions').insert({
+        customer_id: customerId,
+        type: interactionType,
+        description: notes,
+        created_by: user.id,
+      })
+    }
+
+    router.push(`/dashboard/customers/${customerId}`)
+    setLoading(false)
+  }
+
+  return (
+    <div className="h-screen flex flex-col bg-white overflow-hidden">
+      <TopNav />
+      <div className="flex-1 overflow-y-auto px-4 py-4 pb-28">
+        <div className="max-w-sm mx-auto">
+
+          <button onClick={() => router.back()} className="flex items-center gap-2 text-gray-400 text-xs font-medium mb-6">
+            <ArrowLeft size={14} /> Back
+          </button>
+
+          <div className="bg-pink-50 border border-pink-100 rounded-2xl p-4 mb-6">
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1">Phone number</p>
+            <p className="text-base font-bold text-gray-800">+{phone}</p>
+            {existingId && <p className="text-[9px] text-pink-600 font-semibold mt-1 uppercase tracking-wide">Existing customer</p>}
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Customer name (optional)</label>
+              <input
+                type="text"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                placeholder="Full name"
+                className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3 text-sm font-medium outline-none focus:border-pink-300"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Interaction type</label>
+              <div className="flex gap-2">
+                {(['message', 'call', 'feedback'] as const).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setInteractionType(t)}
+                    className={`flex-1 py-2.5 rounded-full text-xs font-semibold transition-all capitalize ${interactionType === t ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-500'}`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Notes</label>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="What did you discuss? Any details..."
+                rows={4}
+                className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3 text-sm font-medium outline-none focus:border-pink-300 resize-none leading-relaxed"
+              />
+            </div>
+
+            <div
+              onClick={() => setIsPriority(!isPriority)}
+              className={`flex items-center justify-between p-4 rounded-2xl border cursor-pointer transition-all ${isPriority ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100'}`}
+            >
+              <div>
+                <p className={`text-xs font-bold ${isPriority ? 'text-red-600' : 'text-gray-500'}`}>Priority / Hot lead</p>
+                <p className="text-[9px] text-gray-400 font-medium mt-0.5">Mark if likely to buy</p>
+              </div>
+              <div className={`w-11 h-6 rounded-full transition-all ${isPriority ? 'bg-red-500' : 'bg-gray-200'}`}>
+                <div className={`w-5 h-5 bg-white rounded-full mt-0.5 shadow-sm transition-all ${isPriority ? 'ml-5.5' : 'ml-0.5'}`} style={{ marginLeft: isPriority ? '22px' : '2px' }} />
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={handleSave}
+            disabled={loading}
+            className="w-full mt-6 bg-pink-600 text-white py-4 rounded-full font-bold text-sm shadow-lg shadow-pink-200 flex items-center justify-center gap-2 active:scale-95 transition-all"
+          >
+            {loading ? <Loader2 size={16} className="animate-spin" /> : 'Save & Open Customer →'}
+          </button>
+        </div>
+      </div>
+      <BottomNav />
+    </div>
+  )
+}
+
+export default function EntryProcessPage() {
+  return (
+    <Suspense fallback={<div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-pink-600" size={28} /></div>}>
+      <ProcessContent />
+    </Suspense>
+  )
+}

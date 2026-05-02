@@ -33,7 +33,6 @@ export default function CustomerDetailPage() {
   const [workers, setWorkers] = useState<{ id: string; full_name: string; role: string }[]>([])
   const [selectedAssignee, setSelectedAssignee] = useState('')
 
-  // Order creation form state
   const [showOrderForm, setShowOrderForm] = useState(false)
   const [selectedPkg, setSelectedPkg] = useState('')
   const [amountPaid, setAmountPaid] = useState('')
@@ -41,19 +40,16 @@ export default function CustomerDetailPage() {
   const [orderTimer, setOrderTimer] = useState(600)
   const [timerActive, setTimerActive] = useState(false)
 
-  // Extension form
   const [showExtend, setShowExtend] = useState(false)
   const [extendReason, setExtendReason] = useState('')
   const [extendDays, setExtendDays] = useState(1)
 
-  // Brief form
   const [brief, setBrief] = useState('')
 
   useEffect(() => {
     fetchAll()
   }, [id])
 
-  // Order creation timer
   useEffect(() => {
     if (!timerActive) return
     if (orderTimer <= 0) { setShowOrderForm(false); setTimerActive(false); return }
@@ -161,6 +157,63 @@ export default function CustomerDetailPage() {
     setActionLoading(false)
   }
 
+  const handleCreateOrder = async () => {
+    if (!selectedPkg || !amountPaid || !user) {
+      console.log('BLOCKED: missing fields', { selectedPkg, amountPaid, user: user?.id })
+      return
+    }
+    setActionLoading(true)
+    const pkg = packages.find(p => p.id === selectedPkg)
+    console.log('--- ORDER CREATION START ---')
+    console.log('user.id:', user.id)
+    console.log('customer.id:', customer?.id)
+    console.log('selectedPkg:', selectedPkg)
+    console.log('selectedAssignee:', selectedAssignee)
+
+    const { data: order, error: orderError } = await supabase.from('orders').insert({
+      customer_id: customer?.id,
+      package_id: selectedPkg,
+      current_step: 3,
+      step_variant: pkg?.flow_variant || 'standard',
+      status: 'active',
+      amount_paid: Number(amountPaid),
+      payment_type: paymentType,
+      created_by: user.id,
+    }).select().single()
+
+    console.log('order result:', order)
+    console.log('order error:', orderError)
+
+    if (order) {
+      const { data: step, error: stepError } = await supabase.from('order_steps').insert({
+        order_id: order.id,
+        step_number: 3,
+        step_name: 'Back Office — Onboarding',
+        status: 'pending',
+        assigned_to: selectedAssignee || null,
+      }).select().single()
+
+      console.log('step result:', step)
+      console.log('step error:', stepError)
+
+      const assignedWorker = workers.find(w => w.id === selectedAssignee)
+      const { error: interactionError } = await supabase.from('interactions').insert({
+        customer_id: customer?.id,
+        type: 'order',
+        description: `Order created: ${pkg?.name} — LKR ${amountPaid}. Assigned to ${assignedWorker?.full_name || 'Back Office'}.`,
+        created_by: user.id,
+      })
+      console.log('interaction error:', interactionError)
+    }
+
+    console.log('--- ORDER CREATION END ---')
+    setShowOrderForm(false)
+    setTimerActive(false)
+    setSelectedAssignee('')
+    await fetchAll()
+    setActionLoading(false)
+  }
+
   const openWa = (url: string) => window.open(url, '_blank')
 
   if (loading) return (
@@ -176,14 +229,12 @@ export default function CustomerDetailPage() {
   )
 
   const isActiveStep = canAct()
-  const selectedPackage = packages.find(p => p.id === selectedPkg)
 
   return (
     <div className="h-screen flex flex-col bg-white overflow-hidden">
       <TopNav />
       <div className="flex-1 overflow-y-auto pb-28">
 
-        {/* Header */}
         <div className="bg-pink-50 px-4 pt-4 pb-5">
           <button onClick={() => router.back()} className="flex items-center gap-1.5 text-gray-400 text-xs font-medium mb-3">
             <ArrowLeft size={13} /> Back
@@ -228,7 +279,6 @@ export default function CustomerDetailPage() {
 
         <div className="px-4 py-4 space-y-4">
 
-          {/* EXPIRED BANNER */}
           {isExpired && (
             <div className="bg-red-50 border border-red-200 rounded-2xl p-4 text-center">
               <Lock size={20} className="text-red-400 mx-auto mb-1" />
@@ -237,13 +287,12 @@ export default function CustomerDetailPage() {
             </div>
           )}
 
-          {/* ACTIVE STEP ACTION PANEL */}
           {activeOrder && activeStep && !isExpired && (
             <div className={`border rounded-2xl overflow-hidden ${isActiveStep ? 'border-pink-200' : 'border-gray-100'}`}>
               <div className={`px-4 py-3 flex items-center justify-between ${isActiveStep ? 'bg-pink-50' : 'bg-gray-50'}`}>
                 <div>
                   <p className={`text-[9px] font-bold uppercase tracking-wide ${isActiveStep ? 'text-pink-600' : 'text-gray-400'}`}>
-                    {isActiveStep ? 'Your turn to act' : `Waiting — Step ${activeStep.step_number}${activeStep.assigned_user ? ` · ${(activeStep as any).assigned_user.full_name}` : ''}`}
+                    {isActiveStep ? 'Your turn to act' : `Waiting — Step ${activeStep.step_number}${(activeStep as any).assigned_user ? ` · ${(activeStep as any).assigned_user.full_name}` : ''}`}
                   </p>
                   {activeStep.deadline && !isActiveStep && (
                     <p className="text-[8px] text-gray-400 font-medium mt-0.5">
@@ -261,7 +310,6 @@ export default function CustomerDetailPage() {
                 )}
               </div>
 
-              {/* Step 3 — Back Office */}
               {isActiveStep && myStep === 3 && (
                 <div className="p-4 space-y-2">
                   <button onClick={() => openWa(buildWaLink(customer.phone, WA.greeting(customer.name || customer.phone)))}
@@ -278,9 +326,7 @@ export default function CustomerDetailPage() {
                   </button>
                   <div>
                     <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign counselor</label>
-                    <select
-                      value={selectedAssignee}
-                      onChange={e => setSelectedAssignee(e.target.value)}
+                    <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
                       className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
                       <option value="">Select counselor...</option>
                       {workers.filter(w => w.role === 'counselor').map(w => (
@@ -288,16 +334,13 @@ export default function CustomerDetailPage() {
                       ))}
                     </select>
                   </div>
-                  <button
-                    onClick={() => doComplete(4, {}, selectedAssignee)}
-                    disabled={!selectedAssignee || actionLoading}
+                  <button onClick={() => doComplete(4, {}, selectedAssignee)} disabled={!selectedAssignee || actionLoading}
                     className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
                     {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Assign to counselor →'}
                   </button>
                 </div>
               )}
 
-              {/* Step 4 — Counselor */}
               {isActiveStep && myStep === 4 && (
                 <div className="p-4 space-y-2">
                   <button onClick={() => { doAccept(); openWa(buildWaLink(customer.phone, WA.sessionStart(customer.name || customer.phone))) }}
@@ -366,7 +409,6 @@ export default function CustomerDetailPage() {
                 </div>
               )}
 
-              {/* Step 5 — Manager */}
               {isActiveStep && myStep === 5 && (
                 <div className="p-4 space-y-2">
                   <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
@@ -378,9 +420,7 @@ export default function CustomerDetailPage() {
                   </button>
                   <div>
                     <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign designer</label>
-                    <select
-                      value={selectedAssignee}
-                      onChange={e => setSelectedAssignee(e.target.value)}
+                    <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
                       className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
                       <option value="">Select designer...</option>
                       {workers.filter(w => w.role === 'designer').map(w => (
@@ -388,9 +428,7 @@ export default function CustomerDetailPage() {
                       ))}
                     </select>
                   </div>
-                  <button
-                    onClick={() => doComplete(6, {}, selectedAssignee)}
-                    disabled={!selectedAssignee || actionLoading}
+                  <button onClick={() => doComplete(6, {}, selectedAssignee)} disabled={!selectedAssignee || actionLoading}
                     className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
                     {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Assign to designer →'}
                   </button>
@@ -403,7 +441,6 @@ export default function CustomerDetailPage() {
                 </div>
               )}
 
-              {/* Step 6 — Designer */}
               {isActiveStep && myStep === 6 && (
                 <div className="p-4 space-y-2">
                   <button onClick={() => doAccept()} className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold">
@@ -443,7 +480,6 @@ export default function CustomerDetailPage() {
             </div>
           )}
 
-          {/* CREATE ORDER (CRM only, no active order) */}
           {role === 'crm_agent' && !activeOrder && (
             <div>
               {!showOrderForm ? (
@@ -492,9 +528,7 @@ export default function CustomerDetailPage() {
                     </div>
                     <div>
                       <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign to back office</label>
-                      <select
-                        value={selectedAssignee}
-                        onChange={e => setSelectedAssignee(e.target.value)}
+                      <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
                         className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
                         <option value="">Select back office person...</option>
                         {workers.filter(w => w.role === 'back_office').map(w => (
@@ -503,36 +537,7 @@ export default function CustomerDetailPage() {
                       </select>
                     </div>
                     <button
-                      onClick={async () => {
-                        if (!selectedPkg || !amountPaid || !user) return
-                        setActionLoading(true)
-                        const pkg = packages.find(p => p.id === selectedPkg)
-                        const { data: order } = await supabase.from('orders').insert({
-                          customer_id: customer?.id, package_id: selectedPkg,
-                          current_step: 3, step_variant: pkg?.flow_variant || 'standard',
-                          status: 'active', amount_paid: Number(amountPaid),
-                          payment_type: paymentType, created_by: user.id,
-                        }).select().single()
-                        if (order) {
-                          await supabase.from('order_steps').insert({
-                            order_id: order.id, step_number: 3,
-                            step_name: 'Back Office — Onboarding',
-                            status: 'pending',
-                            assigned_to: selectedAssignee || null,
-                          })
-                          const assignedWorker = workers.find(w => w.id === selectedAssignee)
-                          await supabase.from('interactions').insert({
-                            customer_id: customer?.id, type: 'order',
-                            description: `Order created: ${pkg?.name} — LKR ${amountPaid}. Assigned to ${assignedWorker?.full_name || 'Back Office'}.`,
-                            created_by: user.id,
-                          })
-                        }
-                        setShowOrderForm(false)
-                        setTimerActive(false)
-                        setSelectedAssignee('')
-                        await fetchAll()
-                        setActionLoading(false)
-                      }}
+                      onClick={handleCreateOrder}
                       disabled={!selectedPkg || !amountPaid || actionLoading}
                       className="w-full bg-pink-600 text-white rounded-xl py-3 text-xs font-bold disabled:opacity-40"
                     >
@@ -544,14 +549,11 @@ export default function CustomerDetailPage() {
             </div>
           )}
 
-          {/* INTERACTION TIMELINE */}
           <div>
             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">History</p>
-
             {role === 'crm_agent' && (
               <LogInteractionForm customerId={customer.id} userId={user!.id} onSaved={fetchAll} />
             )}
-
             <div className="border-l-2 border-pink-100 ml-3 pl-4 space-y-3 mt-3">
               {interactions.map(interaction => (
                 <div key={interaction.id} className="relative">

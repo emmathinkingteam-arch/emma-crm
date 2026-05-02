@@ -8,17 +8,14 @@ import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import {
   Loader2, ArrowLeft, Star, Phone, MessageCircle,
-  PhoneCall, ThumbsUp, ShoppingCart, ChevronRight,
-  CheckCircle2, Lock, Clock, AlertTriangle, Package
+  PhoneCall, ThumbsUp, ShoppingCart, Lock, Clock
 } from 'lucide-react'
 import { Customer, Order, OrderStep, Interaction, Package as Pkg } from '@/types'
 import { fmtDate, fmtTime, buildWaLink, WA, getDaysLeft } from '@/lib/utils'
-import Link from 'next/link'
 
 export default function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>()
   const params = useSearchParams()
-  const orderId = params.get('orderId')
   const { user, role } = useAuthStore()
   const router = useRouter()
 
@@ -33,6 +30,7 @@ export default function CustomerDetailPage() {
   const [workers, setWorkers] = useState<{ id: string; full_name: string; role: string }[]>([])
   const [selectedAssignee, setSelectedAssignee] = useState('')
 
+  // Order creation
   const [showOrderForm, setShowOrderForm] = useState(false)
   const [selectedPkg, setSelectedPkg] = useState('')
   const [amountPaid, setAmountPaid] = useState('')
@@ -40,15 +38,25 @@ export default function CustomerDetailPage() {
   const [orderTimer, setOrderTimer] = useState(600)
   const [timerActive, setTimerActive] = useState(false)
 
+  // Extension
   const [showExtend, setShowExtend] = useState(false)
   const [extendReason, setExtendReason] = useState('')
   const [extendDays, setExtendDays] = useState(1)
 
+  // Brief & meeting
   const [brief, setBrief] = useState('')
+  const [meetingDate, setMeetingDate] = useState('')
+  const [meetingTime, setMeetingTime] = useState('')
+  const [customerApproved, setCustomerApproved] = useState(false)
 
+  // Countdown ticker
+  const [now, setNow] = useState(Date.now())
   useEffect(() => {
-    fetchAll()
-  }, [id])
+    const t = setInterval(() => setNow(Date.now()), 60000)
+    return () => clearInterval(t)
+  }, [])
+
+  useEffect(() => { fetchAll() }, [id])
 
   useEffect(() => {
     if (!timerActive) return
@@ -64,7 +72,7 @@ export default function CustomerDetailPage() {
       supabase.from('orders').select('*, package:packages(*), current_step_row:order_steps(*)').eq('customer_id', id).order('created_at', { ascending: false }),
       supabase.from('interactions').select('*, created_by_user:users!created_by(full_name)').eq('customer_id', id).order('created_at', { ascending: false }),
       supabase.from('packages').select('*').eq('is_active', true).order('price'),
-      supabase.from('users').select('id, full_name, role').in('role', ['back_office', 'counselor', 'manager', 'designer']).eq('is_active', true),
+      supabase.from('users').select('id, full_name, role, meeting_link').in('role', ['back_office', 'counselor', 'manager', 'designer']).eq('is_active', true),
     ])
 
     if (custRes.data) setCustomer(custRes.data)
@@ -76,7 +84,7 @@ export default function CustomerDetailPage() {
         setActiveOrder(active)
         const { data: stepData } = await supabase
           .from('order_steps')
-          .select('*, assigned_user:users!assigned_to(full_name, role)')
+          .select('*, assigned_user:users!assigned_to(full_name, role, meeting_link)')
           .eq('order_id', active.id)
           .in('status', ['pending', 'in_progress'])
           .order('step_number', { ascending: false })
@@ -91,6 +99,17 @@ export default function CustomerDetailPage() {
     setLoading(false)
   }
 
+  // Log any action to interactions timeline
+  const logAction = async (description: string) => {
+    if (!customer || !user) return
+    await supabase.from('interactions').insert({
+      customer_id: customer.id,
+      type: 'order',
+      description,
+      created_by: user.id,
+    })
+  }
+
   const openOrderTab = () => {
     setShowOrderForm(true)
     setTimerActive(true)
@@ -98,6 +117,19 @@ export default function CustomerDetailPage() {
   }
 
   const fmtTimer = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+
+  // Countdown from deadline
+  const getCountdown = (deadline?: string, extended?: string) => {
+    const target = extended || deadline
+    if (!target) return null
+    const diff = new Date(target).getTime() - now
+    if (diff <= 0) return '⚠️ Overdue'
+    const hours = Math.floor(diff / 3600000)
+    const mins = Math.floor((diff % 3600000) / 60000)
+    if (hours >= 48) return `${Math.floor(hours / 24)}d ${hours % 24}h left`
+    if (hours >= 1) return `${hours}h ${mins}m left`
+    return `${mins}m left`
+  }
 
   const canAct = () => {
     if (!user || !activeOrder || !activeStep) return false
@@ -108,23 +140,34 @@ export default function CustomerDetailPage() {
 
   const myStep = activeStep?.step_number
   const isExpired = activeOrder?.validity_expires_at && new Date(activeOrder.validity_expires_at) < new Date()
+  const stepAccepted = activeStep?.status === 'in_progress'
 
   const doAccept = async () => {
     if (!activeStep) return
     setActionLoading(true)
+    const deadlineHours = myStep === 4 ? 48 : myStep === 5 ? 24 : 4
     await supabase.from('order_steps').update({
-      status: 'in_progress', started_at: new Date().toISOString(),
-      deadline: new Date(Date.now() + (myStep === 4 ? 48 : myStep === 5 ? 24 : 4) * 3600000).toISOString()
+      status: 'in_progress',
+      started_at: new Date().toISOString(),
+      deadline: new Date(Date.now() + deadlineHours * 3600000).toISOString()
     }).eq('id', activeStep.id)
+    const labels: Record<number, string> = {
+      3: 'Back Office accepted — onboarding started',
+      4: 'Counselor accepted — session started',
+      5: 'Manager reviewing brief',
+      6: 'Designer accepted',
+    }
+    await logAction(labels[myStep!] || 'Step accepted')
     await fetchAll()
     setActionLoading(false)
   }
 
-  const doComplete = async (nextStep: number, data?: Partial<OrderStep>, assignTo?: string) => {
+  const doComplete = async (nextStep: number, data?: Partial<OrderStep>, assignTo?: string, logMsg?: string) => {
     if (!activeStep || !activeOrder) return
     setActionLoading(true)
     await supabase.from('order_steps').update({
-      status: 'done', completed_at: new Date().toISOString(),
+      status: 'done',
+      completed_at: new Date().toISOString(),
       ...(data || {})
     }).eq('id', activeStep.id)
     await supabase.from('orders').update({ current_step: nextStep }).eq('id', activeOrder.id)
@@ -137,7 +180,9 @@ export default function CustomerDetailPage() {
         assigned_to: assignTo || null,
       })
     }
+    if (logMsg) await logAction(logMsg)
     setSelectedAssignee('')
+    setCustomerApproved(false)
     await fetchAll()
     setActionLoading(false)
   }
@@ -151,70 +196,23 @@ export default function CustomerDetailPage() {
       extension_reason: extendReason,
       extended_by_days: extendDays,
     }).eq('id', activeStep.id)
+    await logAction(`⏱ Extension requested: "${extendReason}" (+${extendDays} day${extendDays > 1 ? 's' : ''})`)
     setShowExtend(false)
     setExtendReason('')
     await fetchAll()
     setActionLoading(false)
   }
 
-  const handleCreateOrder = async () => {
-    if (!selectedPkg || !amountPaid || !user) {
-      console.log('BLOCKED: missing fields', { selectedPkg, amountPaid, user: user?.id })
-      return
-    }
-    setActionLoading(true)
-    const pkg = packages.find(p => p.id === selectedPkg)
-    console.log('--- ORDER CREATION START ---')
-    console.log('user.id:', user.id)
-    console.log('customer.id:', customer?.id)
-    console.log('selectedPkg:', selectedPkg)
-    console.log('selectedAssignee:', selectedAssignee)
-
-    const { data: order, error: orderError } = await supabase.from('orders').insert({
-      customer_id: customer?.id,
-      package_id: selectedPkg,
-      current_step: 3,
-      step_variant: pkg?.flow_variant || 'standard',
-      status: 'active',
-      amount_paid: Number(amountPaid),
-      payment_type: paymentType,
-      created_by: user.id,
-    }).select().single()
-
-    console.log('order result:', order)
-    console.log('order error:', orderError)
-
-    if (order) {
-      const { data: step, error: stepError } = await supabase.from('order_steps').insert({
-        order_id: order.id,
-        step_number: 3,
-        step_name: 'Back Office — Onboarding',
-        status: 'pending',
-        assigned_to: selectedAssignee || null,
-      }).select().single()
-
-      console.log('step result:', step)
-      console.log('step error:', stepError)
-
-      const assignedWorker = workers.find(w => w.id === selectedAssignee)
-      const { error: interactionError } = await supabase.from('interactions').insert({
-        customer_id: customer?.id,
-        type: 'order',
-        description: `Order created: ${pkg?.name} — LKR ${amountPaid}. Assigned to ${assignedWorker?.full_name || 'Back Office'}.`,
-        created_by: user.id,
-      })
-      console.log('interaction error:', interactionError)
-    }
-
-    console.log('--- ORDER CREATION END ---')
-    setShowOrderForm(false)
-    setTimerActive(false)
-    setSelectedAssignee('')
-    await fetchAll()
-    setActionLoading(false)
-  }
-
   const openWa = (url: string) => window.open(url, '_blank')
+
+  const handleConfirmMeeting = async () => {
+    if (!meetingDate || !meetingTime || !customer) return
+    const counselorLink = (activeStep as any)?.assigned_user?.meeting_link || (user as any)?.meeting_link || ''
+    const msg = `ආයුබෝවන් ${customer.name || customer.phone}! 🌸\n\nඔබේ Emma Thinking counselling session confirm කර ඇත.\n\n📅 දිනය: ${meetingDate}\n⏰ වේලාව: ${meetingTime}\n🔗 Meet Link: ${counselorLink}\n\nThank you! 💗`
+    openWa(buildWaLink(customer.phone, msg))
+    await logAction(`📅 Meeting confirmed: ${meetingDate} at ${meetingTime}`)
+    await fetchAll()
+  }
 
   if (loading) return (
     <div className="h-screen flex items-center justify-center bg-white">
@@ -229,12 +227,14 @@ export default function CustomerDetailPage() {
   )
 
   const isActiveStep = canAct()
+  const countdown = activeStep ? getCountdown(activeStep.deadline, activeStep.extended_deadline) : null
 
   return (
     <div className="h-screen flex flex-col bg-white overflow-hidden">
       <TopNav />
       <div className="flex-1 overflow-y-auto pb-28">
 
+        {/* Header */}
         <div className="bg-pink-50 px-4 pt-4 pb-5">
           <button onClick={() => router.back()} className="flex items-center gap-1.5 text-gray-400 text-xs font-medium mb-3">
             <ArrowLeft size={13} /> Back
@@ -264,7 +264,6 @@ export default function CustomerDetailPage() {
               </button>
             )}
           </div>
-
           {activeOrder && (
             <div className="flex gap-2 mt-3 flex-wrap">
               {[2, 3, 4, 5, 6].map(n => (
@@ -279,207 +278,387 @@ export default function CustomerDetailPage() {
 
         <div className="px-4 py-4 space-y-4">
 
+          {/* EXPIRED */}
           {isExpired && (
             <div className="bg-red-50 border border-red-200 rounded-2xl p-4 text-center">
               <Lock size={20} className="text-red-400 mx-auto mb-1" />
               <p className="text-xs font-bold text-red-500">Order Expired</p>
-              <p className="text-[9px] text-red-400 font-medium mt-0.5">No further actions possible on this order</p>
+              <p className="text-[9px] text-red-400 font-medium mt-0.5">No further actions possible</p>
             </div>
           )}
 
+          {/* ACTIVE STEP PANEL */}
           {activeOrder && activeStep && !isExpired && (
             <div className={`border rounded-2xl overflow-hidden ${isActiveStep ? 'border-pink-200' : 'border-gray-100'}`}>
-              <div className={`px-4 py-3 flex items-center justify-between ${isActiveStep ? 'bg-pink-50' : 'bg-gray-50'}`}>
-                <div>
-                  <p className={`text-[9px] font-bold uppercase tracking-wide ${isActiveStep ? 'text-pink-600' : 'text-gray-400'}`}>
-                    {isActiveStep ? 'Your turn to act' : `Waiting — Step ${activeStep.step_number}${(activeStep as any).assigned_user ? ` · ${(activeStep as any).assigned_user.full_name}` : ''}`}
-                  </p>
-                  {activeStep.deadline && !isActiveStep && (
-                    <p className="text-[8px] text-gray-400 font-medium mt-0.5">
-                      {getDaysLeft(activeStep.extended_deadline || activeStep.deadline)}d remaining
+              {/* Panel header */}
+              <div className={`px-4 py-3 ${isActiveStep ? 'bg-pink-50' : 'bg-gray-50'}`}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className={`text-[9px] font-bold uppercase tracking-wide ${isActiveStep ? 'text-pink-600' : 'text-gray-400'}`}>
+                      {isActiveStep
+                        ? stepAccepted ? 'In progress — your turn' : 'New assignment — action required'
+                        : `Waiting — Step ${activeStep.step_number}${(activeStep as any).assigned_user ? ` · ${(activeStep as any).assigned_user.full_name}` : ''}`}
                     </p>
+                    {countdown && (
+                      <p className={`text-[8px] font-bold mt-0.5 ${countdown.includes('Overdue') ? 'text-red-500' : 'text-amber-500'}`}>
+                        ⏱ {countdown}
+                      </p>
+                    )}
+                  </div>
+                  {isActiveStep ? (
+                    <div className="flex items-center gap-1.5">
+                      <div className={`w-2 h-2 rounded-full ${stepAccepted ? 'bg-green-500' : 'bg-pink-500 animate-pulse'}`} />
+                      <span className={`text-[9px] font-bold ${stepAccepted ? 'text-green-600' : 'text-pink-600'}`}>
+                        {stepAccepted ? 'Accepted' : 'Pending'}
+                      </span>
+                    </div>
+                  ) : (
+                    <Lock size={14} className="text-gray-300" />
                   )}
                 </div>
-                {isActiveStep ? (
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-2 h-2 rounded-full bg-pink-500 animate-pulse" />
-                    <span className="text-[9px] font-bold text-pink-600">Active</span>
-                  </div>
-                ) : (
-                  <Lock size={14} className="text-gray-300" />
-                )}
               </div>
 
+              {/* ── STEP 3 — Back Office ── */}
               {isActiveStep && myStep === 3 && (
                 <div className="p-4 space-y-2">
-                  <button onClick={() => openWa(buildWaLink(customer.phone, WA.greeting(customer.name || customer.phone)))}
-                    className="w-full flex items-center gap-3 bg-white border border-green-100 rounded-xl px-4 py-3 text-xs font-semibold text-green-700">
-                    <span className="w-2 h-2 rounded-full bg-green-500" />Greeting
+                  {/* Accept first */}
+                  {!stepAccepted && (
+                    <button
+                      onClick={doAccept}
+                      disabled={actionLoading}
+                      className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
+                      {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Accept assignment'}
+                    </button>
+                  )}
+
+                  {/* WA buttons — only after accept */}
+                  <button
+                    disabled={!stepAccepted}
+                    onClick={async () => {
+                      openWa(buildWaLink(customer.phone, WA.greeting(customer.name || customer.phone)))
+                      await logAction('👋 Greeting sent via WhatsApp')
+                      await fetchAll()
+                    }}
+                    className={`w-full flex items-center gap-3 border rounded-xl px-4 py-3 text-xs font-semibold transition-all ${stepAccepted ? 'bg-white border-green-100 text-green-700' : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'}`}>
+                    <span className={`w-2 h-2 rounded-full ${stepAccepted ? 'bg-green-500' : 'bg-gray-300'}`} />
+                    Send greeting
                   </button>
-                  <button onClick={() => openWa(buildWaLink(customer.phone, WA.sendInvoice(customer.name || customer.phone, `${process.env.NEXT_PUBLIC_APP_URL}/invoice/${activeOrder.id}`)))}
-                    className="w-full flex items-center gap-3 bg-white border border-green-100 rounded-xl px-4 py-3 text-xs font-semibold text-green-700">
-                    <span className="w-2 h-2 rounded-full bg-green-500" />Send invoice
+
+                  <button
+                    disabled={!stepAccepted}
+                    onClick={async () => {
+                      openWa(buildWaLink(customer.phone, WA.sendInvoice(customer.name || customer.phone, `${process.env.NEXT_PUBLIC_APP_URL}/invoice/${activeOrder.id}`)))
+                      await logAction('🧾 Invoice sent via WhatsApp')
+                      await fetchAll()
+                    }}
+                    className={`w-full flex items-center gap-3 border rounded-xl px-4 py-3 text-xs font-semibold transition-all ${stepAccepted ? 'bg-white border-green-100 text-green-700' : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'}`}>
+                    <span className={`w-2 h-2 rounded-full ${stepAccepted ? 'bg-green-500' : 'bg-gray-300'}`} />
+                    Send invoice
                   </button>
-                  <button onClick={() => doAccept()}
-                    className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold">
-                    Accept
-                  </button>
-                  <div>
-                    <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign counselor</label>
-                    <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
-                      <option value="">Select counselor...</option>
-                      {workers.filter(w => w.role === 'counselor').map(w => (
-                        <option key={w.id} value={w.id}>{w.full_name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <button onClick={() => doComplete(4, {}, selectedAssignee)} disabled={!selectedAssignee || actionLoading}
-                    className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
-                    {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Assign to counselor →'}
-                  </button>
+
+                  {/* Assign counselor — only after accept */}
+                  {stepAccepted && (
+                    <>
+                      <div>
+                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign counselor</label>
+                        <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
+                          className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
+                          <option value="">Select counselor...</option>
+                          {workers.filter(w => w.role === 'counselor').map(w => (
+                            <option key={w.id} value={w.id}>{w.full_name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'counselor'
+                          doComplete(4, {}, selectedAssignee, `➡️ Assigned to counselor: ${name}`)
+                        }}
+                        disabled={!selectedAssignee || actionLoading}
+                        className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
+                        {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Assign to counselor →'}
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
 
+              {/* ── STEP 4 — Counselor ── */}
               {isActiveStep && myStep === 4 && (
                 <div className="p-4 space-y-2">
-                  <button onClick={() => { doAccept(); openWa(buildWaLink(customer.phone, WA.sessionStart(customer.name || customer.phone))) }}
-                    className="w-full flex items-center gap-3 bg-white border border-green-100 rounded-xl px-4 py-3 text-xs font-semibold text-green-700">
-                    <span className="w-2 h-2 rounded-full bg-green-500" />Accept — session start
-                  </button>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Meeting date</label>
-                      <input type="date" className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs font-medium outline-none" />
-                    </div>
-                    <div>
-                      <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Time</label>
-                      <input type="time" className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs font-medium outline-none" />
-                    </div>
-                  </div>
-                  <button className="w-full flex items-center gap-3 bg-white border border-green-100 rounded-xl px-4 py-3 text-xs font-semibold text-green-700">
-                    <span className="w-2 h-2 rounded-full bg-green-500" />Confirm time + Meet link
-                  </button>
-                  <div>
-                    <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Creative brief</label>
-                    <textarea value={brief} onChange={e => setBrief(e.target.value)} rows={4}
-                      placeholder="Describe the content strategy, tone, themes..."
-                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none resize-none leading-relaxed" />
-                  </div>
-                  {activeOrder.step_variant === 'standard' && (
-                    <button onClick={() => openWa(buildWaLink(customer.phone, WA.sendBriefToCustomer(customer.name || customer.phone, brief)))}
-                      className="w-full flex items-center gap-3 bg-white border border-green-100 rounded-xl px-4 py-3 text-xs font-semibold text-green-700">
-                      <span className="w-2 h-2 rounded-full bg-green-500" />Send brief to customer
+                  {/* Accept */}
+                  {!stepAccepted && (
+                    <button onClick={async () => {
+                      await doAccept()
+                      openWa(buildWaLink(customer.phone, WA.sessionStart(customer.name || customer.phone)))
+                    }}
+                      className="w-full flex items-center gap-3 bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold">
+                      Accept — send session start message
                     </button>
                   )}
-                  <button onClick={() => doComplete(4, { description: brief })}
-                    className="w-full bg-gray-100 text-gray-500 rounded-xl px-4 py-3 text-xs font-bold">
-                    Mark customer approved
-                  </button>
-                  {activeOrder.step_variant === 'standard' && (
-                    <button onClick={() => doComplete(5, { description: brief })}
-                      className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold">
-                      Submit to manager →
-                    </button>
-                  )}
-                  {activeOrder.step_variant === 'silver_bronze' && (
-                    <button onClick={() => doComplete(3, { description: brief, sub_step: 'customer_facing' })}
-                      className="w-full bg-purple-600 text-white rounded-xl px-4 py-3 text-xs font-bold">
-                      Return to Back Office →
-                    </button>
-                  )}
-                  {!showExtend ? (
-                    <button onClick={() => setShowExtend(true)} className="w-full border border-red-100 text-red-400 rounded-xl px-4 py-2.5 text-xs font-semibold">
-                      Request extension
-                    </button>
-                  ) : (
-                    <div className="bg-red-50 border border-red-100 rounded-xl p-3 space-y-2">
-                      <input value={extendReason} onChange={e => setExtendReason(e.target.value)}
-                        placeholder="Reason for extension"
-                        className="w-full bg-white border border-red-100 rounded-lg px-3 py-2 text-xs font-medium outline-none" />
-                      <div className="flex gap-2">
-                        <input type="number" value={extendDays} onChange={e => setExtendDays(Number(e.target.value))} min={1} max={7}
-                          className="w-20 bg-white border border-red-100 rounded-lg px-3 py-2 text-xs font-medium outline-none" />
-                        <button onClick={doExtend} className="flex-1 bg-red-400 text-white rounded-lg px-3 py-2 text-xs font-bold">
-                          Extend {extendDays}d
-                        </button>
+
+                  {stepAccepted && (
+                    <>
+                      {/* Meeting date/time */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Meeting date</label>
+                          <input type="date" value={meetingDate} onChange={e => setMeetingDate(e.target.value)}
+                            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs font-medium outline-none" />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Time</label>
+                          <input type="time" value={meetingTime} onChange={e => setMeetingTime(e.target.value)}
+                            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs font-medium outline-none" />
+                        </div>
                       </div>
-                    </div>
+
+                      <button
+                        onClick={handleConfirmMeeting}
+                        disabled={!meetingDate || !meetingTime}
+                        className={`w-full flex items-center gap-3 border rounded-xl px-4 py-3 text-xs font-semibold transition-all ${meetingDate && meetingTime ? 'bg-white border-green-100 text-green-700' : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'}`}>
+                        <span className={`w-2 h-2 rounded-full ${meetingDate && meetingTime ? 'bg-green-500' : 'bg-gray-300'}`} />
+                        Send confirmation + meet link
+                      </button>
+
+                      {/* Brief */}
+                      <div>
+                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Creative brief</label>
+                        <textarea
+                          value={brief}
+                          onChange={e => setBrief(e.target.value)}
+                          placeholder="Paste or type the full brief here..."
+                          rows={10}
+                          className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none resize-none leading-relaxed"
+                        />
+                      </div>
+
+                      {activeOrder.step_variant === 'standard' && (
+                        <button
+                          disabled={!brief}
+                          onClick={async () => {
+                            openWa(buildWaLink(customer.phone, WA.sendBriefToCustomer(customer.name || customer.phone, brief)))
+                            await logAction('📋 Brief sent to customer via WhatsApp')
+                            await fetchAll()
+                          }}
+                          className={`w-full flex items-center gap-3 border rounded-xl px-4 py-3 text-xs font-semibold transition-all ${brief ? 'bg-white border-green-100 text-green-700' : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'}`}>
+                          <span className={`w-2 h-2 rounded-full ${brief ? 'bg-green-500' : 'bg-gray-300'}`} />
+                          Send brief to customer
+                        </button>
+                      )}
+
+                      {/* Customer approved toggle */}
+                      <button
+                        onClick={async () => {
+                          setCustomerApproved(true)
+                          await logAction('✅ Customer approved the brief')
+                          await fetchAll()
+                        }}
+                        disabled={customerApproved}
+                        className={`w-full rounded-xl px-4 py-3 text-xs font-bold transition-all ${customerApproved ? 'bg-green-50 border border-green-200 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
+                        {customerApproved ? '✅ Customer approved' : 'Mark customer approved'}
+                      </button>
+
+                      {/* Submit to manager — only after customer approved */}
+                      {activeOrder.step_variant === 'standard' && customerApproved && (
+                        <>
+                          <div>
+                            <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign manager</label>
+                            <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
+                              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
+                              <option value="">Select manager...</option>
+                              {workers.filter(w => w.role === 'manager').map(w => (
+                                <option key={w.id} value={w.id}>{w.full_name}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <button
+                            onClick={() => {
+                              const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'manager'
+                              doComplete(5, { description: brief }, selectedAssignee, `➡️ Brief submitted to manager: ${name}`)
+                            }}
+                            disabled={!selectedAssignee || actionLoading}
+                            className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
+                            {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Submit to manager →'}
+                          </button>
+                        </>
+                      )}
+
+                      {/* Silver/Bronze — return to back office */}
+                      {activeOrder.step_variant === 'silver_bronze' && customerApproved && (
+                        <>
+                          <div>
+                            <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign back office</label>
+                            <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
+                              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
+                              <option value="">Select back office...</option>
+                              {workers.filter(w => w.role === 'back_office').map(w => (
+                                <option key={w.id} value={w.id}>{w.full_name}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <button
+                            onClick={() => {
+                              const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'back office'
+                              doComplete(3, { description: brief, sub_step: 'customer_facing' }, selectedAssignee, `↩️ Returned to back office: ${name}`)
+                            }}
+                            disabled={!selectedAssignee || actionLoading}
+                            className="w-full bg-purple-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
+                            Return to Back Office →
+                          </button>
+                        </>
+                      )}
+
+                      {/* Extension */}
+                      {!showExtend ? (
+                        <button onClick={() => setShowExtend(true)} className="w-full border border-red-100 text-red-400 rounded-xl px-4 py-2.5 text-xs font-semibold">
+                          Request extension
+                        </button>
+                      ) : (
+                        <div className="bg-red-50 border border-red-100 rounded-xl p-3 space-y-2">
+                          <input value={extendReason} onChange={e => setExtendReason(e.target.value)}
+                            placeholder="Reason for extension"
+                            className="w-full bg-white border border-red-100 rounded-lg px-3 py-2 text-xs font-medium outline-none" />
+                          <div className="flex gap-2">
+                            <input type="number" value={extendDays} onChange={e => setExtendDays(Number(e.target.value))} min={1} max={7}
+                              className="w-20 bg-white border border-red-100 rounded-lg px-3 py-2 text-xs font-medium outline-none" />
+                            <button onClick={doExtend} disabled={!extendReason || actionLoading}
+                              className="flex-1 bg-red-400 text-white rounded-lg px-3 py-2 text-xs font-bold disabled:opacity-40">
+                              Extend {extendDays}d
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}
 
+              {/* ── STEP 5 — Manager ── */}
               {isActiveStep && myStep === 5 && (
                 <div className="p-4 space-y-2">
-                  <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
-                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1.5">Brief from counselor</p>
-                    <p className="text-xs text-gray-600 font-medium leading-relaxed">{activeStep.description || 'No brief written yet'}</p>
-                  </div>
-                  <button onClick={() => doAccept()} className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold">
-                    Approve brief
-                  </button>
-                  <div>
-                    <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign designer</label>
-                    <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
-                      <option value="">Select designer...</option>
-                      {workers.filter(w => w.role === 'designer').map(w => (
-                        <option key={w.id} value={w.id}>{w.full_name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <button onClick={() => doComplete(6, {}, selectedAssignee)} disabled={!selectedAssignee || actionLoading}
-                    className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
-                    {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Assign to designer →'}
-                  </button>
-                  <div className="border-t border-gray-100 pt-3">
-                    <input placeholder="Rejection reason..." className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none mb-2" />
-                    <button className="w-full border border-red-100 text-red-400 rounded-xl px-4 py-2.5 text-xs font-semibold">
-                      Reject — return to counselor
+                  {!stepAccepted && (
+                    <button onClick={doAccept} disabled={actionLoading}
+                      className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
+                      {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Accept & review brief'}
                     </button>
-                  </div>
+                  )}
+
+                  {stepAccepted && (
+                    <>
+                      <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
+                        <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1.5">Brief from counselor</p>
+                        <p className="text-xs text-gray-600 font-medium leading-relaxed whitespace-pre-wrap">{activeStep.description || 'No brief written yet'}</p>
+                      </div>
+
+                      <div>
+                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign designer</label>
+                        <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
+                          className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
+                          <option value="">Select designer...</option>
+                          {workers.filter(w => w.role === 'designer').map(w => (
+                            <option key={w.id} value={w.id}>{w.full_name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'designer'
+                          doComplete(6, {}, selectedAssignee, `✅ Manager approved. Assigned to designer: ${name}`)
+                        }}
+                        disabled={!selectedAssignee || actionLoading}
+                        className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
+                        {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Approve & assign to designer →'}
+                      </button>
+
+                      <div className="border-t border-gray-100 pt-3">
+                        <input placeholder="Rejection reason..." className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none mb-2" />
+                        <button className="w-full border border-red-100 text-red-400 rounded-xl px-4 py-2.5 text-xs font-semibold">
+                          Reject — return to counselor
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 
+              {/* ── STEP 6 — Designer ── */}
               {isActiveStep && myStep === 6 && (
                 <div className="p-4 space-y-2">
-                  <button onClick={() => doAccept()} className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold">
-                    Accept
-                  </button>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Post date</label>
-                      <input type="date" className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs font-medium outline-none" />
-                    </div>
-                    <div>
-                      <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Time slot</label>
-                      <select className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs font-medium outline-none">
-                        <option value="W">W — 6:30am</option>
-                        <option value="X">X — 11:30am</option>
-                        <option value="Y">Y — 3:30pm</option>
-                        <option value="Z">Z — 8:30pm</option>
-                      </select>
-                    </div>
-                  </div>
-                  <button onClick={() => openWa(buildWaLink(customer.phone, WA.planningConfirmation(customer.name || customer.phone, 'May 2', '6:30am')))}
-                    className="w-full flex items-center gap-3 bg-white border border-green-100 rounded-xl px-4 py-3 text-xs font-semibold text-green-700">
-                    <span className="w-2 h-2 rounded-full bg-green-500" />Send planning confirmation
-                  </button>
-                  <button onClick={() => doComplete(6)} className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold">
-                    Mark published
-                  </button>
-                  <div>
-                    <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Validity expiry</label>
-                    <input type="date" className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none" />
-                  </div>
-                  <button className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold">
-                    Set validity expiry — finalise
-                  </button>
+                  {!stepAccepted && (
+                    <button onClick={doAccept} disabled={actionLoading}
+                      className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold">
+                      {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Accept assignment'}
+                    </button>
+                  )}
+
+                  {stepAccepted && (
+                    <>
+                      <div className="bg-gray-50 border border-gray-100 rounded-xl p-3">
+                        <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1">Creative brief</p>
+                        <p className="text-xs text-gray-600 leading-relaxed whitespace-pre-wrap">{activeStep.description}</p>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Post date</label>
+                          <input type="date" id="postDate" className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs font-medium outline-none" />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Time slot</label>
+                          <select id="timeSlot" className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs font-medium outline-none">
+                            <option value="W">W — 6:30am</option>
+                            <option value="X">X — 11:30am</option>
+                            <option value="Y">Y — 3:30pm</option>
+                            <option value="Z">Z — 8:30pm</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={async () => {
+                          const postDate = (document.getElementById('postDate') as HTMLInputElement)?.value
+                          const timeSlot = (document.getElementById('timeSlot') as HTMLSelectElement)?.value
+                          const slotLabel: Record<string, string> = { W: '6:30am', X: '11:30am', Y: '3:30pm', Z: '8:30pm' }
+                          openWa(buildWaLink(customer.phone, WA.planningConfirmation(customer.name || customer.phone, postDate, slotLabel[timeSlot])))
+                          await logAction(`📅 Post planned: ${postDate} at ${slotLabel[timeSlot]}`)
+                          await fetchAll()
+                        }}
+                        className="w-full flex items-center gap-3 bg-white border border-green-100 rounded-xl px-4 py-3 text-xs font-semibold text-green-700">
+                        <span className="w-2 h-2 rounded-full bg-green-500" />Send planning confirmation
+                      </button>
+
+                      <button
+                        onClick={() => doComplete(6, {}, undefined, '🚀 Post published')}
+                        className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold">
+                        Mark published
+                      </button>
+
+                      <div>
+                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Validity expiry date</label>
+                        <input type="date" id="expiryDate" className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none" />
+                      </div>
+
+                      <button
+                        onClick={async () => {
+                          const expiry = (document.getElementById('expiryDate') as HTMLInputElement)?.value
+                          if (!expiry || !activeOrder) return
+                          await supabase.from('orders').update({ validity_expires_at: new Date(expiry).toISOString(), status: 'active' }).eq('id', activeOrder.id)
+                          await logAction(`📆 Validity set: expires ${expiry}`)
+                          await fetchAll()
+                        }}
+                        className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 text-xs font-bold">
+                        Set validity expiry — finalise
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
           )}
 
+          {/* CREATE ORDER — CRM only */}
           {role === 'crm_agent' && !activeOrder && (
             <div>
               {!showOrderForm ? (
@@ -492,7 +671,7 @@ export default function CustomerDetailPage() {
                   <div className="bg-red-50 px-4 py-3 flex items-center justify-between">
                     <div>
                       <p className="text-[9px] font-bold text-red-500 uppercase tracking-wide">10 min order window</p>
-                      <p className="text-[8px] text-red-400 font-medium">Complete and submit before time runs out</p>
+                      <p className="text-[8px] text-red-400 font-medium">Complete before time runs out</p>
                     </div>
                     <span className="text-xl font-bold text-red-500 font-mono">{fmtTimer(orderTimer)}</span>
                   </div>
@@ -537,10 +716,45 @@ export default function CustomerDetailPage() {
                       </select>
                     </div>
                     <button
-                      onClick={handleCreateOrder}
+                      onClick={async () => {
+                        if (!selectedPkg || !amountPaid || !user) return
+                        setActionLoading(true)
+                        const pkg = packages.find(p => p.id === selectedPkg)
+                        const { data: order } = await supabase.from('orders').insert({
+                          customer_id: customer?.id, package_id: selectedPkg,
+                          current_step: 3, step_variant: pkg?.flow_variant || 'standard',
+                          status: 'active', amount_paid: Number(amountPaid),
+                          payment_type: paymentType, created_by: user.id,
+                        }).select().single()
+                        if (order) {
+                          await supabase.from('order_steps').insert({
+                            order_id: order.id, step_number: 3,
+                            step_name: 'Back Office — Onboarding',
+                            status: 'pending',
+                            assigned_to: selectedAssignee || null,
+                          })
+                          const assignedWorker = workers.find(w => w.id === selectedAssignee)
+                          await supabase.from('interactions').insert([
+                            {
+                              customer_id: customer?.id, type: 'order',
+                              description: `🎉 Order created: ${pkg?.name} — LKR ${amountPaid}`,
+                              created_by: user.id,
+                            },
+                            {
+                              customer_id: customer?.id, type: 'order',
+                              description: `➡️ Assigned to back office: ${assignedWorker?.full_name || 'unassigned'}`,
+                              created_by: user.id,
+                            }
+                          ])
+                        }
+                        setShowOrderForm(false)
+                        setTimerActive(false)
+                        setSelectedAssignee('')
+                        await fetchAll()
+                        setActionLoading(false)
+                      }}
                       disabled={!selectedPkg || !amountPaid || actionLoading}
-                      className="w-full bg-pink-600 text-white rounded-xl py-3 text-xs font-bold disabled:opacity-40"
-                    >
+                      className="w-full bg-pink-600 text-white rounded-xl py-3 text-xs font-bold disabled:opacity-40">
                       {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Generate invoice + Submit →'}
                     </button>
                   </div>
@@ -549,6 +763,7 @@ export default function CustomerDetailPage() {
             </div>
           )}
 
+          {/* HISTORY TIMELINE */}
           <div>
             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">History</p>
             {role === 'crm_agent' && (

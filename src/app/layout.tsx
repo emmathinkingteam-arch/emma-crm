@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import type { Metadata } from 'next'
 import '@fontsource/plus-jakarta-sans/400.css'
 import '@fontsource/plus-jakarta-sans/500.css'

@@ -520,9 +520,11 @@ export default function CustomerDetailPage() {
                             status: 'pending',
                             assigned_to: selectedAssignee || null,
                           })
+                          const assignedWorker = workers.find(w => w.id === selectedAssignee)
                           await supabase.from('interactions').insert({
                             customer_id: customer?.id, type: 'order',
-                            description: `Order created: ${pkg?.name} — LKR ${amountPaid}`, created_by: user.id,
+                            description: `Order created: ${pkg?.name} — LKR ${amountPaid}. Assigned to ${assignedWorker?.full_name || 'Back Office'}.`,
+                            created_by: user.id,
                           })
                         }
                         setShowOrderForm(false)

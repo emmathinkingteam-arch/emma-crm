@@ -4,7 +4,7 @@ import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
-import { Loader2, ArrowLeft } from 'lucide-react'
+import { Loader2, ArrowLeft, Package, Landmark, CalendarClock } from 'lucide-react'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 
@@ -19,10 +19,11 @@ function ProcessContent() {
   const [customerName, setCustomerName] = useState('')
   const [existingId, setExistingId] = useState<string | null>(null)
   const [isPriority, setIsPriority] = useState(false)
+  const [buyDate, setBuyDate] = useState('')
+  const [showBuyDate, setShowBuyDate] = useState(false)
 
   useEffect(() => {
     if (!phone) { router.replace('/entry'); return }
-    // Check if customer exists
     supabase.from('customers').select('*').eq('phone', phone).single()
       .then(({ data }) => {
         if (data) {
@@ -33,27 +34,40 @@ function ProcessContent() {
       })
   }, [phone])
 
+  // Quick note helpers
+  const appendNote = (text: string) => {
+    setNotes(prev => prev ? `${prev}\n${text}` : text)
+  }
+
+  const handleQuickPackage = () => appendNote('Package details sent ✅')
+  const handleQuickBank = () => appendNote('Bank details sent ✅')
+  const handleQuickBuyDate = () => {
+    if (!buyDate) { setShowBuyDate(true); return }
+    appendNote(`Will buy on ${buyDate} 📅`)
+    setShowBuyDate(false)
+    setBuyDate('')
+  }
+
   const handleSave = async () => {
     if (!user) return
     setLoading(true)
-
     let customerId = existingId
 
-    // Create customer if new
     if (!customerId) {
       const { data } = await supabase
         .from('customers')
-        .insert({ phone, name: customerName || null, created_by: user.id })
-        .select('id')
-        .single()
+        .insert({ phone, name: customerName || null, created_by: user.id, is_priority: isPriority })
+        .select('id').single()
       customerId = data?.id
-    } else if (customerName) {
-      await supabase.from('customers').update({ name: customerName }).eq('id', customerId)
+    } else {
+      const updates: any = {}
+      if (customerName) updates.name = customerName
+      updates.is_priority = isPriority
+      await supabase.from('customers').update(updates).eq('id', customerId)
     }
 
     if (!customerId) { setLoading(false); return }
 
-    // Log interaction
     if (notes) {
       await supabase.from('interactions').insert({
         customer_id: customerId,
@@ -84,6 +98,7 @@ function ProcessContent() {
           </div>
 
           <div className="space-y-4">
+            {/* Customer name */}
             <div>
               <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Customer name (optional)</label>
               <input
@@ -95,6 +110,7 @@ function ProcessContent() {
               />
             </div>
 
+            {/* Interaction type */}
             <div>
               <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Interaction type</label>
               <div className="flex gap-2">
@@ -110,8 +126,52 @@ function ProcessContent() {
               </div>
             </div>
 
+            {/* Notes with quick buttons */}
             <div>
               <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Notes</label>
+
+              {/* Quick fill buttons */}
+              <div className="flex flex-wrap gap-2 mb-2">
+                <button
+                  onClick={handleQuickPackage}
+                  className="flex items-center gap-1.5 bg-blue-50 border border-blue-100 text-blue-600 px-3 py-2 rounded-xl text-[10px] font-bold active:scale-95 transition-all"
+                >
+                  <Package size={11} /> Pkg Details Sent
+                </button>
+                <button
+                  onClick={handleQuickBank}
+                  className="flex items-center gap-1.5 bg-green-50 border border-green-100 text-green-600 px-3 py-2 rounded-xl text-[10px] font-bold active:scale-95 transition-all"
+                >
+                  <Landmark size={11} /> Bank Details Sent
+                </button>
+                <button
+                  onClick={() => setShowBuyDate(!showBuyDate)}
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-bold active:scale-95 transition-all border ${showBuyDate ? 'bg-amber-600 text-white border-amber-600' : 'bg-amber-50 border-amber-100 text-amber-600'}`}
+                >
+                  <CalendarClock size={11} /> Will Buy On...
+                </button>
+              </div>
+
+              {/* Buy date picker (expandable) */}
+              {showBuyDate && (
+                <div className="flex gap-2 mb-2">
+                  <input
+                    type="date"
+                    value={buyDate}
+                    onChange={e => setBuyDate(e.target.value)}
+                    min={new Date().toISOString().split('T')[0]}
+                    className="flex-1 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs font-medium outline-none focus:border-amber-400"
+                  />
+                  <button
+                    onClick={handleQuickBuyDate}
+                    disabled={!buyDate}
+                    className="bg-amber-500 text-white px-4 py-2 rounded-xl text-xs font-bold disabled:opacity-40"
+                  >
+                    Add
+                  </button>
+                </div>
+              )}
+
               <textarea
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
@@ -121,16 +181,17 @@ function ProcessContent() {
               />
             </div>
 
+            {/* Priority toggle */}
             <div
               onClick={() => setIsPriority(!isPriority)}
               className={`flex items-center justify-between p-4 rounded-2xl border cursor-pointer transition-all ${isPriority ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100'}`}
             >
               <div>
                 <p className={`text-xs font-bold ${isPriority ? 'text-red-600' : 'text-gray-500'}`}>Priority / Hot lead</p>
-                <p className="text-[9px] text-gray-400 font-medium mt-0.5">Mark if likely to buy</p>
+                <p className="text-[9px] text-gray-400 font-medium mt-0.5">Mark if likely to buy — appears at top in red</p>
               </div>
               <div className={`w-11 h-6 rounded-full transition-all ${isPriority ? 'bg-red-500' : 'bg-gray-200'}`}>
-                <div className={`w-5 h-5 bg-white rounded-full mt-0.5 shadow-sm transition-all ${isPriority ? 'ml-5.5' : 'ml-0.5'}`} style={{ marginLeft: isPriority ? '22px' : '2px' }} />
+                <div className={`w-5 h-5 bg-white rounded-full mt-0.5 shadow-sm transition-all`} style={{ marginLeft: isPriority ? '22px' : '2px' }} />
               </div>
             </div>
           </div>

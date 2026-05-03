@@ -6,13 +6,24 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
-import { Loader2, ArrowLeft, Star, Phone, MessageCircle, PhoneCall, ThumbsUp, ShoppingCart, Lock } from 'lucide-react'
+import {
+  Loader2, ArrowLeft, Star, Phone, MessageCircle, PhoneCall,
+  ThumbsUp, ShoppingCart, Lock, Upload, CheckCircle, ExternalLink
+} from 'lucide-react'
 import { Customer, Order, OrderStep, Interaction, Package as Pkg, MONTH_CODES } from '@/types'
 import { fmtDate, fmtTime, buildWaLink, WA } from '@/lib/utils'
 
 const SLOT_LABELS: Record<string, string> = { W: '6:30am', X: '11:30am', Y: '3:30pm', Z: '8:30pm' }
 const SLOTS = ['W', 'X', 'Y', 'Z'] as const
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+const DISCOUNT_OPTIONS = [
+  { label: 'No discount', value: 0 },
+  { label: '10% off', value: 10 },
+  { label: '20% off', value: 20 },
+  { label: '30% off', value: 30 },
+  { label: '50% off', value: 50 },
+]
 
 function getNext14Days(): string[] {
   const days: string[] = []
@@ -26,7 +37,7 @@ function getNext14Days(): string[] {
 
 export default function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const { user, role } = useAuthStore()
+  const { user, role, setUser } = useAuthStore()
   const router = useRouter()
 
   const [customer, setCustomer] = useState<Customer | null>(null)
@@ -43,8 +54,14 @@ export default function CustomerDetailPage() {
   // Order creation
   const [showOrderForm, setShowOrderForm] = useState(false)
   const [selectedPkg, setSelectedPkg] = useState('')
+  const [discount, setDiscount] = useState(0)
   const [amountPaid, setAmountPaid] = useState('')
-  const [paymentType, setPaymentType] = useState('bank_transfer')
+  const [actualReceived, setActualReceived] = useState('') // optional, if customer paid more/different
+  const [paymentType, setPaymentType] = useState<'bank_transfer' | 'genie' | 'koko'>('bank_transfer')
+  const [slipFile, setSlipFile] = useState<File | null>(null)
+  const [slipUploading, setSlipUploading] = useState(false)
+  const [slipUrl, setSlipUrl] = useState('')
+  const [invoiceUrl, setInvoiceUrl] = useState('')
   const [orderTimer, setOrderTimer] = useState(600)
   const [timerActive, setTimerActive] = useState(false)
 
@@ -90,6 +107,20 @@ export default function CustomerDetailPage() {
     const t = setTimeout(() => setOrderTimer(s => s - 1), 1000)
     return () => clearTimeout(t)
   }, [timerActive, orderTimer])
+
+  // Compute discounted price
+  const selectedPkgObj = packages.find(p => p.id === selectedPkg)
+  const basePrice = selectedPkgObj?.price || 0
+  const discountedPrice = discount > 0 ? Math.round(basePrice * (1 - discount / 100)) : basePrice
+  const displayPkgName = selectedPkgObj
+    ? discount > 0 ? `${selectedPkgObj.name} (${discount}% Discount)` : selectedPkgObj.name
+    : ''
+  const needsSlip = paymentType === 'bank_transfer' || paymentType === 'genie'
+
+  // When package/discount changes, update amountPaid
+  useEffect(() => {
+    if (selectedPkgObj) setAmountPaid(String(discountedPrice))
+  }, [selectedPkg, discount])
 
   const fetchCalendarSlots = async () => {
     const { data } = await supabase
@@ -153,7 +184,20 @@ export default function CustomerDetailPage() {
     })
   }
 
-  const openOrderTab = () => { setShowOrderForm(true); setTimerActive(true); setOrderTimer(600) }
+  const openOrderTab = () => {
+    setShowOrderForm(true)
+    setTimerActive(true)
+    setOrderTimer(600)
+    setSlipFile(null)
+    setSlipUrl('')
+    setInvoiceUrl('')
+    setDiscount(0)
+    setActualReceived('')
+    setSelectedPkg('')
+    setAmountPaid('')
+    setSelectedAssignee('')
+  }
+
   const fmtTimer = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
   const openWa = (url: string) => window.open(url, '_blank')
 
@@ -190,6 +234,18 @@ export default function CustomerDetailPage() {
   const stepAccepted = activeStep?.status === 'in_progress'
   const isActiveStep = canAct()
   const countdown = activeStep ? getCountdown(activeStep.deadline, activeStep.extended_deadline) : null
+
+  // Upload payment slip
+  const handleSlipUpload = async (file: File): Promise<string> => {
+    setSlipUploading(true)
+    const ext = file.name.split('.').pop()
+    const path = `slips/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+    await supabase.storage.from('invoices').upload(path, file, { upsert: true })
+    const { data: { publicUrl } } = supabase.storage.from('invoices').getPublicUrl(path)
+    setSlipUrl(publicUrl)
+    setSlipUploading(false)
+    return publicUrl
+  }
 
   const doAccept = async () => {
     if (!activeStep) return
@@ -307,6 +363,121 @@ export default function CustomerDetailPage() {
     await fetchAll()
   }
 
+  // Create order — the main function
+  const handleCreateOrder = async () => {
+    if (!selectedPkg || !amountPaid || !user || !customer) return
+    setActionLoading(true)
+
+    const pkg = packages.find(p => p.id === selectedPkg)
+    const finalAmountNum = discountedPrice
+    const actualAmountNum = actualReceived ? Number(actualReceived) : finalAmountNum
+
+    // Upload slip if needed
+    let uploadedSlipUrl = slipUrl
+    if (needsSlip && slipFile && !slipUrl) {
+      uploadedSlipUrl = await handleSlipUpload(slipFile)
+    }
+
+    // Create the order
+    const { data: order } = await supabase.from('orders').insert({
+      customer_id: customer.id,
+      package_id: selectedPkg,
+      current_step: 3,
+      step_variant: pkg?.flow_variant || 'standard',
+      status: 'active',
+      amount_paid: actualAmountNum,
+      payment_type: paymentType,
+      payment_slip_url: uploadedSlipUrl || null,
+      created_by: user.id,
+    }).select().single()
+
+    if (!order) { setActionLoading(false); return }
+
+    // Create first order step
+    await supabase.from('order_steps').insert({
+      order_id: order.id,
+      step_number: 3,
+      step_name: 'Back Office — Onboarding',
+      status: 'pending',
+      assigned_to: selectedAssignee || null,
+    })
+
+    // Generate invoice
+    try {
+      const invRes = await fetch('/api/generate-invoice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: order.id,
+          clientName: customer.name || customer.phone,
+          clientNumber: customer.phone,
+          paymentMethod: paymentType === 'bank_transfer' ? 'Bank Transfer' : paymentType === 'genie' ? 'Genie' : 'KOKO',
+          packageName: pkg?.name || '',
+          finalAmount: finalAmountNum,
+          discountPercent: discount,
+        })
+      })
+      if (invRes.ok) {
+        const invData = await invRes.json()
+        if (invData.invoiceUrl) setInvoiceUrl(invData.invoiceUrl)
+      }
+    } catch (_) {
+      // Invoice generation failed silently
+    }
+
+    // Calculate and add commission
+    const { data: agentData } = await supabase
+      .from('users')
+      .select('commission_rates, wallet_balance')
+      .eq('id', user.id)
+      .single()
+
+    const rate = agentData?.commission_rates?.[selectedPkg] || 0
+    if (rate > 0) {
+      const commissionAmount = Math.round(finalAmountNum * rate / 100)
+      const monthYear = new Date().toISOString().slice(0, 7)
+
+      await supabase.from('commissions').insert({
+        user_id: user.id,
+        order_id: order.id,
+        package_id: selectedPkg,
+        step_number: 1,
+        amount: commissionAmount,
+        earned_at: new Date().toISOString(),
+        month_year: monthYear,
+      })
+
+      const newBalance = (agentData?.wallet_balance || 0) + commissionAmount
+      await supabase.from('users').update({ wallet_balance: newBalance }).eq('id', user.id)
+
+      // Update auth store so profile reflects immediately
+      if (user) setUser({ ...user, wallet_balance: newBalance })
+    }
+
+    // Log interactions
+    const assignedWorker = workers.find(w => w.id === selectedAssignee)
+    await supabase.from('interactions').insert([
+      {
+        customer_id: customer.id,
+        type: 'order',
+        description: `Order created: ${displayPkgName} — LKR ${finalAmountNum.toLocaleString()} (paid: LKR ${actualAmountNum.toLocaleString()}) via ${paymentType}`,
+        created_by: user.id,
+      },
+      ...(selectedAssignee ? [{
+        customer_id: customer.id,
+        type: 'order' as const,
+        description: `Assigned to back office: ${assignedWorker?.full_name || 'unassigned'}`,
+        created_by: user.id,
+      }] : []),
+    ])
+
+    setShowOrderForm(false)
+    setTimerActive(false)
+    setSelectedAssignee('')
+    await fetchAll()
+    setActionLoading(false)
+  }
+
   if (loading) return <div className="h-screen flex items-center justify-center bg-white"><Loader2 className="animate-spin text-pink-600" size={28} /></div>
   if (!customer) return <div className="h-screen flex items-center justify-center bg-white"><p className="text-gray-400 text-sm">Customer not found</p></div>
 
@@ -316,28 +487,35 @@ export default function CustomerDetailPage() {
       <div className="flex-1 overflow-y-auto pb-28">
 
         {/* Header */}
-        <div className="bg-pink-50 px-4 pt-4 pb-5">
+        <div className={`px-4 pt-4 pb-5 ${customer.is_priority ? 'bg-red-50' : 'bg-pink-50'}`}>
           <button onClick={() => router.back()} className="flex items-center gap-1.5 text-gray-400 text-xs font-medium mb-3">
             <ArrowLeft size={13} /> Back
           </button>
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-11 h-11 bg-white rounded-2xl flex items-center justify-center shadow-sm">
-                <Phone size={18} className="text-pink-400" />
+              <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shadow-sm ${customer.is_priority ? 'bg-red-100' : 'bg-white'}`}>
+                {customer.is_priority
+                  ? <Star size={18} className="text-red-500 fill-red-500" />
+                  : <Phone size={18} className="text-pink-400" />}
               </div>
               <div>
                 <div className="flex items-center gap-1.5">
-                  <p className="text-sm font-bold text-gray-800">{customer.name || customer.phone}</p>
-                  {customer.is_priority && <Star size={12} className="text-red-400 fill-red-400" />}
+                  <p className={`text-sm font-bold ${customer.is_priority ? 'text-red-700' : 'text-gray-800'}`}>
+                    {customer.name || customer.phone}
+                  </p>
+                  {customer.is_priority && (
+                    <span className="text-[8px] font-bold bg-red-500 text-white px-2 py-0.5 rounded-full uppercase tracking-wide">Priority</span>
+                  )}
                 </div>
-                {customer.name && <p className="text-xs text-gray-400 font-medium">{customer.phone}</p>}
+                {customer.name && <p className={`text-xs font-medium ${customer.is_priority ? 'text-red-400' : 'text-gray-400'}`}>{customer.phone}</p>}
               </div>
             </div>
             {role === 'crm_agent' && (
               <button onClick={async () => {
-                await supabase.from('customers').update({ is_priority: !customer.is_priority }).eq('id', customer.id)
-                setCustomer(c => c ? { ...c, is_priority: !c.is_priority } : c)
-              }} className={`text-[8px] font-bold px-3 py-1.5 rounded-full border transition-all ${customer.is_priority ? 'bg-red-50 border-red-200 text-red-500' : 'bg-white border-gray-200 text-gray-400'}`}>
+                const newPriority = !customer.is_priority
+                await supabase.from('customers').update({ is_priority: newPriority }).eq('id', customer.id)
+                setCustomer(c => c ? { ...c, is_priority: newPriority } : c)
+              }} className={`text-[8px] font-bold px-3 py-1.5 rounded-full border transition-all ${customer.is_priority ? 'bg-red-100 border-red-200 text-red-600' : 'bg-white border-gray-200 text-gray-400'}`}>
                 {customer.is_priority ? 'Remove priority' : 'Mark priority'}
               </button>
             )}
@@ -623,8 +801,6 @@ export default function CustomerDetailPage() {
                         <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1">Creative brief</p>
                         <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap">{activeStep.description}</p>
                       </div>
-
-                      {/* Calendar Planner */}
                       {!showCalendar ? (
                         <button onClick={async () => {
                           await fetchCalendarSlots()
@@ -695,12 +871,10 @@ export default function CustomerDetailPage() {
                           )}
                         </div>
                       )}
-
                       <button onClick={handleMarkPublished} disabled={actionLoading}
                         className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
                         {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Mark published'}
                       </button>
-
                       <div>
                         <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Validity expiry date</label>
                         <input type="date" value={expiryDate} onChange={e => setExpiryDate(e.target.value)}
@@ -717,7 +891,7 @@ export default function CustomerDetailPage() {
             </div>
           )}
 
-          {/* PARTNER LINK — back office */}
+          {/* PARTNER LINK */}
           {(role === 'back_office' || role === 'admin') && activeOrder && (
             <div>
               {!showPartnerLink ? (
@@ -744,7 +918,7 @@ export default function CustomerDetailPage() {
             </div>
           )}
 
-          {/* CREATE ORDER */}
+          {/* CREATE ORDER — CRM Agent */}
           {role === 'crm_agent' && !activeOrder && (
             <div>
               {!showOrderForm ? (
@@ -754,6 +928,7 @@ export default function CustomerDetailPage() {
                 </button>
               ) : (
                 <div className="border border-pink-200 rounded-2xl overflow-hidden">
+                  {/* Timer header */}
                   <div className="bg-red-50 px-4 py-3 flex items-center justify-between">
                     <div>
                       <p className="text-[9px] font-bold text-red-500 uppercase tracking-wide">10 min order window</p>
@@ -761,36 +936,118 @@ export default function CustomerDetailPage() {
                     </div>
                     <span className="text-xl font-bold text-red-500 font-mono">{fmtTimer(orderTimer)}</span>
                   </div>
+
                   <div className="p-4 space-y-3">
+
+                    {/* Package */}
                     <div>
                       <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Package</label>
-                      <select value={selectedPkg} onChange={e => setSelectedPkg(e.target.value)}
+                      <select value={selectedPkg} onChange={e => { setSelectedPkg(e.target.value); setDiscount(0) }}
                         className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
                         <option value="">Select package...</option>
                         {packages.map(p => <option key={p.id} value={p.id}>{p.name} — LKR {p.price.toLocaleString()}</option>)}
                       </select>
                     </div>
-                    <div>
-                      <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Amount paid (LKR)</label>
-                      <input type="number" value={amountPaid} onChange={e => setAmountPaid(e.target.value)}
-                        placeholder="0.00" className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none" />
-                    </div>
+
+                    {/* Discount */}
+                    {selectedPkg && (
+                      <div>
+                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Discount</label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {DISCOUNT_OPTIONS.map(opt => (
+                            <button key={opt.value} onClick={() => setDiscount(opt.value)}
+                              className={`px-3 py-2 rounded-xl text-[10px] font-bold transition-all ${discount === opt.value ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                        {selectedPkgObj && (
+                          <div className="mt-2 bg-pink-50 border border-pink-100 rounded-xl px-3 py-2.5">
+                            <p className="text-[9px] font-bold text-pink-600 uppercase tracking-wide mb-0.5">Package</p>
+                            <p className="text-xs font-bold text-gray-800">{displayPkgName}</p>
+                            <p className="text-sm font-bold text-pink-600 mt-1">
+                              LKR {discountedPrice.toLocaleString()}
+                              {discount > 0 && <span className="text-[9px] text-gray-400 font-medium ml-2 line-through">LKR {basePrice.toLocaleString()}</span>}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Amount paid (auto-filled, editable) */}
+                    {selectedPkg && (
+                      <div>
+                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+                          Amount paid (LKR)
+                        </label>
+                        <input type="number" value={amountPaid} onChange={e => setAmountPaid(e.target.value)}
+                          placeholder="0" className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none focus:border-pink-300" />
+                      </div>
+                    )}
+
+                    {/* Actual amount received (optional) */}
+                    {selectedPkg && (
+                      <div>
+                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1">
+                          Actual amount received <span className="text-gray-300 font-normal">(optional — if different)</span>
+                        </label>
+                        <input type="number" value={actualReceived} onChange={e => setActualReceived(e.target.value)}
+                          placeholder={`e.g. if customer paid extra`}
+                          className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none focus:border-pink-300" />
+                      </div>
+                    )}
+
+                    {/* Payment method */}
                     <div>
                       <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Payment method</label>
-                      <select value={paymentType} onChange={e => setPaymentType(e.target.value)}
-                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
-                        <option value="bank_transfer">Bank transfer</option>
-                        <option value="cash">Cash</option>
-                        <option value="card">Card</option>
-                        <option value="koko">KOKO</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Payment slip</label>
-                      <div className="border-2 border-dashed border-gray-200 rounded-xl p-4 text-center text-xs text-gray-400 font-medium">
-                        Tap to upload slip image
+                      <div className="flex gap-2">
+                        {([
+                          { value: 'bank_transfer', label: '🏦 Bank' },
+                          { value: 'genie', label: '📱 Genie' },
+                          { value: 'koko', label: '🐊 KOKO' },
+                        ] as const).map(opt => (
+                          <button key={opt.value} onClick={() => { setPaymentType(opt.value); setSlipFile(null); setSlipUrl('') }}
+                            className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${paymentType === opt.value ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                            {opt.label}
+                          </button>
+                        ))}
                       </div>
                     </div>
+
+                    {/* Payment slip upload (Bank Transfer or Genie) */}
+                    {needsSlip && (
+                      <div>
+                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+                          Payment slip <span className="text-red-500">*</span>
+                        </label>
+                        {slipUrl ? (
+                          <div className="flex items-center gap-2 bg-green-50 border border-green-100 rounded-xl px-3 py-2.5">
+                            <CheckCircle size={14} className="text-green-500 flex-shrink-0" />
+                            <p className="text-xs font-semibold text-green-700 flex-1 truncate">Slip uploaded</p>
+                            <button onClick={() => { setSlipFile(null); setSlipUrl('') }} className="text-[9px] text-red-400 font-bold">Remove</button>
+                          </div>
+                        ) : (
+                          <label className="flex items-center gap-3 bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl px-4 py-3 cursor-pointer hover:border-pink-300 transition-all">
+                            {slipUploading
+                              ? <Loader2 size={16} className="animate-spin text-pink-400" />
+                              : <Upload size={16} className="text-gray-400" />}
+                            <div>
+                              <p className="text-xs font-semibold text-gray-500">
+                                {slipFile ? slipFile.name : 'Tap to upload slip (PNG or PDF)'}
+                              </p>
+                              <p className="text-[9px] text-gray-400">PNG, JPG or PDF</p>
+                            </div>
+                            <input type="file" accept="image/*,.pdf" className="hidden"
+                              onChange={e => {
+                                const file = e.target.files?.[0]
+                                if (file) { setSlipFile(file); setSlipUrl('') }
+                              }} />
+                          </label>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Assign to back office */}
                     <div>
                       <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign to back office</label>
                       <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
@@ -799,34 +1056,26 @@ export default function CustomerDetailPage() {
                         {workers.filter(w => w.role === 'back_office').map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
                       </select>
                     </div>
-                    <button onClick={async () => {
-                      if (!selectedPkg || !amountPaid || !user) return
-                      setActionLoading(true)
-                      const pkg = packages.find(p => p.id === selectedPkg)
-                      const { data: order } = await supabase.from('orders').insert({
-                        customer_id: customer?.id, package_id: selectedPkg,
-                        current_step: 3, step_variant: pkg?.flow_variant || 'standard',
-                        status: 'active', amount_paid: Number(amountPaid),
-                        payment_type: paymentType, created_by: user.id,
-                      }).select().single()
-                      if (order) {
-                        await supabase.from('order_steps').insert({
-                          order_id: order.id, step_number: 3,
-                          step_name: 'Back Office — Onboarding', status: 'pending',
-                          assigned_to: selectedAssignee || null,
-                        })
-                        const assignedWorker = workers.find(w => w.id === selectedAssignee)
-                        await supabase.from('interactions').insert([
-                          { customer_id: customer?.id, type: 'order', description: `Order created: ${pkg?.name} — LKR ${amountPaid}`, created_by: user.id },
-                          { customer_id: customer?.id, type: 'order', description: `Assigned to back office: ${assignedWorker?.full_name || 'unassigned'}`, created_by: user.id },
-                        ])
+
+                    {/* Submit button */}
+                    <button
+                      onClick={handleCreateOrder}
+                      disabled={!selectedPkg || !amountPaid || (needsSlip && !slipFile && !slipUrl) || actionLoading}
+                      className="w-full bg-pink-600 text-white rounded-xl py-3 text-xs font-bold disabled:opacity-40 flex items-center justify-center gap-2"
+                    >
+                      {actionLoading
+                        ? <><Loader2 size={14} className="animate-spin" /> Processing...</>
+                        : 'Generate invoice + Submit →'
                       }
-                      setShowOrderForm(false); setTimerActive(false); setSelectedAssignee('')
-                      await fetchAll(); setActionLoading(false)
-                    }} disabled={!selectedPkg || !amountPaid || actionLoading}
-                      className="w-full bg-pink-600 text-white rounded-xl py-3 text-xs font-bold disabled:opacity-40">
-                      {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Generate invoice + Submit →'}
                     </button>
+
+                    {/* Invoice link (shows after creation) */}
+                    {invoiceUrl && (
+                      <a href={invoiceUrl} target="_blank" rel="noreferrer"
+                        className="flex items-center justify-center gap-2 bg-green-50 border border-green-100 text-green-700 rounded-xl py-3 text-xs font-bold">
+                        <ExternalLink size={13} /> View invoice
+                      </a>
+                    )}
                   </div>
                 </div>
               )}

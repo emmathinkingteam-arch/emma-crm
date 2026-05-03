@@ -19,22 +19,22 @@ export function buildWaLink(phone: string, message: string): string {
 // ── WA Message templates ─────────────────────────────────────
 export const WA = {
   greeting: (name: string) =>
-    `Hi ${name}! 🌟 Welcome to Emma Thinking. We're so happy to have you with us. Your order has been received and we're getting everything ready. 💫`,
+    `Hi ${name},\n\nWelcome to Emma Thinking.\n\nYour order has been received and we are getting everything ready for you.\n\n---\n\nTo maintain privacy and fairness, Emma Thinking controls the sharing of contact information between members. If you wish to connect directly with someone, you must first register with us.\n\nඔබට අප හරහා කවුරුන්හෝ සම්බන්ධ කරගැනීමට අවශ්‍ය නම්, ප්‍රථමයෙන් අප සමග ලියාපදිංචි වීම අත්‍යවශ්‍යයවේ.\n\nලියාපදිංචිය සම්පූර්ණයෙන්ම නොමිලේ වන අතර, ඔබට පහත Website එක Fill කර එය සිදු කල හැකිය:\n\nලියාපදිංචි වීමට - https://www.emmathinking.com/login\n\nඔබට අදාළ පුද්ගලයා / පුද්ගලයන් සම්බන්ධ කර ගත හැකි වන්නෙ ලියාපදිංචියෙන් පසුව පමණක් බව කරුණාවෙන් සලකන්න.\n\nEmma Thinking (Pvt) Ltd කෙරෙහි තැබූ විශ්වාසට ඔබට තූති.`,
 
   sendInvoice: (name: string, invoiceUrl: string) =>
-    `Hi ${name}! Here is your invoice for your reference 🧾\n${invoiceUrl}\nFeel free to ask us anything!`,
+    `Hi ${name},\n\nPlease find your invoice below for your reference.\n\n${invoiceUrl}\n\n---\n\nThis is your personal Relationship Manager.\n\nIf you have any questions or need assistance, please feel free to contact me at any time.\n\nEmma Thinking (Pvt) Ltd`,
 
   sessionStart: (name: string) =>
-    `Hi ${name}! 👋 Your counselling session has started and I'll be your personal counselor. Could you please share your available times so we can schedule our meeting? 🗓️`,
+    `Hi ${name},\n\nYour counselling session has now started and I will be your personal counselor throughout this process.\n\nCould you please share your available dates and times so we can schedule our meeting at a time that suits you?\n\nLooking forward to speaking with you.\n\nEmma Thinking (Pvt) Ltd`,
 
   confirmTime: (name: string, date: string, time: string, meetLink: string) =>
-    `Hi ${name}! Your meeting is confirmed ✔️\n📅 Date: ${date}\n⏰ Time: ${time}\n🔗 Meeting: ${meetLink}\nWe look forward to speaking with you!`,
+    `Hi ${name},\n\nYour counselling session has been confirmed. Please find the details below.\n\n   Date     : ${date}\n   Time     : ${time}\n   Meeting  : ${meetLink}\n\nKindly join the meeting on time. If you need to reschedule, please let us know in advance.\n\nWe look forward to speaking with you.\n\nEmma Thinking (Pvt) Ltd`,
 
   sendBriefToCustomer: (name: string, briefSummary: string) =>
-    `Hi ${name}! 🎨 We've prepared your content brief:\n\n${briefSummary.slice(0, 300)}${briefSummary.length > 300 ? '...' : ''}\n\nPlease let us know if you approve or need any changes. ✨`,
+    `Hi ${name},\n\nWe have prepared your profile content brief. Please review the details below carefully.\n\n---\n\n${briefSummary}\n\n---\n\nIf you are happy with the above, please confirm your approval.\n\nIf you would like any changes, please let us know and we will be happy to assist.\n\nEmma Thinking (Pvt) Ltd`,
 
   planningConfirmation: (name: string, date: string, time: string) =>
-    `Hi ${name}! 📅 Your post has been planned for publication on ${date} at ${time}. We'll take care of everything! ✨`,
+    `Hi ${name},\n\nYour post has been planned for publication on ${date} at ${time}.\n\nWe will take care of everything and notify you once it goes live.\n\nEmma Thinking (Pvt) Ltd`,
 }
 
 // ── Post ID code generator ────────────────────────────────────

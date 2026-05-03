@@ -8,7 +8,7 @@ import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import {
   Loader2, ArrowLeft, Star, Phone, MessageCircle, PhoneCall,
-  ThumbsUp, ShoppingCart, Lock, Upload, CheckCircle, ExternalLink
+  ThumbsUp, ShoppingCart, Lock, Upload, CheckCircle, ExternalLink, Filter
 } from 'lucide-react'
 import { Customer, Order, OrderStep, Interaction, Package as Pkg, MONTH_CODES } from '@/types'
 import { fmtDate, fmtTime, buildWaLink, WA } from '@/lib/utils'
@@ -16,6 +16,14 @@ import { fmtDate, fmtTime, buildWaLink, WA } from '@/lib/utils'
 const SLOT_LABELS: Record<string, string> = { W: '6:30am', X: '11:30am', Y: '3:30pm', Z: '8:30pm' }
 const SLOTS = ['W', 'X', 'Y', 'Z'] as const
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+// Deadlines set at step CREATION (from transfer time, not accept time)
+const STEP_DEADLINE_HOURS: Record<number, number | null> = {
+  3: 4,    // Back Office: 4 hours from CRM transfer
+  4: 48,   // Counselor: 2 days from Back Office transfer
+  5: 6,    // Manager: 6 hours from Counselor transfer
+  6: null, // Designer: no deadline
+}
 
 const DISCOUNT_OPTIONS = [
   { label: 'No discount', value: 0 },
@@ -25,6 +33,8 @@ const DISCOUNT_OPTIONS = [
   { label: '50% off', value: 50 },
 ]
 
+type HistoryFilter = 'all' | 'order' | 'message' | 'call' | 'feedback'
+
 function getNext14Days(): string[] {
   const days: string[] = []
   for (let i = 0; i < 14; i++) {
@@ -33,6 +43,12 @@ function getNext14Days(): string[] {
     days.push(d.toISOString().split('T')[0])
   }
   return days
+}
+
+function makeDeadline(stepNumber: number): string | null {
+  const hours = STEP_DEADLINE_HOURS[stepNumber]
+  if (hours == null) return null
+  return new Date(Date.now() + hours * 3600000).toISOString()
 }
 
 export default function CustomerDetailPage() {
@@ -50,14 +66,16 @@ export default function CustomerDetailPage() {
   const [actionLoading, setActionLoading] = useState(false)
   const [workers, setWorkers] = useState<{ id: string; full_name: string; role: string; meeting_link?: string }[]>([])
   const [selectedAssignee, setSelectedAssignee] = useState('')
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('all')
 
   // Order creation
   const [showOrderForm, setShowOrderForm] = useState(false)
   const [selectedPkg, setSelectedPkg] = useState('')
   const [discount, setDiscount] = useState(0)
   const [amountPaid, setAmountPaid] = useState('')
-  const [actualReceived, setActualReceived] = useState('') // optional, if customer paid more/different
+  const [actualReceived, setActualReceived] = useState('')
   const [paymentType, setPaymentType] = useState<'bank_transfer' | 'genie' | 'koko'>('bank_transfer')
+  const [kokoId, setKokoId] = useState('')
   const [slipFile, setSlipFile] = useState<File | null>(null)
   const [slipUploading, setSlipUploading] = useState(false)
   const [slipUrl, setSlipUrl] = useState('')
@@ -92,7 +110,6 @@ export default function CustomerDetailPage() {
   const [partnerLink, setPartnerLink] = useState('')
   const [showPartnerLink, setShowPartnerLink] = useState(false)
 
-  // Countdown
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30000)
@@ -108,7 +125,7 @@ export default function CustomerDetailPage() {
     return () => clearTimeout(t)
   }, [timerActive, orderTimer])
 
-  // Compute discounted price
+  // Computed order form values
   const selectedPkgObj = packages.find(p => p.id === selectedPkg)
   const basePrice = selectedPkgObj?.price || 0
   const discountedPrice = discount > 0 ? Math.round(basePrice * (1 - discount / 100)) : basePrice
@@ -117,7 +134,6 @@ export default function CustomerDetailPage() {
     : ''
   const needsSlip = paymentType === 'bank_transfer' || paymentType === 'genie'
 
-  // When package/discount changes, update amountPaid
   useEffect(() => {
     if (selectedPkgObj) setAmountPaid(String(discountedPrice))
   }, [selectedPkg, discount])
@@ -177,25 +193,21 @@ export default function CustomerDetailPage() {
     setLoading(false)
   }
 
-  const logAction = async (description: string) => {
+  const logAction = async (description: string, type: 'order' | 'message' | 'call' | 'feedback' = 'order') => {
     if (!customer || !user) return
     await supabase.from('interactions').insert({
-      customer_id: customer.id, type: 'order', description, created_by: user.id,
+      customer_id: customer.id,
+      type,
+      description,
+      created_by: user.id,
     })
   }
 
   const openOrderTab = () => {
-    setShowOrderForm(true)
-    setTimerActive(true)
-    setOrderTimer(600)
-    setSlipFile(null)
-    setSlipUrl('')
-    setInvoiceUrl('')
-    setDiscount(0)
-    setActualReceived('')
-    setSelectedPkg('')
-    setAmountPaid('')
-    setSelectedAssignee('')
+    setShowOrderForm(true); setTimerActive(true); setOrderTimer(600)
+    setSlipFile(null); setSlipUrl(''); setInvoiceUrl('')
+    setDiscount(0); setActualReceived(''); setKokoId('')
+    setSelectedPkg(''); setAmountPaid(''); setSelectedAssignee('')
   }
 
   const fmtTimer = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
@@ -247,14 +259,13 @@ export default function CustomerDetailPage() {
     return publicUrl
   }
 
+  // Accept step — just mark in_progress, deadline already set at step creation
   const doAccept = async () => {
     if (!activeStep) return
     setActionLoading(true)
-    const deadlineHours = myStep === 4 ? 48 : myStep === 5 ? 24 : 4
     await supabase.from('order_steps').update({
       status: 'in_progress',
       started_at: new Date().toISOString(),
-      deadline: new Date(Date.now() + deadlineHours * 3600000).toISOString()
     }).eq('id', activeStep.id)
     const labels: Record<number, string> = {
       3: 'Back Office accepted — onboarding started',
@@ -267,14 +278,27 @@ export default function CustomerDetailPage() {
     setActionLoading(false)
   }
 
-  const doComplete = async (nextStep: number, data?: Partial<OrderStep>, assignTo?: string, logMsg?: string, nextDescription?: string) => {
+  // Complete step and create next — deadline set HERE at transfer time
+  const doComplete = async (
+    nextStep: number,
+    data?: Partial<OrderStep>,
+    assignTo?: string,
+    logMsg?: string,
+    nextDescription?: string
+  ) => {
     if (!activeStep || !activeOrder) return
     setActionLoading(true)
+
     await supabase.from('order_steps').update({
-      status: 'done', completed_at: new Date().toISOString(), ...(data || {})
+      status: 'done',
+      completed_at: new Date().toISOString(),
+      ...(data || {})
     }).eq('id', activeStep.id)
+
     await supabase.from('orders').update({ current_step: nextStep }).eq('id', activeOrder.id)
+
     if (nextStep <= 6) {
+      const deadline = makeDeadline(nextStep) // set from transfer time
       await supabase.from('order_steps').insert({
         order_id: activeOrder.id,
         step_number: nextStep,
@@ -282,10 +306,13 @@ export default function CustomerDetailPage() {
         status: 'pending',
         assigned_to: assignTo || null,
         description: nextDescription || null,
+        deadline: deadline,
       })
     }
+
     if (logMsg) await logAction(logMsg)
-    setSelectedAssignee(''); setCustomerApproved(false); setShowReject(false); setRejectReason(''); setRejectAssignee('')
+    setSelectedAssignee(''); setCustomerApproved(false)
+    setShowReject(false); setRejectReason(''); setRejectAssignee('')
     await fetchAll()
     setActionLoading(false)
   }
@@ -295,7 +322,9 @@ export default function CustomerDetailPage() {
     setActionLoading(true)
     const newDeadline = new Date(Date.now() + extendDays * 86400000).toISOString()
     await supabase.from('order_steps').update({
-      extended_deadline: newDeadline, extension_reason: extendReason, extended_by_days: extendDays,
+      extended_deadline: newDeadline,
+      extension_reason: extendReason,
+      extended_by_days: extendDays,
     }).eq('id', activeStep.id)
     await logAction(`Extension requested — ${extendReason} (+${extendDays} day${extendDays > 1 ? 's' : ''})`)
     setShowExtend(false); setExtendReason('')
@@ -349,7 +378,7 @@ export default function CustomerDetailPage() {
     setActionLoading(true)
     await supabase.from('orders').update({ published_at: new Date().toISOString() }).eq('id', activeOrder.id)
     await supabase.from('order_steps').update({ status: 'done', completed_at: new Date().toISOString() }).eq('id', activeStep.id)
-    await logAction('Post published')
+    await logAction('Post marked as published')
     await fetchAll()
     setActionLoading(false)
   }
@@ -363,7 +392,6 @@ export default function CustomerDetailPage() {
     await fetchAll()
   }
 
-  // Create order — the main function
   const handleCreateOrder = async () => {
     if (!selectedPkg || !amountPaid || !user || !customer) return
     setActionLoading(true)
@@ -372,13 +400,14 @@ export default function CustomerDetailPage() {
     const finalAmountNum = discountedPrice
     const actualAmountNum = actualReceived ? Number(actualReceived) : finalAmountNum
 
-    // Upload slip if needed
     let uploadedSlipUrl = slipUrl
     if (needsSlip && slipFile && !slipUrl) {
       uploadedSlipUrl = await handleSlipUpload(slipFile)
     }
 
-    // Create the order
+    const paymentLabel = paymentType === 'bank_transfer' ? 'Bank Transfer' : paymentType === 'genie' ? 'Genie' : 'KOKO'
+    const kokoNote = paymentType === 'koko' && kokoId ? ` | KOKO ID: ${kokoId}` : ''
+
     const { data: order } = await supabase.from('orders').insert({
       customer_id: customer.id,
       package_id: selectedPkg,
@@ -393,16 +422,19 @@ export default function CustomerDetailPage() {
 
     if (!order) { setActionLoading(false); return }
 
-    // Create first order step
+    // Create step 3 with deadline set from NOW (transfer time)
+    const stepDeadline = makeDeadline(3)
     await supabase.from('order_steps').insert({
       order_id: order.id,
       step_number: 3,
       step_name: 'Back Office — Onboarding',
       status: 'pending',
       assigned_to: selectedAssignee || null,
+      deadline: stepDeadline,
     })
 
     // Generate invoice
+    let generatedInvoiceUrl = ''
     try {
       const invRes = await fetch('/api/generate-invoice', {
         method: 'POST',
@@ -411,7 +443,7 @@ export default function CustomerDetailPage() {
           orderId: order.id,
           clientName: customer.name || customer.phone,
           clientNumber: customer.phone,
-          paymentMethod: paymentType === 'bank_transfer' ? 'Bank Transfer' : paymentType === 'genie' ? 'Genie' : 'KOKO',
+          paymentMethod: paymentLabel,
           packageName: pkg?.name || '',
           finalAmount: finalAmountNum,
           discountPercent: discount,
@@ -419,64 +451,57 @@ export default function CustomerDetailPage() {
       })
       if (invRes.ok) {
         const invData = await invRes.json()
-        if (invData.invoiceUrl) setInvoiceUrl(invData.invoiceUrl)
+        if (invData.invoiceUrl) {
+          generatedInvoiceUrl = invData.invoiceUrl
+          setInvoiceUrl(invData.invoiceUrl)
+        }
       }
-    } catch (_) {
-      // Invoice generation failed silently
-    }
+    } catch (_) { /* silent */ }
 
-    // Calculate and add commission
+    // Commission
     const { data: agentData } = await supabase
-      .from('users')
-      .select('commission_rates, wallet_balance')
-      .eq('id', user.id)
-      .single()
-
+      .from('users').select('commission_rates, wallet_balance').eq('id', user.id).single()
     const rate = agentData?.commission_rates?.[selectedPkg] || 0
     if (rate > 0) {
       const commissionAmount = Math.round(finalAmountNum * rate / 100)
       const monthYear = new Date().toISOString().slice(0, 7)
-
       await supabase.from('commissions').insert({
-        user_id: user.id,
-        order_id: order.id,
-        package_id: selectedPkg,
-        step_number: 1,
-        amount: commissionAmount,
-        earned_at: new Date().toISOString(),
-        month_year: monthYear,
+        user_id: user.id, order_id: order.id, package_id: selectedPkg,
+        step_number: 1, amount: commissionAmount,
+        earned_at: new Date().toISOString(), month_year: monthYear,
       })
-
       const newBalance = (agentData?.wallet_balance || 0) + commissionAmount
       await supabase.from('users').update({ wallet_balance: newBalance }).eq('id', user.id)
-
-      // Update auth store so profile reflects immediately
       if (user) setUser({ ...user, wallet_balance: newBalance })
     }
 
     // Log interactions
     const assignedWorker = workers.find(w => w.id === selectedAssignee)
+    const invoiceNote = generatedInvoiceUrl ? ` | Invoice: ${generatedInvoiceUrl}` : ''
     await supabase.from('interactions').insert([
       {
         customer_id: customer.id,
         type: 'order',
-        description: `Order created: ${displayPkgName} — LKR ${finalAmountNum.toLocaleString()} (paid: LKR ${actualAmountNum.toLocaleString()}) via ${paymentType}`,
+        description: `Order created: ${displayPkgName} — LKR ${finalAmountNum.toLocaleString()} (paid: LKR ${actualAmountNum.toLocaleString()}) via ${paymentLabel}${kokoNote}${invoiceNote}`,
         created_by: user.id,
       },
       ...(selectedAssignee ? [{
         customer_id: customer.id,
         type: 'order' as const,
-        description: `Assigned to back office: ${assignedWorker?.full_name || 'unassigned'}`,
+        description: `Assigned to back office: ${assignedWorker?.full_name || 'unassigned'} — 4hr deadline set`,
         created_by: user.id,
       }] : []),
     ])
 
-    setShowOrderForm(false)
-    setTimerActive(false)
-    setSelectedAssignee('')
+    setShowOrderForm(false); setTimerActive(false); setSelectedAssignee('')
     await fetchAll()
     setActionLoading(false)
   }
+
+  // History filter
+  const filteredInteractions = interactions.filter(i =>
+    historyFilter === 'all' ? true : i.type === historyFilter
+  )
 
   if (loading) return <div className="h-screen flex items-center justify-center bg-white"><Loader2 className="animate-spin text-pink-600" size={28} /></div>
   if (!customer) return <div className="h-screen flex items-center justify-center bg-white"><p className="text-gray-400 text-sm">Customer not found</p></div>
@@ -514,7 +539,9 @@ export default function CustomerDetailPage() {
               <button onClick={async () => {
                 const newPriority = !customer.is_priority
                 await supabase.from('customers').update({ is_priority: newPriority }).eq('id', customer.id)
+                await logAction(newPriority ? 'Marked as priority lead' : 'Priority removed')
                 setCustomer(c => c ? { ...c, is_priority: newPriority } : c)
+                await fetchAll()
               }} className={`text-[8px] font-bold px-3 py-1.5 rounded-full border transition-all ${customer.is_priority ? 'bg-red-100 border-red-200 text-red-600' : 'bg-white border-gray-200 text-gray-400'}`}>
                 {customer.is_priority ? 'Remove priority' : 'Mark priority'}
               </button>
@@ -559,7 +586,12 @@ export default function CustomerDetailPage() {
                     )}
                   </div>
                   {isActiveStep
-                    ? <div className="flex items-center gap-1.5"><div className={`w-2 h-2 rounded-full ${stepAccepted ? 'bg-green-500' : 'bg-pink-500 animate-pulse'}`} /><span className={`text-[9px] font-bold ${stepAccepted ? 'text-green-600' : 'text-pink-600'}`}>{stepAccepted ? 'In Progress' : 'Pending'}</span></div>
+                    ? <div className="flex items-center gap-1.5">
+                      <div className={`w-2 h-2 rounded-full ${countdown === 'Overdue' ? 'bg-red-500 animate-pulse' : stepAccepted ? 'bg-green-500' : 'bg-pink-500 animate-pulse'}`} />
+                      <span className={`text-[9px] font-bold ${countdown === 'Overdue' ? 'text-red-600' : stepAccepted ? 'text-green-600' : 'text-pink-600'}`}>
+                        {countdown === 'Overdue' ? 'Overdue' : stepAccepted ? 'In Progress' : 'Pending'}
+                      </span>
+                    </div>
                     : <Lock size={14} className="text-gray-300" />}
                 </div>
               </div>
@@ -578,14 +610,14 @@ export default function CustomerDetailPage() {
                     await logAction('Greeting sent via WhatsApp')
                     await fetchAll()
                   }} className={`w-full flex items-center gap-3 border rounded-xl px-4 py-3 text-xs font-semibold transition-all ${stepAccepted ? 'bg-white border-green-100 text-green-700' : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'}`}>
-                    <span className={`w-2 h-2 rounded-full ${stepAccepted ? 'bg-green-500' : 'bg-gray-300'}`} />Send greeting
+                    <span className={`w-2 h-2 rounded-full ${stepAccepted ? 'bg-green-500' : 'bg-gray-300'}`} />Send greeting via WhatsApp
                   </button>
                   <button disabled={!stepAccepted} onClick={async () => {
                     openWa(buildWaLink(customer.phone, WA.sendInvoice(customer.name || customer.phone, `${process.env.NEXT_PUBLIC_APP_URL}/invoice/${activeOrder.id}`)))
                     await logAction('Invoice sent via WhatsApp')
                     await fetchAll()
                   }} className={`w-full flex items-center gap-3 border rounded-xl px-4 py-3 text-xs font-semibold transition-all ${stepAccepted ? 'bg-white border-green-100 text-green-700' : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'}`}>
-                    <span className={`w-2 h-2 rounded-full ${stepAccepted ? 'bg-green-500' : 'bg-gray-300'}`} />Send invoice
+                    <span className={`w-2 h-2 rounded-full ${stepAccepted ? 'bg-green-500' : 'bg-gray-300'}`} />Send invoice via WhatsApp
                   </button>
                   {stepAccepted && (
                     <>
@@ -599,10 +631,10 @@ export default function CustomerDetailPage() {
                       </div>
                       <button onClick={() => {
                         const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'counselor'
-                        doComplete(4, {}, selectedAssignee, `Assigned to counselor: ${name}`)
+                        doComplete(4, {}, selectedAssignee, `Assigned to counselor: ${name} — 48hr deadline set`)
                       }} disabled={!selectedAssignee || actionLoading}
                         className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
-                        {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Assign to counselor →'}
+                        {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Assign to counselor'}
                       </button>
                     </>
                   )}
@@ -616,6 +648,8 @@ export default function CustomerDetailPage() {
                     <button onClick={async () => {
                       await doAccept()
                       openWa(buildWaLink(customer.phone, WA.sessionStart(customer.name || customer.phone)))
+                      await logAction('Session start message sent via WhatsApp')
+                      await fetchAll()
                     }} className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold">
                       Accept — send session start message
                     </button>
@@ -674,10 +708,10 @@ export default function CustomerDetailPage() {
                           </div>
                           <button onClick={() => {
                             const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'manager'
-                            doComplete(5, { description: brief }, selectedAssignee, `Brief submitted to manager: ${name}`, brief)
+                            doComplete(5, { description: brief }, selectedAssignee, `Brief submitted to manager: ${name} — 6hr deadline set`, brief)
                           }} disabled={!selectedAssignee || actionLoading}
                             className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
-                            {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Submit to manager →'}
+                            {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Submit to manager'}
                           </button>
                         </>
                       )}
@@ -696,7 +730,7 @@ export default function CustomerDetailPage() {
                             doComplete(3, { description: brief, sub_step: 'customer_facing' }, selectedAssignee, `Returned to back office: ${name}`, brief)
                           }} disabled={!selectedAssignee || actionLoading}
                             className="w-full bg-purple-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
-                            Return to Back Office →
+                            Return to Back Office
                           </button>
                         </>
                       )}
@@ -748,10 +782,10 @@ export default function CustomerDetailPage() {
                       </div>
                       <button onClick={() => {
                         const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'designer'
-                        doComplete(6, {}, selectedAssignee, `Manager approved. Assigned to designer: ${name}`, activeStep.description || '')
+                        doComplete(6, {}, selectedAssignee, `Manager approved — assigned to designer: ${name}`, activeStep.description || '')
                       }} disabled={!selectedAssignee || actionLoading}
                         className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
-                        {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Approve and assign to designer →'}
+                        {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Approve and assign to designer'}
                       </button>
                       <div className="border-t border-gray-100 pt-2">
                         {!showReject ? (
@@ -773,7 +807,7 @@ export default function CustomerDetailPage() {
                             <button onClick={() => {
                               const name = workers.find(w => w.id === rejectAssignee)?.full_name || 'counselor'
                               const briefWithFeedback = `${activeStep.description || ''}\n\n---\nManager feedback: ${rejectReason}`
-                              doComplete(4, {}, rejectAssignee, `Rejected by manager. Returned to ${name}: "${rejectReason}"`, briefWithFeedback)
+                              doComplete(4, {}, rejectAssignee, `Brief rejected by manager — returned to ${name}: "${rejectReason}"`, briefWithFeedback)
                             }} disabled={!rejectReason || !rejectAssignee || actionLoading}
                               className="w-full bg-red-400 text-white rounded-lg px-3 py-2 text-xs font-bold disabled:opacity-40">
                               Send back to counselor
@@ -786,7 +820,7 @@ export default function CustomerDetailPage() {
                 </div>
               )}
 
-              {/* STEP 6 — Designer */}
+              {/* STEP 6 — Designer (no deadline) */}
               {isActiveStep && myStep === 6 && (
                 <div className="p-4 space-y-2">
                   {!stepAccepted && (
@@ -802,11 +836,9 @@ export default function CustomerDetailPage() {
                         <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap">{activeStep.description}</p>
                       </div>
                       {!showCalendar ? (
-                        <button onClick={async () => {
-                          await fetchCalendarSlots()
-                          setShowCalendar(true)
-                        }} className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold">
-                          Open calendar planner →
+                        <button onClick={async () => { await fetchCalendarSlots(); setShowCalendar(true) }}
+                          className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold">
+                          Open calendar planner
                         </button>
                       ) : (
                         <div className="border border-gray-100 rounded-xl overflow-hidden">
@@ -841,8 +873,7 @@ export default function CustomerDetailPage() {
                                       const taken = takenSlots[key]
                                       const selected = selectedCell === key
                                       return (
-                                        <td key={key}
-                                          onClick={() => !taken && setSelectedCell(selected ? null : key)}
+                                        <td key={key} onClick={() => !taken && setSelectedCell(selected ? null : key)}
                                           className={`text-center py-2 border border-gray-50 transition-all ${taken ? 'bg-gray-100 cursor-not-allowed' : selected ? 'bg-pink-600 cursor-pointer' : 'bg-white cursor-pointer hover:bg-pink-50'}`}>
                                           <span className={`text-[10px] font-bold ${taken ? 'text-gray-300' : selected ? 'text-white' : 'text-gray-200'}`}>
                                             {taken ? '●' : selected ? '✓' : '○'}
@@ -865,7 +896,7 @@ export default function CustomerDetailPage() {
                               </p>
                               <button onClick={handlePlanSlot} disabled={actionLoading}
                                 className="w-full bg-pink-600 text-white rounded-lg py-2 text-[10px] font-bold disabled:opacity-40">
-                                {actionLoading ? <Loader2 size={12} className="animate-spin mx-auto" /> : 'Plan this slot + send WA'}
+                                {actionLoading ? <Loader2 size={12} className="animate-spin mx-auto" /> : 'Plan this slot + send WhatsApp'}
                               </button>
                             </div>
                           )}
@@ -873,7 +904,7 @@ export default function CustomerDetailPage() {
                       )}
                       <button onClick={handleMarkPublished} disabled={actionLoading}
                         className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
-                        {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Mark published'}
+                        {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Mark as published'}
                       </button>
                       <div>
                         <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Validity expiry date</label>
@@ -918,17 +949,16 @@ export default function CustomerDetailPage() {
             </div>
           )}
 
-          {/* CREATE ORDER — CRM Agent */}
+          {/* CREATE ORDER */}
           {role === 'crm_agent' && !activeOrder && (
             <div>
               {!showOrderForm ? (
                 <button onClick={openOrderTab}
                   className="w-full bg-pink-600 text-white rounded-2xl py-4 text-xs font-bold shadow-lg shadow-pink-200 active:scale-95 transition-all">
-                  Create order →
+                  Create order
                 </button>
               ) : (
                 <div className="border border-pink-200 rounded-2xl overflow-hidden">
-                  {/* Timer header */}
                   <div className="bg-red-50 px-4 py-3 flex items-center justify-between">
                     <div>
                       <p className="text-[9px] font-bold text-red-500 uppercase tracking-wide">10 min order window</p>
@@ -936,10 +966,7 @@ export default function CustomerDetailPage() {
                     </div>
                     <span className="text-xl font-bold text-red-500 font-mono">{fmtTimer(orderTimer)}</span>
                   </div>
-
                   <div className="p-4 space-y-3">
-
-                    {/* Package */}
                     <div>
                       <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Package</label>
                       <select value={selectedPkg} onChange={e => { setSelectedPkg(e.target.value); setDiscount(0) }}
@@ -948,8 +975,6 @@ export default function CustomerDetailPage() {
                         {packages.map(p => <option key={p.id} value={p.id}>{p.name} — LKR {p.price.toLocaleString()}</option>)}
                       </select>
                     </div>
-
-                    {/* Discount */}
                     {selectedPkg && (
                       <div>
                         <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Discount</label>
@@ -963,9 +988,8 @@ export default function CustomerDetailPage() {
                         </div>
                         {selectedPkgObj && (
                           <div className="mt-2 bg-pink-50 border border-pink-100 rounded-xl px-3 py-2.5">
-                            <p className="text-[9px] font-bold text-pink-600 uppercase tracking-wide mb-0.5">Package</p>
                             <p className="text-xs font-bold text-gray-800">{displayPkgName}</p>
-                            <p className="text-sm font-bold text-pink-600 mt-1">
+                            <p className="text-sm font-bold text-pink-600 mt-0.5">
                               LKR {discountedPrice.toLocaleString()}
                               {discount > 0 && <span className="text-[9px] text-gray-400 font-medium ml-2 line-through">LKR {basePrice.toLocaleString()}</span>}
                             </p>
@@ -973,52 +997,42 @@ export default function CustomerDetailPage() {
                         )}
                       </div>
                     )}
-
-                    {/* Amount paid (auto-filled, editable) */}
                     {selectedPkg && (
                       <div>
-                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
-                          Amount paid (LKR)
-                        </label>
+                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Amount paid (LKR)</label>
                         <input type="number" value={amountPaid} onChange={e => setAmountPaid(e.target.value)}
-                          placeholder="0" className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none focus:border-pink-300" />
-                      </div>
-                    )}
-
-                    {/* Actual amount received (optional) */}
-                    {selectedPkg && (
-                      <div>
-                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1">
-                          Actual amount received <span className="text-gray-300 font-normal">(optional — if different)</span>
-                        </label>
-                        <input type="number" value={actualReceived} onChange={e => setActualReceived(e.target.value)}
-                          placeholder={`e.g. if customer paid extra`}
                           className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none focus:border-pink-300" />
                       </div>
                     )}
-
-                    {/* Payment method */}
+                    {selectedPkg && (
+                      <div>
+                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1">
+                          Actual amount received <span className="text-gray-300 font-normal normal-case">(optional — if customer paid a different amount)</span>
+                        </label>
+                        <input type="number" value={actualReceived} onChange={e => setActualReceived(e.target.value)}
+                          placeholder="Leave blank if same as above"
+                          className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none focus:border-pink-300" />
+                      </div>
+                    )}
                     <div>
                       <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Payment method</label>
                       <div className="flex gap-2">
                         {([
-                          { value: 'bank_transfer', label: '🏦 Bank' },
-                          { value: 'genie', label: '📱 Genie' },
-                          { value: 'koko', label: '🐊 KOKO' },
+                          { value: 'bank_transfer', label: 'Bank Transfer' },
+                          { value: 'genie', label: 'Genie' },
+                          { value: 'koko', label: 'KOKO' },
                         ] as const).map(opt => (
-                          <button key={opt.value} onClick={() => { setPaymentType(opt.value); setSlipFile(null); setSlipUrl('') }}
+                          <button key={opt.value} onClick={() => { setPaymentType(opt.value); setSlipFile(null); setSlipUrl(''); setKokoId('') }}
                             className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${paymentType === opt.value ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
                             {opt.label}
                           </button>
                         ))}
                       </div>
                     </div>
-
-                    {/* Payment slip upload (Bank Transfer or Genie) */}
                     {needsSlip && (
                       <div>
                         <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
-                          Payment slip <span className="text-red-500">*</span>
+                          Payment slip <span className="text-red-500">required</span>
                         </label>
                         {slipUrl ? (
                           <div className="flex items-center gap-2 bg-green-50 border border-green-100 rounded-xl px-3 py-2.5">
@@ -1028,26 +1042,27 @@ export default function CustomerDetailPage() {
                           </div>
                         ) : (
                           <label className="flex items-center gap-3 bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl px-4 py-3 cursor-pointer hover:border-pink-300 transition-all">
-                            {slipUploading
-                              ? <Loader2 size={16} className="animate-spin text-pink-400" />
-                              : <Upload size={16} className="text-gray-400" />}
+                            {slipUploading ? <Loader2 size={16} className="animate-spin text-pink-400" /> : <Upload size={16} className="text-gray-400" />}
                             <div>
                               <p className="text-xs font-semibold text-gray-500">
-                                {slipFile ? slipFile.name : 'Tap to upload slip (PNG or PDF)'}
+                                {slipFile ? slipFile.name : 'Tap to upload payment slip'}
                               </p>
                               <p className="text-[9px] text-gray-400">PNG, JPG or PDF</p>
                             </div>
                             <input type="file" accept="image/*,.pdf" className="hidden"
-                              onChange={e => {
-                                const file = e.target.files?.[0]
-                                if (file) { setSlipFile(file); setSlipUrl('') }
-                              }} />
+                              onChange={e => { const f = e.target.files?.[0]; if (f) { setSlipFile(f); setSlipUrl('') } }} />
                           </label>
                         )}
                       </div>
                     )}
-
-                    {/* Assign to back office */}
+                    {paymentType === 'koko' && (
+                      <div>
+                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">KOKO Transaction ID</label>
+                        <input type="text" value={kokoId} onChange={e => setKokoId(e.target.value)}
+                          placeholder="e.g. KK-2024-XXXXXX"
+                          className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none focus:border-pink-300" />
+                      </div>
+                    )}
                     <div>
                       <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign to back office</label>
                       <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
@@ -1056,20 +1071,11 @@ export default function CustomerDetailPage() {
                         {workers.filter(w => w.role === 'back_office').map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
                       </select>
                     </div>
-
-                    {/* Submit button */}
-                    <button
-                      onClick={handleCreateOrder}
+                    <button onClick={handleCreateOrder}
                       disabled={!selectedPkg || !amountPaid || (needsSlip && !slipFile && !slipUrl) || actionLoading}
-                      className="w-full bg-pink-600 text-white rounded-xl py-3 text-xs font-bold disabled:opacity-40 flex items-center justify-center gap-2"
-                    >
-                      {actionLoading
-                        ? <><Loader2 size={14} className="animate-spin" /> Processing...</>
-                        : 'Generate invoice + Submit →'
-                      }
+                      className="w-full bg-pink-600 text-white rounded-xl py-3 text-xs font-bold disabled:opacity-40 flex items-center justify-center gap-2">
+                      {actionLoading ? <><Loader2 size={14} className="animate-spin" /> Processing...</> : 'Generate invoice + Submit'}
                     </button>
-
-                    {/* Invoice link (shows after creation) */}
                     {invoiceUrl && (
                       <a href={invoiceUrl} target="_blank" rel="noreferrer"
                         className="flex items-center justify-center gap-2 bg-green-50 border border-green-100 text-green-700 rounded-xl py-3 text-xs font-bold">
@@ -1084,37 +1090,88 @@ export default function CustomerDetailPage() {
 
           {/* HISTORY */}
           <div>
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">History</p>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">History</p>
+              <div className="flex items-center gap-1">
+                <Filter size={9} className="text-gray-300" />
+                <span className="text-[8px] text-gray-300 font-medium uppercase tracking-wide">Filter</span>
+              </div>
+            </div>
+
+            {/* Filter buttons */}
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {([
+                { key: 'all', label: 'All' },
+                { key: 'order', label: 'Order' },
+                { key: 'message', label: 'Message' },
+                { key: 'call', label: 'Call' },
+                { key: 'feedback', label: 'Feedback' },
+              ] as { key: HistoryFilter; label: string }[]).map(f => (
+                <button key={f.key} onClick={() => setHistoryFilter(f.key)}
+                  className={`px-3 py-1.5 rounded-full text-[9px] font-bold transition-all ${historyFilter === f.key ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                  {f.label}
+                  {f.key !== 'all' && (
+                    <span className={`ml-1 ${historyFilter === f.key ? 'opacity-70' : 'text-gray-400'}`}>
+                      {interactions.filter(i => i.type === f.key).length}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+
             {role === 'crm_agent' && (
               <LogInteractionForm customerId={customer.id} userId={user!.id} onSaved={fetchAll} />
             )}
+
             <div className="border-l-2 border-pink-100 ml-3 pl-4 space-y-3 mt-3">
-              {interactions.map(interaction => (
-                <div key={interaction.id} className="relative">
-                  <div className="absolute -left-[21px] top-1 w-3 h-3 bg-white border-2 border-pink-400 rounded-full" />
-                  <div className="bg-gray-50 rounded-xl p-3">
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-1.5">
-                        {interaction.type === 'message' && <MessageCircle size={10} className="text-blue-400" />}
-                        {interaction.type === 'call' && <PhoneCall size={10} className="text-purple-400" />}
-                        {interaction.type === 'feedback' && <ThumbsUp size={10} className="text-amber-400" />}
-                        {interaction.type === 'order' && <ShoppingCart size={10} className="text-green-500" />}
-                        <span className={`text-[8px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${interaction.type === 'message' ? 'bg-blue-50 text-blue-500' : interaction.type === 'call' ? 'bg-purple-50 text-purple-500' : interaction.type === 'feedback' ? 'bg-amber-50 text-amber-500' : 'bg-green-50 text-green-600'}`}>
-                          {interaction.type}
-                        </span>
-                        {(interaction as any).created_by_user?.full_name && (
-                          <span className="text-[8px] font-medium bg-white border border-gray-100 px-1.5 py-0.5 rounded-full text-gray-400">
-                            {(interaction as any).created_by_user.full_name}
+              {filteredInteractions.map(interaction => {
+                // Check if this interaction has an invoice link embedded
+                const invoiceLinkMatch = interaction.description.match(/Invoice: (https?:\/\/\S+)/)
+                const invoiceLink = invoiceLinkMatch ? invoiceLinkMatch[1] : null
+                // Clean description to show (remove the raw URL from display)
+                const cleanDescription = interaction.description.replace(/ \| Invoice: https?:\/\/\S+/, '')
+
+                return (
+                  <div key={interaction.id} className="relative">
+                    <div className="absolute -left-[21px] top-1 w-3 h-3 bg-white border-2 border-pink-400 rounded-full" />
+                    <div className="bg-gray-50 rounded-xl p-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-1.5">
+                          {interaction.type === 'message' && <MessageCircle size={10} className="text-blue-400" />}
+                          {interaction.type === 'call' && <PhoneCall size={10} className="text-purple-400" />}
+                          {interaction.type === 'feedback' && <ThumbsUp size={10} className="text-amber-400" />}
+                          {interaction.type === 'order' && <ShoppingCart size={10} className="text-green-500" />}
+                          <span className={`text-[8px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${interaction.type === 'message' ? 'bg-blue-50 text-blue-500'
+                            : interaction.type === 'call' ? 'bg-purple-50 text-purple-500'
+                              : interaction.type === 'feedback' ? 'bg-amber-50 text-amber-500'
+                                : 'bg-green-50 text-green-600'
+                            }`}>
+                            {interaction.type}
                           </span>
-                        )}
+                          {(interaction as any).created_by_user?.full_name && (
+                            <span className="text-[8px] font-medium bg-white border border-gray-100 px-1.5 py-0.5 rounded-full text-gray-400">
+                              {(interaction as any).created_by_user.full_name}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[8px] text-gray-300 font-medium">{fmtDate(interaction.created_at)} {fmtTime(interaction.created_at)}</span>
                       </div>
-                      <span className="text-[8px] text-gray-300 font-medium">{fmtDate(interaction.created_at)} {fmtTime(interaction.created_at)}</span>
+                      <p className="text-xs text-gray-600 font-medium leading-relaxed">{cleanDescription}</p>
+                      {invoiceLink && (
+                        <a href={invoiceLink} target="_blank" rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 mt-2 text-[9px] font-bold text-pink-600 bg-pink-50 border border-pink-100 px-2.5 py-1.5 rounded-lg">
+                          <ExternalLink size={9} /> View invoice
+                        </a>
+                      )}
                     </div>
-                    <p className="text-xs text-gray-600 font-medium leading-relaxed">{interaction.description}</p>
                   </div>
-                </div>
-              ))}
-              {interactions.length === 0 && <p className="text-xs text-gray-300 font-medium py-4 text-center">No history yet</p>}
+                )
+              })}
+              {filteredInteractions.length === 0 && (
+                <p className="text-xs text-gray-300 font-medium py-4 text-center">
+                  {historyFilter === 'all' ? 'No history yet' : `No ${historyFilter} entries yet`}
+                </p>
+              )}
             </div>
           </div>
         </div>

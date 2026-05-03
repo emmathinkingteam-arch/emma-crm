@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Bell, X, CheckCircle2, Clock, AlertTriangle, ChevronRight, Wallet } from 'lucide-react'
+import { Bell, X, CheckCircle2, Clock, AlertTriangle, Wallet } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Task } from '@/types'
@@ -11,6 +11,7 @@ export default function TopNav() {
   const { user } = useAuthStore()
   const [tasks, setTasks] = useState<Task[]>([])
   const [notifOpen, setNotifOpen] = useState(false)
+  const [imgTs, setImgTs] = useState(Date.now())
 
   useEffect(() => {
     if (!user) return
@@ -21,6 +22,9 @@ export default function TopNav() {
       .order('deadline', { ascending: true })
       .then(({ data }) => { if (data) setTasks(data as Task[]) })
   }, [user])
+
+  // Refresh avatar when profile_photo_url changes
+  useEffect(() => { setImgTs(Date.now()) }, [user?.profile_photo_url])
 
   const activeTasks = tasks.filter((t) => t.status !== 'done')
 
@@ -55,9 +59,17 @@ export default function TopNav() {
             )}
           </button>
 
-          {/* Avatar */}
-          <div className="w-8 h-8 rounded-full bg-pink-600 flex items-center justify-center text-white text-xs font-bold border-2 border-white shadow-sm">
-            {user?.full_name?.[0] ?? 'U'}
+          {/* Avatar — shows profile photo if uploaded */}
+          <div className="w-8 h-8 rounded-full bg-pink-600 flex items-center justify-center overflow-hidden border-2 border-white shadow-sm flex-shrink-0">
+            {user?.profile_photo_url ? (
+              <img
+                src={`${user.profile_photo_url}?t=${imgTs}`}
+                alt={user.full_name}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <span className="text-white text-xs font-bold">{user?.full_name?.[0] ?? 'U'}</span>
+            )}
           </div>
         </div>
       </div>
@@ -111,7 +123,7 @@ export default function TopNav() {
                           <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${isDone ? 'bg-green-50' : isUrgent || isOverdue ? 'bg-red-50' : 'bg-pink-50'}`}>
                             {isDone ? <CheckCircle2 size={16} className="text-green-500" />
                               : isUrgent || isOverdue ? <AlertTriangle size={16} className="text-red-400" />
-                              : <Clock size={16} className="text-pink-600" />}
+                                : <Clock size={16} className="text-pink-600" />}
                           </div>
                           <p className="text-xs font-bold text-gray-800 leading-tight">{task.title}</p>
                         </div>

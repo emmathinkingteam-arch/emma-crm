@@ -1,26 +1,50 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import { Customer } from '@/types'
-import { Search, Phone, ChevronRight, Loader2, Star, CalendarDays } from 'lucide-react'
+import { Search, Phone, ChevronRight, Loader2, Star, CalendarDays, CreditCard } from 'lucide-react'
 import Link from 'next/link'
+
+type NoteFilter = 'all' | 'package_sent' | 'bank_sent' | 'will_buy_on'
+
+interface EnrichedCustomer extends Customer {
+  packageSent: boolean
+  bankSent: boolean
+  willBuyOnDate: string | null   // YYYY-MM-DD or null
+  installmentPending: boolean
+}
+
+function parseWillBuyDate(description: string): string | null {
+  const m = description.match(/will buy on (\d{4}-\d{2}-\d{2})/i)
+  return m ? m[1] : null
+}
+
+function isToday(dateStr: string | null): boolean {
+  if (!dateStr) return false
+  const today = new Date().toISOString().split('T')[0]
+  return dateStr === today
+}
+
+function isPastOrToday(dateStr: string | null): boolean {
+  if (!dateStr) return false
+  return dateStr <= new Date().toISOString().split('T')[0]
+}
 
 export default function CustomersPage() {
   const { user, role } = useAuthStore()
-  const [customers, setCustomers] = useState<Customer[]>([])
+  const [customers, setCustomers] = useState<EnrichedCustomer[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
-  const [filterDate, setFilterDate] = useState<string>(new Date().toISOString().split('T')[0]) // today
+  const [filterDate, setFilterDate] = useState<string>(new Date().toISOString().split('T')[0])
   const [showAllDates, setShowAllDates] = useState(false)
+  const [noteFilter, setNoteFilter] = useState<NoteFilter>('all')
 
-  useEffect(() => {
-    fetchCustomers()
-  }, [user])
+  useEffect(() => { fetchCustomers() }, [user])
 
   const fetchCustomers = async () => {
     if (!user) return
@@ -36,43 +60,108 @@ export default function CustomersPage() {
       query = query.eq('created_by', user.id)
     }
 
-    const { data } = await query
-    if (data) setCustomers(data as any)
+    const { data: custData } = await query
+    if (!custData) { setLoading(false); return }
+
+    const customerIds = custData.map((c: any) => c.id)
+
+    // Fetch all interactions to detect note types
+    const { data: interactionsData } = await supabase
+      .from('interactions')
+      .select('customer_id, description, created_at')
+      .in('customer_id', customerIds)
+      .order('created_at', { ascending: false })
+
+    // Fetch active orders to detect installment status
+    const { data: ordersData } = await supabase
+      .from('orders')
+      .select('customer_id, installment_status')
+      .in('customer_id', customerIds)
+      .eq('status', 'active')
+
+    // Build note map per customer
+    const noteMap = new Map<string, {
+      packageSent: boolean
+      bankSent: boolean
+      willBuyOnDate: string | null
+    }>()
+
+    interactionsData?.forEach((i: any) => {
+      if (!noteMap.has(i.customer_id)) {
+        noteMap.set(i.customer_id, { packageSent: false, bankSent: false, willBuyOnDate: null })
+      }
+      const entry = noteMap.get(i.customer_id)!
+      const desc = (i.description || '').toLowerCase()
+      if (desc.includes('package details sent')) entry.packageSent = true
+      if (desc.includes('bank details sent')) entry.bankSent = true
+      const buyDate = parseWillBuyDate(i.description || '')
+      if (buyDate && !entry.willBuyOnDate) entry.willBuyOnDate = buyDate
+    })
+
+    // Build installment map
+    const installmentMap = new Map<string, boolean>()
+    ordersData?.forEach((o: any) => {
+      if (o.installment_status === 'partial') installmentMap.set(o.customer_id, true)
+    })
+
+    const enriched: EnrichedCustomer[] = custData.map((c: any) => ({
+      ...c,
+      packageSent: noteMap.get(c.id)?.packageSent ?? false,
+      bankSent: noteMap.get(c.id)?.bankSent ?? false,
+      willBuyOnDate: noteMap.get(c.id)?.willBuyOnDate ?? null,
+      installmentPending: installmentMap.get(c.id) ?? false,
+    }))
+
+    setCustomers(enriched)
     setLoading(false)
   }
 
-  // Filter logic:
-  // Priority leads always show regardless of date
-  // Non-priority: show only entries from selected date (default today), unless showAllDates
-  const filtered = customers.filter(c => {
-    const matchesSearch =
-      c.phone.includes(search) ||
-      (c.name?.toLowerCase() || '').includes(search.toLowerCase())
+  // ── Filtered list ──────────────────────────────────────────
+  const filtered = useMemo(() => {
+    return customers.filter(c => {
+      const matchesSearch =
+        c.phone.includes(search) ||
+        (c.name?.toLowerCase() || '').includes(search.toLowerCase())
+      if (!matchesSearch) return false
 
-    if (!matchesSearch) return false
+      // Note filter — overrides date filter when active
+      if (noteFilter === 'package_sent') return c.packageSent
+      if (noteFilter === 'bank_sent') return c.bankSent
+      if (noteFilter === 'will_buy_on') return !!c.willBuyOnDate
 
-    // Priority customers always visible
-    if (c.is_priority) return true
+      // Default: priority always shows, else date filter
+      if (c.is_priority) return true
+      if (search.trim()) return true
+      if (showAllDates) return true
+      return c.created_at.split('T')[0] === filterDate
+    })
+  }, [customers, search, noteFilter, showAllDates, filterDate])
 
-    // If searching, show all
-    if (search.trim()) return true
+  // Sort: will-buy-on overdue → installment → priority → rest
+  const sorted = useMemo(() => {
+    return [...filtered].sort((a, b) => {
+      const rank = (c: EnrichedCustomer) => {
+        if (isPastOrToday(c.willBuyOnDate)) return 0
+        if (c.installmentPending) return 1
+        if (c.is_priority) return 2
+        return 3
+      }
+      return rank(a) - rank(b)
+    })
+  }, [filtered])
 
-    // Date filter
-    if (showAllDates) return true
-
-    const entryDate = c.created_at.split('T')[0]
-    return entryDate === filterDate
-  })
-
-  // Sort: priority on top
-  const sorted = [...filtered].sort((a, b) => {
-    if (a.is_priority && !b.is_priority) return -1
-    if (!a.is_priority && b.is_priority) return 1
-    return 0
-  })
-
-  const priorityCount = sorted.filter(c => c.is_priority).length
+  const priorityCount = customers.filter(c => c.is_priority).length
+  const installmentCount = customers.filter(c => c.installmentPending).length
+  const willBuyTodayCount = customers.filter(c => isPastOrToday(c.willBuyOnDate)).length
   const todayCount = customers.filter(c => !c.is_priority && c.created_at.split('T')[0] === filterDate).length
+
+  // Filter button counts
+  const NOTE_FILTERS: { key: NoteFilter; label: string; count: number }[] = [
+    { key: 'all', label: 'All', count: customers.length },
+    { key: 'package_sent', label: 'Package Details Sent', count: customers.filter(c => c.packageSent).length },
+    { key: 'bank_sent', label: 'Bank Details Sent', count: customers.filter(c => c.bankSent).length },
+    { key: 'will_buy_on', label: 'Will Buy On Date', count: customers.filter(c => !!c.willBuyOnDate).length },
+  ]
 
   return (
     <div className="h-screen flex flex-col bg-white overflow-hidden">
@@ -91,8 +180,27 @@ export default function CustomersPage() {
           />
         </div>
 
-        {/* Date filter row */}
-        {!search && (
+        {/* Note type filter buttons */}
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {NOTE_FILTERS.map(f => (
+            <button
+              key={f.key}
+              onClick={() => setNoteFilter(f.key)}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-[9px] font-bold transition-all ${noteFilter === f.key
+                ? 'bg-pink-600 text-white shadow-sm'
+                : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                }`}
+            >
+              {f.label}
+              <span className={`px-1.5 py-0.5 rounded-full text-[8px] ${noteFilter === f.key ? 'bg-white/25' : 'bg-white text-gray-400'}`}>
+                {f.count}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {/* Date filter — only when no note filter active */}
+        {noteFilter === 'all' && !search && (
           <div className="flex items-center gap-2 mb-4">
             <button
               onClick={() => { setShowAllDates(false); setFilterDate(new Date().toISOString().split('T')[0]) }}
@@ -118,8 +226,24 @@ export default function CustomersPage() {
           </div>
         )}
 
-        {/* Priority banner */}
-        {priorityCount > 0 && !search && (
+        {/* Alert strips */}
+        {willBuyTodayCount > 0 && noteFilter === 'all' && !search && (
+          <div className="bg-red-50 border border-red-100 rounded-2xl px-3 py-2 mb-2 flex items-center gap-2">
+            <Star size={11} className="text-red-500 fill-red-500 flex-shrink-0" />
+            <p className="text-[10px] font-bold text-red-600">
+              {willBuyTodayCount} customer{willBuyTodayCount > 1 ? 's' : ''} due to buy today or overdue
+            </p>
+          </div>
+        )}
+        {installmentCount > 0 && noteFilter === 'all' && !search && (
+          <div className="bg-amber-50 border border-amber-100 rounded-2xl px-3 py-2 mb-2 flex items-center gap-2">
+            <CreditCard size={11} className="text-amber-500 flex-shrink-0" />
+            <p className="text-[10px] font-bold text-amber-600">
+              {installmentCount} pending 2nd installment
+            </p>
+          </div>
+        )}
+        {priorityCount > 0 && noteFilter === 'all' && !search && (
           <div className="bg-red-50 border border-red-100 rounded-2xl px-3 py-2 mb-3 flex items-center gap-2">
             <Star size={11} className="text-red-500 fill-red-500 flex-shrink-0" />
             <p className="text-[10px] font-bold text-red-600">{priorityCount} priority lead{priorityCount > 1 ? 's' : ''} pinned at top</p>
@@ -141,9 +265,9 @@ export default function CustomersPage() {
           <div className="text-center py-16">
             <Phone size={28} className="text-gray-200 mx-auto mb-2" />
             <p className="text-xs font-bold text-gray-400">
-              {search ? 'No customers found' : 'No entries for this date'}
+              {search ? 'No customers found' : noteFilter !== 'all' ? 'No customers match this filter' : 'No entries for this date'}
             </p>
-            {!search && !showAllDates && (
+            {!search && noteFilter === 'all' && !showAllDates && (
               <button onClick={() => setShowAllDates(true)} className="mt-2 text-pink-600 text-[10px] font-bold underline underline-offset-2">
                 Show all entries
               </button>
@@ -151,35 +275,95 @@ export default function CustomersPage() {
           </div>
         ) : (
           <div className="space-y-2">
-            {sorted.map(c => (
-              <Link
-                key={c.id}
-                href={`/dashboard/customers/${c.id}`}
-                className={`flex items-center gap-3 rounded-2xl p-4 shadow-sm active:scale-[0.98] transition-all border ${c.is_priority
-                  ? 'bg-red-50 border-red-200'
-                  : 'bg-white border-gray-100'
-                  }`}
-              >
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${c.is_priority ? 'bg-red-100' : 'bg-pink-50'}`}>
-                  {c.is_priority
-                    ? <Star size={16} className="text-red-500 fill-red-500" />
-                    : <Phone size={16} className="text-pink-400" />
-                  }
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <p className={`text-xs font-bold truncate ${c.is_priority ? 'text-red-700' : 'text-gray-800'}`}>
-                      {c.name || c.phone}
-                    </p>
+            {sorted.map(c => {
+              const isWillBuyToday = isPastOrToday(c.willBuyOnDate)
+              const isInstallment = c.installmentPending
+              const isPriorityOnly = c.is_priority && !isWillBuyToday && !isInstallment
+
+              let cardBg = 'bg-white border-gray-100'
+              let iconBg = 'bg-pink-50'
+              let iconEl = <Phone size={16} className="text-pink-400" />
+              let nameColor = 'text-gray-800'
+              let subColor = 'text-gray-400'
+              let badge: JSX.Element | null = null
+
+              if (isWillBuyToday) {
+                cardBg = 'bg-red-50 border-red-200'
+                iconBg = 'bg-red-100'
+                iconEl = <Star size={16} className="text-red-500 fill-red-500" />
+                nameColor = 'text-red-700'
+                subColor = 'text-red-400'
+                badge = (
+                  <span className="text-[8px] font-bold bg-red-500 text-white px-2 py-0.5 rounded-full uppercase">
+                    {isToday(c.willBuyOnDate) ? 'Buy Today' : `Due ${c.willBuyOnDate}`}
+                  </span>
+                )
+              } else if (isInstallment) {
+                cardBg = 'bg-amber-50 border-amber-200'
+                iconBg = 'bg-amber-100'
+                iconEl = <CreditCard size={16} className="text-amber-500" />
+                nameColor = 'text-amber-800'
+                subColor = 'text-amber-500'
+                badge = (
+                  <span className="text-[8px] font-bold bg-amber-400 text-white px-2 py-0.5 rounded-full uppercase">
+                    Installment
+                  </span>
+                )
+              } else if (isPriorityOnly) {
+                cardBg = 'bg-red-50 border-red-200'
+                iconBg = 'bg-red-100'
+                iconEl = <Star size={16} className="text-red-500 fill-red-500" />
+                nameColor = 'text-red-700'
+                subColor = 'text-red-400'
+                badge = (
+                  <span className="text-[8px] font-bold bg-red-100 text-red-500 px-1.5 py-0.5 rounded-full uppercase">Priority</span>
+                )
+              }
+
+              return (
+                <Link
+                  key={c.id}
+                  href={`/dashboard/customers/${c.id}`}
+                  className={`flex items-center gap-3 rounded-2xl p-4 shadow-sm active:scale-[0.98] transition-all border ${cardBg}`}
+                >
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${iconBg}`}>
+                    {iconEl}
                   </div>
-                  <p className={`text-[9px] font-medium ${c.is_priority ? 'text-red-400' : 'text-gray-400'}`}>
-                    {c.name ? c.phone : new Date(c.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    {c.is_priority && <span className="ml-1.5 bg-red-100 text-red-500 px-1.5 py-0.5 rounded-full text-[8px] font-bold uppercase">Priority</span>}
-                  </p>
-                </div>
-                <ChevronRight size={14} className={c.is_priority ? 'text-red-300' : 'text-gray-300'} />
-              </Link>
-            ))}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className={`text-xs font-bold truncate ${nameColor}`}>
+                        {c.name || c.phone}
+                      </p>
+                      {badge}
+                    </div>
+                    <p className={`text-[9px] font-medium ${subColor}`}>
+                      {c.name ? c.phone : new Date(c.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                    {/* Note type indicators */}
+                    {(c.packageSent || c.bankSent) && (
+                      <div className="flex gap-1 mt-1 flex-wrap">
+                        {c.packageSent && (
+                          <span className="text-[8px] font-bold bg-blue-50 text-blue-500 px-1.5 py-0.5 rounded-full border border-blue-100">
+                            Pkg Sent
+                          </span>
+                        )}
+                        {c.bankSent && (
+                          <span className="text-[8px] font-bold bg-green-50 text-green-500 px-1.5 py-0.5 rounded-full border border-green-100">
+                            Bank Sent
+                          </span>
+                        )}
+                        {c.willBuyOnDate && !isWillBuyToday && (
+                          <span className="text-[8px] font-bold bg-amber-50 text-amber-500 px-1.5 py-0.5 rounded-full border border-amber-100">
+                            Buying {c.willBuyOnDate}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <ChevronRight size={14} className={isWillBuyToday ? 'text-red-300' : isInstallment ? 'text-amber-300' : 'text-gray-300'} />
+                </Link>
+              )
+            })}
           </div>
         )}
       </div>

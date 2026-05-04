@@ -8,7 +8,8 @@ import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import {
   Loader2, ArrowLeft, Star, Phone, MessageCircle, PhoneCall,
-  ThumbsUp, ShoppingCart, Lock, Upload, CheckCircle, ExternalLink, Filter
+  ThumbsUp, ShoppingCart, Lock, Upload, CheckCircle, ExternalLink, Filter,
+  CreditCard, AlertCircle
 } from 'lucide-react'
 import { Customer, Order, OrderStep, Interaction, Package as Pkg, MONTH_CODES } from '@/types'
 import { fmtDate, fmtTime, buildWaLink, WA } from '@/lib/utils'
@@ -17,12 +18,11 @@ const SLOT_LABELS: Record<string, string> = { W: '6:30am', X: '11:30am', Y: '3:3
 const SLOTS = ['W', 'X', 'Y', 'Z'] as const
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
-// Deadlines set at step CREATION (from transfer time, not accept time)
 const STEP_DEADLINE_HOURS: Record<number, number | null> = {
-  3: 4,    // Back Office: 4 hours from CRM transfer
-  4: 48,   // Counselor: 2 days from Back Office transfer
-  5: 6,    // Manager: 6 hours from Counselor transfer
-  6: null, // Designer: no deadline
+  3: 4,
+  4: 48,
+  5: 6,
+  6: null,
 }
 
 const DISCOUNT_OPTIONS = [
@@ -70,6 +70,7 @@ export default function CustomerDetailPage() {
 
   // Order creation
   const [showOrderForm, setShowOrderForm] = useState(false)
+  const [agentName, setAgentName] = useState('')
   const [selectedPkg, setSelectedPkg] = useState('')
   const [discount, setDiscount] = useState(0)
   const [amountPaid, setAmountPaid] = useState('')
@@ -82,6 +83,16 @@ export default function CustomerDetailPage() {
   const [invoiceUrl, setInvoiceUrl] = useState('')
   const [orderTimer, setOrderTimer] = useState(600)
   const [timerActive, setTimerActive] = useState(false)
+
+  // Installment
+  const [installmentType, setInstallmentType] = useState<'full' | 'installment'>('full')
+  const [installment1Amount, setInstallment1Amount] = useState('')
+
+  // 2nd installment payment
+  const [show2ndInstallment, setShow2ndInstallment] = useState(false)
+  const [slip2File, setSlip2File] = useState<File | null>(null)
+  const [slip2Url, setSlip2Url] = useState('')
+  const [slip2Uploading, setSlip2Uploading] = useState(false)
 
   // Extension
   const [showExtend, setShowExtend] = useState(false)
@@ -134,80 +145,25 @@ export default function CustomerDetailPage() {
     : ''
   const needsSlip = paymentType === 'bank_transfer' || paymentType === 'genie'
 
+  const inst1Num = parseFloat(installment1Amount) || 0
+  const inst2Num = discountedPrice > 0 && inst1Num > 0 ? discountedPrice - inst1Num : 0
+
   useEffect(() => {
     if (selectedPkgObj) setAmountPaid(String(discountedPrice))
   }, [selectedPkg, discount])
 
-  const fetchCalendarSlots = async () => {
-    const { data } = await supabase
-      .from('calendar_slots')
-      .select('slot_date, slot_time')
-      .gte('slot_date', calendarDates[0])
-      .lte('slot_date', calendarDates[calendarDates.length - 1])
-    if (data) {
-      const taken: Record<string, boolean> = {}
-      data.forEach((s: any) => { taken[`${s.slot_date}-${s.slot_time}`] = true })
-      setTakenSlots(taken)
-    }
-  }
-
-  const fetchAll = async () => {
-    setLoading(true)
-    const [custRes, ordersRes, interactionsRes, pkgsRes, workersRes] = await Promise.all([
-      supabase.from('customers').select('*').eq('id', id).single(),
-      supabase.from('orders').select('*, package:packages(*)').eq('customer_id', id).order('created_at', { ascending: false }),
-      supabase.from('interactions').select('*, created_by_user:users!created_by(full_name)').eq('customer_id', id).order('created_at', { ascending: false }),
-      supabase.from('packages').select('*').eq('is_active', true).order('price'),
-      supabase.from('users').select('id, full_name, role, meeting_link').in('role', ['back_office', 'counselor', 'manager', 'designer']).eq('is_active', true),
-    ])
-
-    if (custRes.data) setCustomer(custRes.data)
-    if (workersRes.data) setWorkers(workersRes.data)
-    if (ordersRes.data) {
-      const active = (ordersRes.data as any[]).find((o: Order) => o.status === 'active')
-      if (active) {
-        setActiveOrder(active)
-        const { data: creatorData } = await supabase.from('users').select('agent_code, full_name').eq('id', active.created_by).single()
-        if (creatorData) setOrderCreator(creatorData)
-        const { data: stepData } = await supabase
-          .from('order_steps')
-          .select('*, assigned_user:users!assigned_to(full_name, role, meeting_link)')
-          .eq('order_id', active.id)
-          .in('status', ['pending', 'in_progress'])
-          .order('step_number', { ascending: false })
-          .limit(1)
-          .single()
-        if (stepData) {
-          setActiveStep(stepData as any)
-          if (stepData.description) setBrief(stepData.description)
-        } else {
-          setActiveStep(null)
-        }
-      } else {
-        setActiveOrder(null)
-        setActiveStep(null)
-      }
-    }
-    if (interactionsRes.data) setInteractions(interactionsRes.data as any)
-    if (pkgsRes.data) setPackages(pkgsRes.data)
-    setLoading(false)
-  }
-
-  const logAction = async (description: string, type: 'order' | 'message' | 'call' | 'feedback' = 'order') => {
-    if (!user || !id) return
-    await supabase.from('interactions').insert({
-      customer_id: id,   // use URL param directly — never null, no state dependency
-      type,
-      description,
-      created_by: user.id,
-    })
-  }
-
+  // Auto-fill agent name from logged-in user when form opens
   const openOrderTab = () => {
     setShowOrderForm(true); setTimerActive(true); setOrderTimer(600)
     setSlipFile(null); setSlipUrl(''); setInvoiceUrl('')
     setDiscount(0); setActualReceived(''); setKokoId('')
     setSelectedPkg(''); setAmountPaid(''); setSelectedAssignee('')
+    setInstallmentType('full'); setInstallment1Amount('')
+    // Pre-fill agent name with logged-in user's name
+    if (!agentName && user) {
+      supabase.from('users').select('full_name').eq('id', user.id).single()
+        .then(({ data }) => { if (data?.full_name) setAgentName(data.full_name) })
+    }
   }
 
   const fmtTimer = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
@@ -246,6 +202,7 @@ export default function CustomerDetailPage() {
   const stepAccepted = activeStep?.status === 'in_progress'
   const isActiveStep = canAct()
   const countdown = activeStep ? getCountdown(activeStep.deadline, activeStep.extended_deadline) : null
+  const isInstallmentPending = (activeOrder as any)?.installment_status === 'partial'
 
   // Upload payment slip
   const handleSlipUpload = async (file: File): Promise<string> => {
@@ -259,7 +216,17 @@ export default function CustomerDetailPage() {
     return publicUrl
   }
 
-  // Accept step — just mark in_progress, deadline already set at step creation
+  const handleSlip2Upload = async (file: File): Promise<string> => {
+    setSlip2Uploading(true)
+    const ext = file.name.split('.').pop()
+    const path = `slips/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+    await supabase.storage.from('invoices').upload(path, file, { upsert: true })
+    const { data: { publicUrl } } = supabase.storage.from('invoices').getPublicUrl(path)
+    setSlip2Url(publicUrl)
+    setSlip2Uploading(false)
+    return publicUrl
+  }
+
   const doAccept = async () => {
     if (!activeStep) return
     setActionLoading(true)
@@ -278,7 +245,6 @@ export default function CustomerDetailPage() {
     setActionLoading(false)
   }
 
-  // Complete step and create next — deadline set HERE at transfer time
   const doComplete = async (
     nextStep: number,
     data?: Partial<OrderStep>,
@@ -298,7 +264,7 @@ export default function CustomerDetailPage() {
     await supabase.from('orders').update({ current_step: nextStep }).eq('id', activeOrder.id)
 
     if (nextStep <= 6) {
-      const deadline = makeDeadline(nextStep) // set from transfer time
+      const deadline = makeDeadline(nextStep)
       await supabase.from('order_steps').insert({
         order_id: activeOrder.id,
         step_number: nextStep,
@@ -392,6 +358,33 @@ export default function CustomerDetailPage() {
     await fetchAll()
   }
 
+  // ── Pay 2nd installment ────────────────────────────────────
+  const handlePay2ndInstallment = async () => {
+    if (!activeOrder || !user) return
+    setActionLoading(true)
+
+    let uploadedSlip2Url = slip2Url
+    if (slip2File && !slip2Url) {
+      uploadedSlip2Url = await handleSlip2Upload(slip2File)
+    }
+
+    await supabase.from('orders').update({
+      installment_status: 'complete',
+      installment_2_slip_url: uploadedSlip2Url || null,
+      installment_2_paid_at: new Date().toISOString(),
+    }).eq('id', activeOrder.id)
+
+    const amt = (activeOrder as any).installment_2_amount
+    await logAction(
+      `2nd installment paid — LKR ${amt ? Number(amt).toLocaleString() : '?'}${uploadedSlip2Url ? ` | Slip uploaded` : ''}`
+    )
+
+    setShow2ndInstallment(false); setSlip2File(null); setSlip2Url('')
+    await fetchAll()
+    setActionLoading(false)
+  }
+
+  // ── Create Order ───────────────────────────────────────────
   const handleCreateOrder = async () => {
     if (!selectedPkg || !amountPaid || !user || !customer) return
     setActionLoading(true)
@@ -408,6 +401,8 @@ export default function CustomerDetailPage() {
     const paymentLabel = paymentType === 'bank_transfer' ? 'Bank Transfer' : paymentType === 'genie' ? 'Genie' : 'KOKO'
     const kokoNote = paymentType === 'koko' && kokoId ? ` | KOKO ID: ${kokoId}` : ''
 
+    const isInstallment = installmentType === 'installment' && inst1Num > 0
+
     const { data: order } = await supabase.from('orders').insert({
       customer_id: customer.id,
       package_id: selectedPkg,
@@ -418,11 +413,14 @@ export default function CustomerDetailPage() {
       payment_type: paymentType,
       payment_slip_url: uploadedSlipUrl || null,
       created_by: user.id,
+      agent_name: agentName.trim() || null,
+      installment_status: isInstallment ? 'partial' : 'complete',
+      installment_1_amount: isInstallment ? inst1Num : null,
+      installment_2_amount: isInstallment ? inst2Num : null,
     }).select().single()
 
     if (!order) { setActionLoading(false); return }
 
-    // Create step 3 with deadline set from NOW (transfer time)
     const stepDeadline = makeDeadline(3)
     await supabase.from('order_steps').insert({
       order_id: order.id,
@@ -447,6 +445,10 @@ export default function CustomerDetailPage() {
           packageName: pkg?.name || '',
           finalAmount: finalAmountNum,
           discountPercent: discount,
+          agentName: agentName.trim() || null,
+          isInstallment,
+          installment1Amount: isInstallment ? inst1Num : null,
+          installment2Amount: isInstallment ? inst2Num : null,
         })
       })
       if (invRes.ok) {
@@ -478,11 +480,14 @@ export default function CustomerDetailPage() {
     // Log interactions
     const assignedWorker = workers.find(w => w.id === selectedAssignee)
     const invoiceNote = generatedInvoiceUrl ? ` | Invoice: ${generatedInvoiceUrl}` : ''
+    const installmentNote = isInstallment
+      ? ` | Installment: 1st LKR ${inst1Num.toLocaleString()}, remaining LKR ${inst2Num.toLocaleString()}`
+      : ''
     await supabase.from('interactions').insert([
       {
         customer_id: id,
         type: 'order',
-        description: `Order created: ${displayPkgName} — LKR ${finalAmountNum.toLocaleString()} (paid: LKR ${actualAmountNum.toLocaleString()}) via ${paymentLabel}${kokoNote}${invoiceNote}`,
+        description: `Order created: ${displayPkgName} — LKR ${finalAmountNum.toLocaleString()} (paid: LKR ${actualAmountNum.toLocaleString()}) via ${paymentLabel}${kokoNote}${installmentNote}${invoiceNote}`,
         created_by: user.id,
       },
       ...(selectedAssignee ? [{
@@ -496,6 +501,71 @@ export default function CustomerDetailPage() {
     setShowOrderForm(false); setTimerActive(false); setSelectedAssignee('')
     await fetchAll()
     setActionLoading(false)
+  }
+
+  const fetchCalendarSlots = async () => {
+    const { data } = await supabase
+      .from('calendar_slots')
+      .select('slot_date, slot_time')
+      .gte('slot_date', calendarDates[0])
+      .lte('slot_date', calendarDates[calendarDates.length - 1])
+    if (data) {
+      const taken: Record<string, boolean> = {}
+      data.forEach((s: any) => { taken[`${s.slot_date}-${s.slot_time}`] = true })
+      setTakenSlots(taken)
+    }
+  }
+
+  const fetchAll = async () => {
+    setLoading(true)
+    const [custRes, ordersRes, interactionsRes, pkgsRes, workersRes] = await Promise.all([
+      supabase.from('customers').select('*').eq('id', id).single(),
+      supabase.from('orders').select('*, package:packages(*)').eq('customer_id', id).order('created_at', { ascending: false }),
+      supabase.from('interactions').select('*, created_by_user:users!created_by(full_name)').eq('customer_id', id).order('created_at', { ascending: false }),
+      supabase.from('packages').select('*').eq('is_active', true).order('price'),
+      supabase.from('users').select('id, full_name, role, meeting_link').in('role', ['back_office', 'counselor', 'manager', 'designer']).eq('is_active', true),
+    ])
+
+    if (custRes.data) setCustomer(custRes.data)
+    if (workersRes.data) setWorkers(workersRes.data)
+    if (ordersRes.data) {
+      const active = (ordersRes.data as any[]).find((o: Order) => o.status === 'active')
+      if (active) {
+        setActiveOrder(active)
+        const { data: creatorData } = await supabase.from('users').select('agent_code, full_name').eq('id', active.created_by).single()
+        if (creatorData) setOrderCreator(creatorData)
+        const { data: stepData } = await supabase
+          .from('order_steps')
+          .select('*, assigned_user:users!assigned_to(full_name, role, meeting_link)')
+          .eq('order_id', active.id)
+          .in('status', ['pending', 'in_progress'])
+          .order('step_number', { ascending: false })
+          .limit(1)
+          .single()
+        if (stepData) {
+          setActiveStep(stepData as any)
+          if (stepData.description) setBrief(stepData.description)
+        } else {
+          setActiveStep(null)
+        }
+      } else {
+        setActiveOrder(null)
+        setActiveStep(null)
+      }
+    }
+    if (interactionsRes.data) setInteractions(interactionsRes.data as any)
+    if (pkgsRes.data) setPackages(pkgsRes.data)
+    setLoading(false)
+  }
+
+  const logAction = async (description: string, type: 'order' | 'message' | 'call' | 'feedback' = 'order') => {
+    if (!user || !id) return
+    await supabase.from('interactions').insert({
+      customer_id: id,
+      type,
+      description,
+      created_by: user.id,
+    })
   }
 
   // History filter
@@ -555,6 +625,11 @@ export default function CustomerDetailPage() {
                 </span>
               ))}
               {isExpired && <span className="text-[8px] font-bold px-2.5 py-1 rounded-full bg-red-500 text-white">EXPIRED</span>}
+              {isInstallmentPending && (
+                <span className="text-[8px] font-bold px-2.5 py-1 rounded-full bg-amber-400 text-white flex items-center gap-1">
+                  <CreditCard size={8} /> Installment Pending
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -568,7 +643,72 @@ export default function CustomerDetailPage() {
             </div>
           )}
 
-          {/* STEP PANEL */}
+          {/* ── 2ND INSTALLMENT PAYMENT PANEL ─────────────── */}
+          {isInstallmentPending && (role === 'back_office' || role === 'admin' || role === 'crm_agent') && (
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl overflow-hidden">
+              <div className="px-4 py-3 bg-amber-100 flex items-center gap-2">
+                <CreditCard size={14} className="text-amber-600" />
+                <div>
+                  <p className="text-[9px] font-bold text-amber-700 uppercase tracking-wide">2nd Installment Pending</p>
+                  <p className="text-[8px] text-amber-600 font-medium">
+                    Balance due: LKR {Number((activeOrder as any)?.installment_2_amount || 0).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+              {!show2ndInstallment ? (
+                <div className="p-4">
+                  <div className="flex justify-between text-xs font-medium text-gray-600 mb-3">
+                    <span>1st paid:</span>
+                    <span>LKR {Number((activeOrder as any)?.installment_1_amount || 0).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between text-xs font-bold text-amber-700 pb-3 border-b border-amber-200 mb-3">
+                    <span>Remaining:</span>
+                    <span>LKR {Number((activeOrder as any)?.installment_2_amount || 0).toLocaleString()}</span>
+                  </div>
+                  <button onClick={() => setShow2ndInstallment(true)}
+                    className="w-full bg-amber-500 text-white rounded-xl py-3 text-xs font-bold">
+                    Mark 2nd Installment as Paid
+                  </button>
+                </div>
+              ) : (
+                <div className="p-4 space-y-3">
+                  {/* Slip upload */}
+                  {slip2Url ? (
+                    <div className="flex items-center gap-2 bg-green-50 border border-green-100 rounded-xl px-3 py-2.5">
+                      <CheckCircle size={14} className="text-green-500 flex-shrink-0" />
+                      <p className="text-xs font-semibold text-green-700 flex-1 truncate">Slip uploaded</p>
+                      <button onClick={() => { setSlip2File(null); setSlip2Url('') }} className="text-[9px] text-red-400 font-bold">Remove</button>
+                    </div>
+                  ) : (
+                    <label className="flex items-center gap-3 bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl px-4 py-3 cursor-pointer hover:border-amber-300 transition-all">
+                      {slip2Uploading ? <Loader2 size={16} className="animate-spin text-amber-400" /> : <Upload size={16} className="text-gray-400" />}
+                      <div>
+                        <p className="text-xs font-semibold text-gray-500">
+                          {slip2File ? slip2File.name : 'Upload 2nd payment slip'}
+                        </p>
+                        <p className="text-[9px] text-gray-400">PNG, JPG or PDF</p>
+                      </div>
+                      <input type="file" accept="image/*,.pdf" className="hidden"
+                        onChange={e => { const f = e.target.files?.[0]; if (f) { setSlip2File(f); setSlip2Url('') } }} />
+                    </label>
+                  )}
+                  <div className="flex gap-2">
+                    <button onClick={() => { setShow2ndInstallment(false); setSlip2File(null); setSlip2Url('') }}
+                      className="flex-1 border border-gray-200 text-gray-400 rounded-xl py-2.5 text-xs font-semibold">
+                      Cancel
+                    </button>
+                    <button onClick={handlePay2ndInstallment}
+                      disabled={actionLoading}
+                      className="flex-1 bg-amber-500 text-white rounded-xl py-2.5 text-xs font-bold disabled:opacity-40">
+                      {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Confirm Payment ✓'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── STEP PANEL ────────────────────────────────── */}
           {activeOrder && activeStep && !isExpired && (
             <div className={`border rounded-2xl overflow-hidden ${isActiveStep ? 'border-pink-200' : 'border-gray-100'}`}>
               <div className={`px-4 py-3 ${isActiveStep ? 'bg-pink-50' : 'bg-gray-50'}`}>
@@ -772,21 +912,39 @@ export default function CustomerDetailPage() {
                         <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1.5">Brief from counselor</p>
                         <p className="text-xs text-gray-700 font-medium leading-relaxed whitespace-pre-wrap">{activeStep.description || 'No brief provided'}</p>
                       </div>
-                      <div>
-                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign designer</label>
-                        <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
-                          className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
-                          <option value="">Select designer...</option>
-                          {workers.filter(w => w.role === 'designer').map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
-                        </select>
-                      </div>
-                      <button onClick={() => {
-                        const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'designer'
-                        doComplete(6, {}, selectedAssignee, `Manager approved — assigned to designer: ${name}`, activeStep.description || '')
-                      }} disabled={!selectedAssignee || actionLoading}
-                        className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
-                        {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Approve and assign to designer'}
-                      </button>
+
+                      {/* ── INSTALLMENT BLOCK ── */}
+                      {isInstallmentPending ? (
+                        <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 flex items-start gap-2">
+                          <Lock size={14} className="text-amber-600 mt-0.5 flex-shrink-0" />
+                          <div>
+                            <p className="text-xs font-bold text-amber-700">Designer step blocked</p>
+                            <p className="text-[9px] text-amber-600 font-medium mt-0.5">
+                              2nd installment of LKR {Number((activeOrder as any)?.installment_2_amount || 0).toLocaleString()} is still pending.
+                              Back office must confirm payment before you can assign the designer.
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div>
+                            <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign designer</label>
+                            <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
+                              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
+                              <option value="">Select designer...</option>
+                              {workers.filter(w => w.role === 'designer').map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
+                            </select>
+                          </div>
+                          <button onClick={() => {
+                            const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'designer'
+                            doComplete(6, {}, selectedAssignee, `Manager approved — assigned to designer: ${name}`, activeStep.description || '')
+                          }} disabled={!selectedAssignee || actionLoading}
+                            className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
+                            {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Approve and assign to designer'}
+                          </button>
+                        </>
+                      )}
+
                       <div className="border-t border-gray-100 pt-2">
                         {!showReject ? (
                           <button onClick={() => setShowReject(true)} className="w-full border border-red-100 text-red-400 rounded-xl px-4 py-2.5 text-xs font-semibold">
@@ -820,7 +978,7 @@ export default function CustomerDetailPage() {
                 </div>
               )}
 
-              {/* STEP 6 — Designer (no deadline) */}
+              {/* STEP 6 — Designer */}
               {isActiveStep && myStep === 6 && (
                 <div className="p-4 space-y-2">
                   {!stepAccepted && (
@@ -949,7 +1107,7 @@ export default function CustomerDetailPage() {
             </div>
           )}
 
-          {/* CREATE ORDER */}
+          {/* ── CREATE ORDER ──────────────────────────────── */}
           {role === 'crm_agent' && !activeOrder && (
             <div>
               {!showOrderForm ? (
@@ -967,6 +1125,22 @@ export default function CustomerDetailPage() {
                     <span className="text-xl font-bold text-red-500 font-mono">{fmtTimer(orderTimer)}</span>
                   </div>
                   <div className="p-4 space-y-3">
+
+                    {/* ── AGENT NAME ── */}
+                    <div>
+                      <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+                        Your name <span className="text-pink-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={agentName}
+                        onChange={e => setAgentName(e.target.value)}
+                        placeholder="Enter your name"
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none focus:border-pink-300"
+                      />
+                    </div>
+
+                    {/* ── PACKAGE ── */}
                     <div>
                       <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Package</label>
                       <select value={selectedPkg} onChange={e => { setSelectedPkg(e.target.value); setDiscount(0) }}
@@ -975,6 +1149,7 @@ export default function CustomerDetailPage() {
                         {packages.map(p => <option key={p.id} value={p.id}>{p.name} — LKR {p.price.toLocaleString()}</option>)}
                       </select>
                     </div>
+
                     {selectedPkg && (
                       <div>
                         <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Discount</label>
@@ -997,6 +1172,7 @@ export default function CustomerDetailPage() {
                         )}
                       </div>
                     )}
+
                     {selectedPkg && (
                       <div>
                         <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Amount paid (LKR)</label>
@@ -1004,16 +1180,19 @@ export default function CustomerDetailPage() {
                           className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none focus:border-pink-300" />
                       </div>
                     )}
+
                     {selectedPkg && (
                       <div>
                         <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1">
-                          Actual amount received <span className="text-gray-300 font-normal normal-case">(optional — if customer paid a different amount)</span>
+                          Actual amount received <span className="text-gray-300 font-normal normal-case">(if different from above)</span>
                         </label>
                         <input type="number" value={actualReceived} onChange={e => setActualReceived(e.target.value)}
                           placeholder="Leave blank if same as above"
                           className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none focus:border-pink-300" />
                       </div>
                     )}
+
+                    {/* ── PAYMENT METHOD ── */}
                     <div>
                       <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Payment method</label>
                       <div className="flex gap-2">
@@ -1029,6 +1208,64 @@ export default function CustomerDetailPage() {
                         ))}
                       </div>
                     </div>
+
+                    {/* ── PAYMENT TYPE: Full / Installment ── */}
+                    {selectedPkg && (
+                      <div>
+                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Payment type</label>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => { setInstallmentType('full'); setInstallment1Amount('') }}
+                            className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${installmentType === 'full' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                            Full Payment
+                          </button>
+                          <button
+                            onClick={() => setInstallmentType('installment')}
+                            className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${installmentType === 'installment' ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                            Installment
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── INSTALLMENT DETAILS ── */}
+                    {installmentType === 'installment' && selectedPkg && (
+                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
+                        <p className="text-[9px] font-bold text-amber-700 uppercase tracking-wide">Installment Details</p>
+                        <div>
+                          <label className="block text-[9px] text-gray-500 font-semibold mb-1">
+                            1st installment amount (LKR) <span className="text-pink-500">*</span>
+                          </label>
+                          <input
+                            type="number"
+                            value={installment1Amount}
+                            onChange={e => setInstallment1Amount(e.target.value)}
+                            placeholder="e.g. 5000"
+                            className="w-full bg-white border border-amber-200 rounded-lg px-3 py-2 text-xs font-medium outline-none focus:border-amber-400"
+                          />
+                        </div>
+                        {inst1Num > 0 && discountedPrice > 0 && (
+                          <div className="flex justify-between items-center pt-1 border-t border-amber-200">
+                            <div className="text-[9px] text-gray-500 space-y-0.5">
+                              <div>1st payment: <span className="font-bold text-gray-700">LKR {inst1Num.toLocaleString()}</span></div>
+                              <div>Package total: LKR {discountedPrice.toLocaleString()}</div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-[8px] text-gray-400">Remaining (2nd)</div>
+                              <div className="text-sm font-bold text-amber-700">LKR {inst2Num.toLocaleString()}</div>
+                            </div>
+                          </div>
+                        )}
+                        <div className="flex items-start gap-1.5 bg-amber-100 rounded-lg px-2.5 py-2">
+                          <AlertCircle size={11} className="text-amber-600 mt-0.5 flex-shrink-0" />
+                          <p className="text-[9px] text-amber-700 font-medium">
+                            Customer card shows <strong>orange</strong>. Designer step is <strong>blocked</strong> until 2nd installment is confirmed.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── SLIP ── */}
                     {needsSlip && (
                       <div>
                         <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
@@ -1055,6 +1292,8 @@ export default function CustomerDetailPage() {
                         )}
                       </div>
                     )}
+
+                    {/* ── KOKO ID ── */}
                     {paymentType === 'koko' && (
                       <div>
                         <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">KOKO Transaction ID</label>
@@ -1063,6 +1302,8 @@ export default function CustomerDetailPage() {
                           className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none focus:border-pink-300" />
                       </div>
                     )}
+
+                    {/* ── ASSIGN BACK OFFICE ── */}
                     <div>
                       <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign to back office</label>
                       <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
@@ -1071,8 +1312,17 @@ export default function CustomerDetailPage() {
                         {workers.filter(w => w.role === 'back_office').map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
                       </select>
                     </div>
+
                     <button onClick={handleCreateOrder}
-                      disabled={!selectedPkg || !amountPaid || (needsSlip && !slipFile && !slipUrl) || actionLoading}
+                      disabled={
+                        !selectedPkg ||
+                        !amountPaid ||
+                        !agentName.trim() ||
+                        (needsSlip && !slipFile && !slipUrl) ||
+                        (installmentType === 'installment' && inst1Num <= 0) ||
+                        (installmentType === 'installment' && inst1Num >= discountedPrice) ||
+                        actionLoading
+                      }
                       className="w-full bg-pink-600 text-white rounded-xl py-3 text-xs font-bold disabled:opacity-40 flex items-center justify-center gap-2">
                       {actionLoading ? <><Loader2 size={14} className="animate-spin" /> Processing...</> : 'Generate invoice + Submit'}
                     </button>
@@ -1088,7 +1338,7 @@ export default function CustomerDetailPage() {
             </div>
           )}
 
-          {/* HISTORY */}
+          {/* ── HISTORY ──────────────────────────────────── */}
           <div>
             <div className="flex items-center justify-between mb-3">
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">History</p>
@@ -1125,10 +1375,8 @@ export default function CustomerDetailPage() {
 
             <div className="border-l-2 border-pink-100 ml-3 pl-4 space-y-3 mt-3">
               {filteredInteractions.map(interaction => {
-                // Check if this interaction has an invoice link embedded
                 const invoiceLinkMatch = interaction.description.match(/Invoice: (https?:\/\/\S+)/)
                 const invoiceLink = invoiceLinkMatch ? invoiceLinkMatch[1] : null
-                // Clean description to show (remove the raw URL from display)
                 const cleanDescription = interaction.description.replace(/ \| Invoice: https?:\/\/\S+/, '')
 
                 return (

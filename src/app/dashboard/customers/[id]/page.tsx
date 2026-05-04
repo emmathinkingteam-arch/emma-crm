@@ -391,7 +391,7 @@ export default function CustomerDetailPage() {
 
     const pkg = packages.find(p => p.id === selectedPkg)
     const finalAmountNum = discountedPrice
-    const actualAmountNum = actualReceived ? Number(actualReceived) : finalAmountNum
+    const actualAmountNum = Number(amountPaid)
 
     let uploadedSlipUrl = slipUrl
     if (needsSlip && slipFile && !slipUrl) {
@@ -1177,17 +1177,6 @@ export default function CustomerDetailPage() {
                       <div>
                         <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Amount paid (LKR)</label>
                         <input type="number" value={amountPaid} onChange={e => setAmountPaid(e.target.value)}
-                          className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none focus:border-pink-300" />
-                      </div>
-                    )}
-
-                    {selectedPkg && (
-                      <div>
-                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1">
-                          Actual amount received <span className="text-gray-300 font-normal normal-case">(if different from above)</span>
-                        </label>
-                        <input type="number" value={actualReceived} onChange={e => setActualReceived(e.target.value)}
-                          placeholder="Leave blank if same as above"
                           className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none focus:border-pink-300" />
                       </div>
                     )}

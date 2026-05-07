@@ -1,5 +1,8 @@
 import { MONTH_CODES, TimeSlot } from '@/types'
 
+// ── KOKO service charge constant ─────────────────────────────
+export const KOKO_SERVICE_CHARGE_RATE = 0.1236 // 12.36%
+
 // ── Phone normalisation ──────────────────────────────────────
 // Converts any Sri Lankan format to international (94XXXXXXXXX)
 export function normalisePhone(phone: string, countryCode = '94'): string {
@@ -23,6 +26,9 @@ export const WA = {
 
   sendInvoice: (name: string, invoiceUrl: string) =>
     `Hi ${name},\n\nPlease find your invoice below for your reference.\n\n${invoiceUrl}\n\n---\n\nThis is your personal Relationship Manager.\n\nIf you have any questions or need assistance, please feel free to contact me at any time.\n\nEmma Thinking (Pvt) Ltd`,
+
+  send2ndInstallmentInvoice: (name: string, invoiceUrl: string) =>
+    `Hi ${name},\n\nPlease find your 2nd installment invoice below for your reference.\n\n${invoiceUrl}\n\n---\n\nThank you for completing your payment.\n\nEmma Thinking (Pvt) Ltd`,
 
   sessionStart: (name: string) =>
     `Hi ${name},\n\nYour counselling session has now started and I will be your personal counselor throughout this process.\n\nCould you please share your available dates and times so we can schedule our meeting at a time that suits you?\n\nLooking forward to speaking with you.\n\nEmma Thinking (Pvt) Ltd`,
@@ -121,23 +127,100 @@ export const ROLE_LABELS: Record<string, string> = {
   designer: 'Designer',
 }
 
+// ── LKR formatter ────────────────────────────────────────────
+function fmtLkr(n: number): string {
+  return Number(Math.round(n)).toLocaleString()
+}
+
 // ── Invoice HTML generator ────────────────────────────────────
-export function generateInvoiceHtml(params: {
+export interface InvoiceParams {
   invoiceNumber: string
   clientName: string
   clientNumber: string
-  paymentMethod: string
+  paymentMethod: string           // "Bank Transfer", "Genie", "KOKO"
+  bankName?: string               // "BOC", "Commercial Bank" etc. — only when bank transfer
   packageName: string
-  finalAmount: number
+  finalAmount: number             // For non-KOKO non-installment: actual amount paid (= line item & total)
+                                  // For KOKO: package amount (X). KOKO charge & total are derived.
+                                  // For installment: amount of THIS installment payment.
   discountPercent?: number
-}): string {
+  // KOKO breakdown
+  isKoko?: boolean                // when true, render Package + KOKO 12.36% charge + Total
+  // Installment info
+  installmentType?: '1st' | '2nd' | null
+  packageTotal?: number           // Full package price (after discount) — needed for installment context
+  otherInstallmentAmount?: number // For 1st invoice: 2nd installment amount (remaining). For 2nd invoice: 1st installment amount.
+}
+
+export function generateInvoiceHtml(params: InvoiceParams): string {
   const today = new Date().toLocaleDateString('en-GB', {
     day: '2-digit', month: 'long', year: 'numeric'
   })
-  const desc = params.discountPercent && params.discountPercent > 0
+
+  // ── Build description ─────────────────────────────────────
+  let desc = params.discountPercent && params.discountPercent > 0
     ? `${params.packageName} — ${params.discountPercent}% Discount`
     : `${params.packageName} — Profile Publishing & Ad Boost`
-  const amt = Number(params.finalAmount).toLocaleString()
+
+  if (params.installmentType === '1st') desc = `${params.packageName} — 1st Installment`
+  if (params.installmentType === '2nd') desc = `${params.packageName} — 2nd Installment (Final)`
+
+  // ── Build line items table ────────────────────────────────
+  let rowsHtml = ''
+  let total = 0
+
+  if (params.isKoko && !params.installmentType) {
+    // KOKO: 2 line items
+    const X = params.finalAmount
+    const charge = Math.round(X * KOKO_SERVICE_CHARGE_RATE)
+    total = X + charge
+    rowsHtml = `
+      <tr><td>${today}</td><td>${desc}</td><td style="text-align:right">LKR ${fmtLkr(X)}.00</td></tr>
+      <tr><td>${today}</td><td>KOKO 12.36% Service Charge</td><td style="text-align:right">LKR ${fmtLkr(charge)}.00</td></tr>
+    `
+  } else if (params.installmentType) {
+    // Installment: this payment's amount as the line item
+    total = params.finalAmount
+    rowsHtml = `
+      <tr><td>${today}</td><td>${desc}</td><td style="text-align:right">LKR ${fmtLkr(params.finalAmount)}.00</td></tr>
+    `
+  } else {
+    // Standard: single line
+    total = params.finalAmount
+    rowsHtml = `
+      <tr><td>${today}</td><td>${desc}</td><td style="text-align:right">LKR ${fmtLkr(params.finalAmount)}.00</td></tr>
+    `
+  }
+
+  // ── Installment summary block (under total) ───────────────
+  let installmentBlock = ''
+  if (params.installmentType && typeof params.packageTotal === 'number') {
+    if (params.installmentType === '1st') {
+      const remaining = params.otherInstallmentAmount ?? Math.max(0, params.packageTotal - params.finalAmount)
+      installmentBlock = `
+        <div class="inst">
+          <p><strong>Package Total:</strong> LKR ${fmtLkr(params.packageTotal)}.00</p>
+          <p><strong>Paid Now (1st Installment):</strong> LKR ${fmtLkr(params.finalAmount)}.00</p>
+          <p class="inst-due"><strong>Remaining Balance:</strong> LKR ${fmtLkr(remaining)}.00</p>
+        </div>
+      `
+    } else {
+      const firstPaid = params.otherInstallmentAmount ?? Math.max(0, params.packageTotal - params.finalAmount)
+      installmentBlock = `
+        <div class="inst inst-paid">
+          <p><strong>Package Total:</strong> LKR ${fmtLkr(params.packageTotal)}.00</p>
+          <p><strong>1st Installment Paid:</strong> LKR ${fmtLkr(firstPaid)}.00</p>
+          <p><strong>2nd Installment Paid Now:</strong> LKR ${fmtLkr(params.finalAmount)}.00</p>
+          <p class="inst-done"><strong>✓ Fully Paid</strong></p>
+        </div>
+      `
+    }
+  }
+
+  // ── Payment line in customer block ────────────────────────
+  const bankLine = params.bankName
+    ? `<p><strong>Bank :</strong> ${params.bankName}</p>`
+    : ''
 
   return `<!DOCTYPE html>
 <html>
@@ -155,6 +238,7 @@ body{font-family:Arial,sans-serif;font-size:13px;color:#222;background:#f5f5f5}
 .co-name{font-size:18px;font-weight:900}
 .co-addr{font-size:11px;color:#555;margin-top:4px}
 .inv-title{font-size:32px;font-weight:900}
+.inv-tag{display:inline-block;background:#EA1E63;color:#fff;font-size:10px;font-weight:900;padding:3px 8px;border-radius:4px;margin-left:6px;vertical-align:middle;letter-spacing:.5px}
 .two-col{display:flex;justify-content:space-between;margin-bottom:20px;gap:20px}
 .cust label{font-weight:700;font-size:14px;margin-bottom:6px;display:block}
 .cust p{font-size:12px;margin:3px 0}
@@ -162,8 +246,13 @@ body{font-family:Arial,sans-serif;font-size:13px;color:#222;background:#f5f5f5}
 .meta p{margin:3px 0}
 table{width:100%;border-collapse:collapse;margin:20px 0}
 th{font-weight:900;font-size:13px;padding:12px 8px;border-top:2px solid #222;border-bottom:1px solid #ccc;text-align:left}
-td{padding:16px 8px;font-size:12px;border-bottom:1px solid #eee}
-.total{border-top:2px solid #222;padding-top:12px;text-align:right;font-size:15px;font-weight:900;margin:8px 0 24px}
+td{padding:14px 8px;font-size:12px;border-bottom:1px solid #eee}
+.total{border-top:2px solid #222;padding-top:12px;text-align:right;font-size:15px;font-weight:900;margin:8px 0 12px}
+.inst{background:#FEF3C7;border:1px solid #FCD34D;border-radius:6px;padding:12px 14px;margin:8px 0 20px;font-size:12px}
+.inst p{margin:3px 0}
+.inst-due{color:#B45309;margin-top:6px !important;font-size:13px}
+.inst-paid{background:#D1FAE5;border-color:#6EE7B7}
+.inst-done{color:#047857;margin-top:6px !important;font-size:14px}
 .terms{font-size:10.5px;color:#333;line-height:1.7;margin-top:20px;border-top:1px solid #ccc;padding-top:16px}
 .terms h4{font-size:13px;font-weight:900;margin-bottom:8px}
 .thanks{text-align:center;margin-top:30px;font-size:15px;font-weight:900;color:#EA1E63;padding:20px}
@@ -175,7 +264,7 @@ td{padding:16px 8px;font-size:12px;border-bottom:1px solid #eee}
 <div class="page">
   <div class="header">
     <div><div class="co-name">EMMA THINKING (PVT) LTD</div><div class="co-addr">RP 578, Rajapakshapura, Seeduwa, SRI LANKA</div></div>
-    <div class="inv-title">Invoice</div>
+    <div class="inv-title">Invoice${params.installmentType ? `<span class="inv-tag">${params.installmentType.toUpperCase()} INSTALLMENT</span>` : ''}</div>
   </div>
   <div style="font-size:12px;border-bottom:1px solid #ccc;padding-bottom:12px;margin-bottom:18px"><strong>Mobile:</strong> 077 734 8733</div>
   <div class="two-col">
@@ -184,6 +273,7 @@ td{padding:16px 8px;font-size:12px;border-bottom:1px solid #eee}
       <p><strong>Name :</strong> ${params.clientName}</p>
       <p><strong>Mobile :</strong> ${params.clientNumber}</p>
       <p><strong>Payment :</strong> ${params.paymentMethod}</p>
+      ${bankLine}
     </div>
     <div class="meta">
       <p>Invoice No: <strong>${params.invoiceNumber}</strong></p>
@@ -193,9 +283,10 @@ td{padding:16px 8px;font-size:12px;border-bottom:1px solid #eee}
   </div>
   <table>
     <thead><tr><th>Date</th><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
-    <tbody><tr><td>${today}</td><td>${desc}</td><td style="text-align:right">LKR ${amt}.00</td></tr></tbody>
+    <tbody>${rowsHtml}</tbody>
   </table>
-  <div class="total">Total: LKR ${amt}.00</div>
+  <div class="total">Total: LKR ${fmtLkr(total)}.00</div>
+  ${installmentBlock}
   <div class="terms">
     <h4>Terms &amp; Conditions</h4>
     <p>1. Emma Thinking (Pvt) Ltd is a legally registered Sri Lankan matchmaking service provider.</p>

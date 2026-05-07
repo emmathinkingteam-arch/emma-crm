@@ -8,18 +8,7 @@ import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import { Loader2, ChevronRight, ClipboardCheck } from 'lucide-react'
 import { normalisePhone } from '@/lib/utils'
-
-const COUNTRY_CODES = [
-  { flag: '🇱🇰', code: 'LK', dial: '94', digits: 9 },
-  { flag: '🇦🇪', code: 'AE', dial: '971', digits: 9 },
-  { flag: '🇶🇦', code: 'QA', dial: '974', digits: 8 },
-  { flag: '🇦🇺', code: 'AU', dial: '61', digits: 9 },
-  { flag: '🇬🇧', code: 'GB', dial: '44', digits: 10 },
-  { flag: '🇺🇸', code: 'US', dial: '1', digits: 10 },
-  { flag: '🇴🇲', code: 'OM', dial: '968', digits: 8 },
-  { flag: '🇰🇼', code: 'KW', dial: '965', digits: 8 },
-  { flag: '🇯🇵', code: 'JP', dial: '81', digits: 10 },
-]
+import { COUNTRY_CODES, detectCountryFromPaste } from '@/lib/country-codes'
 
 export default function EntryPage() {
   const router = useRouter()
@@ -29,6 +18,7 @@ export default function EntryPage() {
   const [loading, setLoading] = useState(false)
   const [dailyCount, setDailyCount] = useState(0)
   const [pasted, setPasted] = useState(false)
+  const [detectedFlag, setDetectedFlag] = useState('')
 
   useEffect(() => {
     if (role && role !== 'crm_agent') {
@@ -51,24 +41,22 @@ export default function EntryPage() {
   const handleSmartPaste = async () => {
     try {
       const text = await navigator.clipboard.readText()
-      const digits = text.replace(/\D/g, '')
-      // Try to match country code
-      for (const cc of COUNTRY_CODES.sort((a, b) => b.dial.length - a.dial.length)) {
-        if (digits.startsWith(cc.dial)) {
-          const local = digits.slice(cc.dial.length)
-          if (local.length === cc.digits) {
-            setCountryDial(cc.dial)
-            setPhone(local)
-            setPasted(true)
-            setTimeout(() => setPasted(false), 2000)
-            return
-          }
-        }
+      const detected = detectCountryFromPaste(text)
+
+      if (detected) {
+        setCountryDial(detected.dial)
+        setPhone(detected.local)
+        const cc = COUNTRY_CODES.find(c => c.dial === detected.dial)
+        if (cc) setDetectedFlag(cc.flag)
+        setPasted(true)
+        setTimeout(() => { setPasted(false); setDetectedFlag('') }, 2500)
+        return
       }
-      // Fallback — take last 9 digits
-      const last9 = digits.slice(-9)
-      if (last9.length >= 7) {
-        setPhone(last9)
+
+      // Fallback — strip non-digits, drop leading zeros, take what's left
+      const digits = text.replace(/\D/g, '').replace(/^0+/, '')
+      if (digits.length >= 7) {
+        setPhone(digits)
         setPasted(true)
         setTimeout(() => setPasted(false), 2000)
       }
@@ -91,10 +79,8 @@ export default function EntryPage() {
       .single()
 
     if (existing) {
-      // Navigate to existing customer
       router.push(`/dashboard/customers/${existing.id}`)
     } else {
-      // Navigate to entry process with the phone number
       router.push(`/entry/process?phone=${fullPhone}`)
     }
 
@@ -114,7 +100,7 @@ export default function EntryPage() {
               <span className="text-2xl">📞</span>
             </div>
             <h1 className="text-xl font-bold text-gray-900 tracking-tight">New Job Entry</h1>
-            <p className="text-xs text-gray-400 font-medium mt-1">Enter or paste a customer phone number</p>
+            <p className="text-xs text-gray-400 font-medium mt-1">Paste from WhatsApp — auto-detects country</p>
           </div>
 
           {/* Input */}
@@ -122,10 +108,10 @@ export default function EntryPage() {
             <select
               value={countryDial}
               onChange={(e) => setCountryDial(e.target.value)}
-              className="bg-gray-50 border border-gray-200 rounded-2xl px-3 py-3 text-xs font-semibold outline-none flex-shrink-0"
+              className="bg-gray-50 border border-gray-200 rounded-2xl px-2 py-3 text-xs font-semibold outline-none flex-shrink-0 max-w-[120px]"
             >
               {COUNTRY_CODES.map((cc) => (
-                <option key={cc.code} value={cc.dial}>{cc.flag} +{cc.dial}</option>
+                <option key={`${cc.code}-${cc.dial}`} value={cc.dial}>{cc.flag} +{cc.dial} {cc.code}</option>
               ))}
             </select>
             <div className="relative flex-1">
@@ -138,15 +124,18 @@ export default function EntryPage() {
               />
               <button
                 onClick={handleSmartPaste}
+                title="Paste from clipboard"
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-pink-400"
               >
-                <ClipboardCheck size={18} className={pasted ? 'text-green-500' : ''} />
+                {pasted && detectedFlag
+                  ? <span className="text-base">{detectedFlag}</span>
+                  : <ClipboardCheck size={18} className={pasted ? 'text-green-500' : ''} />}
               </button>
             </div>
           </div>
 
           <div className="bg-pink-50 border border-pink-100 rounded-2xl px-4 py-3 mb-6 text-xs text-gray-500 font-medium">
-            If the number already exists in the system, it will open that customer's record automatically. No duplicates will be created.
+            Tap the paste icon — supports formats like <span className="font-bold text-gray-700">+94 76 259 8504</span>, <span className="font-bold text-gray-700">+39 366 936 8901</span>, <span className="font-bold text-gray-700">+971 55 787 6839</span>. Spaces and symbols are stripped automatically.
           </div>
 
           <button

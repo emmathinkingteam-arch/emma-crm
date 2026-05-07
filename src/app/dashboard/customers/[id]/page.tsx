@@ -9,10 +9,10 @@ import BottomNav from '@/components/shared/BottomNav'
 import {
   Loader2, ArrowLeft, Star, Phone, MessageCircle, PhoneCall,
   ThumbsUp, ShoppingCart, Lock, Upload, CheckCircle, ExternalLink, Filter,
-  CreditCard, AlertCircle
+  CreditCard, AlertCircle, Pencil, Receipt, Building2
 } from 'lucide-react'
 import { Customer, Order, OrderStep, Interaction, Package as Pkg, MONTH_CODES } from '@/types'
-import { fmtDate, fmtTime, buildWaLink, WA } from '@/lib/utils'
+import { fmtDate, fmtTime, buildWaLink, WA, KOKO_SERVICE_CHARGE_RATE } from '@/lib/utils'
 
 const SLOT_LABELS: Record<string, string> = { W: '6:30am', X: '11:30am', Y: '3:30pm', Z: '8:30pm' }
 const SLOTS = ['W', 'X', 'Y', 'Z'] as const
@@ -27,10 +27,28 @@ const STEP_DEADLINE_HOURS: Record<number, number | null> = {
 
 const DISCOUNT_OPTIONS = [
   { label: 'No discount', value: 0 },
-  { label: '10% off', value: 10 },
-  { label: '20% off', value: 20 },
-  { label: '30% off', value: 30 },
-  { label: '50% off', value: 50 },
+  { label: '10%', value: 10 },
+  { label: '20%', value: 20 },
+  { label: '30%', value: 30 },
+  { label: '50%', value: 50 },
+]
+
+// ── Sri Lankan banks (for bank transfer payments) ─────────────
+const BANKS = [
+  'BOC (Bank of Ceylon)',
+  'Commercial Bank',
+  'Peoples Bank',
+  'Sampath Bank',
+  'HNB (Hatton National Bank)',
+  'NSB (National Savings Bank)',
+  'NTB (Nations Trust Bank)',
+  'NDB (National Development Bank)',
+  'DFCC Bank',
+  'Seylan Bank',
+  'Pan Asia Bank',
+  'Union Bank',
+  'Cargills Bank',
+  'Other',
 ]
 
 type HistoryFilter = 'all' | 'order' | 'message' | 'call' | 'feedback'
@@ -70,19 +88,25 @@ export default function CustomerDetailPage() {
 
   // Order creation
   const [showOrderForm, setShowOrderForm] = useState(false)
-  const [agentName, setAgentName] = useState('')
+  const [orderCustomerName, setOrderCustomerName] = useState('')   // shown on invoice
   const [selectedPkg, setSelectedPkg] = useState('')
   const [discount, setDiscount] = useState(0)
-  const [amountPaid, setAmountPaid] = useState('')
-  const [actualReceived, setActualReceived] = useState('')
+  const [customDiscount, setCustomDiscount] = useState('')         // free-text % input
+  const [amountPaid, setAmountPaid] = useState('')                 // ACTUAL amount received
   const [paymentType, setPaymentType] = useState<'bank_transfer' | 'genie' | 'koko'>('bank_transfer')
+  const [bankName, setBankName] = useState('')                     // when bank transfer
   const [kokoId, setKokoId] = useState('')
   const [slipFile, setSlipFile] = useState<File | null>(null)
   const [slipUploading, setSlipUploading] = useState(false)
   const [slipUrl, setSlipUrl] = useState('')
   const [invoiceUrl, setInvoiceUrl] = useState('')
+  const [invoice2ndUrl, setInvoice2ndUrl] = useState('')
   const [orderTimer, setOrderTimer] = useState(600)
   const [timerActive, setTimerActive] = useState(false)
+
+  // Customer name inline edit (header)
+  const [editingName, setEditingName] = useState(false)
+  const [nameDraft, setNameDraft] = useState('')
 
   // Installment
   const [installmentType, setInstallmentType] = useState<'full' | 'installment'>('full')
@@ -147,23 +171,40 @@ export default function CustomerDetailPage() {
 
   const inst1Num = parseFloat(installment1Amount) || 0
   const inst2Num = discountedPrice > 0 && inst1Num > 0 ? discountedPrice - inst1Num : 0
+  const isInstallment = installmentType === 'installment' && inst1Num > 0
 
+  // Amount the customer actually paid us (or the 1st installment for installment orders)
+  const amountPaidNum = parseFloat(amountPaid) || 0
+
+  // KOKO breakdown — package amount X, charge X*12.36%, total X*1.1236
+  const isKoko = paymentType === 'koko'
+  const kokoChargeAmount = isKoko ? Math.round(discountedPrice * KOKO_SERVICE_CHARGE_RATE) : 0
+  const kokoTotal = isKoko ? discountedPrice + kokoChargeAmount : 0
+
+  // Auto-fill amount paid:
+  //  - KOKO: package + service charge (customer pays the total via KOKO)
+  //  - Installment: 1st installment amount
+  //  - Otherwise: discounted package price (user can override to actual received)
   useEffect(() => {
-    if (selectedPkgObj) setAmountPaid(String(discountedPrice))
-  }, [selectedPkg, discount])
+    if (!selectedPkgObj) return
+    if (isKoko) {
+      setAmountPaid(String(kokoTotal))
+    } else if (isInstallment) {
+      setAmountPaid(String(inst1Num))
+    } else {
+      setAmountPaid(String(discountedPrice))
+    }
+  }, [selectedPkg, discount, paymentType, installmentType, installment1Amount])
 
-  // Auto-fill agent name from logged-in user when form opens
+  // Open order modal — reset all form fields and pre-fill customer name
   const openOrderTab = () => {
     setShowOrderForm(true); setTimerActive(true); setOrderTimer(600)
-    setSlipFile(null); setSlipUrl(''); setInvoiceUrl('')
-    setDiscount(0); setActualReceived(''); setKokoId('')
+    setSlipFile(null); setSlipUrl(''); setInvoiceUrl(''); setInvoice2ndUrl('')
+    setDiscount(0); setCustomDiscount(''); setKokoId(''); setBankName('')
     setSelectedPkg(''); setAmountPaid(''); setSelectedAssignee('')
     setInstallmentType('full'); setInstallment1Amount('')
-    // Pre-fill agent name with logged-in user's name
-    if (!agentName && user) {
-      supabase.from('users').select('full_name').eq('id', user.id).single()
-        .then(({ data }) => { if (data?.full_name) setAgentName(data.full_name) })
-    }
+    // Pre-fill customer name field with stored customer name (editable, will appear on invoice)
+    setOrderCustomerName(customer?.name || '')
   }
 
   const fmtTimer = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
@@ -390,8 +431,8 @@ export default function CustomerDetailPage() {
     setActionLoading(true)
 
     const pkg = packages.find(p => p.id === selectedPkg)
-    const finalAmountNum = discountedPrice
-    const actualAmountNum = Number(amountPaid)
+    const actualPaidNum = Number(amountPaid)        // What customer actually paid (for total / commission)
+    const installment = installmentType === 'installment' && inst1Num > 0
 
     let uploadedSlipUrl = slipUrl
     if (needsSlip && slipFile && !slipUrl) {
@@ -400,8 +441,14 @@ export default function CustomerDetailPage() {
 
     const paymentLabel = paymentType === 'bank_transfer' ? 'Bank Transfer' : paymentType === 'genie' ? 'Genie' : 'KOKO'
     const kokoNote = paymentType === 'koko' && kokoId ? ` | KOKO ID: ${kokoId}` : ''
+    const bankNote = paymentType === 'bank_transfer' && bankName ? ` | Bank: ${bankName}` : ''
 
-    const isInstallment = installmentType === 'installment' && inst1Num > 0
+    // Update customer name if user typed one (and it differs)
+    const trimmedCustomerName = orderCustomerName.trim()
+    if (trimmedCustomerName && trimmedCustomerName !== customer.name) {
+      await supabase.from('customers').update({ name: trimmedCustomerName }).eq('id', customer.id)
+      setCustomer(c => c ? { ...c, name: trimmedCustomerName } : c)
+    }
 
     const { data: order } = await supabase.from('orders').insert({
       customer_id: customer.id,
@@ -409,14 +456,15 @@ export default function CustomerDetailPage() {
       current_step: 3,
       step_variant: pkg?.flow_variant || 'standard',
       status: 'active',
-      amount_paid: actualAmountNum,
+      amount_paid: actualPaidNum,                    // store what was actually received
       payment_type: paymentType,
       payment_slip_url: uploadedSlipUrl || null,
+      payment_bank: paymentType === 'bank_transfer' ? (bankName || null) : null,
       created_by: user.id,
-      agent_name: agentName.trim() || null,
-      installment_status: isInstallment ? 'partial' : 'complete',
-      installment_1_amount: isInstallment ? inst1Num : null,
-      installment_2_amount: isInstallment ? inst2Num : null,
+      agent_name: null,                              // identity is on user.id; column kept for compat
+      installment_status: installment ? 'partial' : 'complete',
+      installment_1_amount: installment ? inst1Num : null,
+      installment_2_amount: installment ? inst2Num : null,
     }).select().single()
 
     if (!order) { setActionLoading(false); return }
@@ -431,7 +479,15 @@ export default function CustomerDetailPage() {
       deadline: stepDeadline,
     })
 
-    // Generate invoice
+    // ── Generate 1st (or only) invoice ─────────────────────
+    // For KOKO: pass package amount X (template adds 12.36% line)
+    // For Installment: pass 1st installment amount
+    // Otherwise: pass actual amount paid
+    const invoiceClientName = trimmedCustomerName || customer.name || customer.phone
+    const invoiceFinalAmount = isKoko && !installment
+      ? discountedPrice
+      : (installment ? inst1Num : actualPaidNum)
+
     let generatedInvoiceUrl = ''
     try {
       const invRes = await fetch('/api/generate-invoice', {
@@ -439,16 +495,17 @@ export default function CustomerDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           orderId: order.id,
-          clientName: customer.name || customer.phone,
+          clientName: invoiceClientName,
           clientNumber: customer.phone,
           paymentMethod: paymentLabel,
+          bankName: paymentType === 'bank_transfer' ? bankName : undefined,
           packageName: pkg?.name || '',
-          finalAmount: finalAmountNum,
+          finalAmount: invoiceFinalAmount,
           discountPercent: discount,
-          agentName: agentName.trim() || null,
-          isInstallment,
-          installment1Amount: isInstallment ? inst1Num : null,
-          installment2Amount: isInstallment ? inst2Num : null,
+          isKoko: isKoko && !installment,
+          installmentType: installment ? '1st' : null,
+          packageTotal: installment ? discountedPrice : undefined,
+          otherInstallmentAmount: installment ? inst2Num : undefined,
         })
       })
       if (invRes.ok) {
@@ -460,12 +517,17 @@ export default function CustomerDetailPage() {
       }
     } catch (_) { /* silent */ }
 
-    // Commission
+    // ── Commission ────────────────────────────────────────
+    // Per spec: commission = actual amount paid * rate.
+    // KOKO exception: commission = package amount X * rate
+    //   (because KOKO takes the 12.36% service charge — company nets X).
+    const commissionBase = (isKoko && !installment) ? discountedPrice : actualPaidNum
+
     const { data: agentData } = await supabase
       .from('users').select('commission_rates, wallet_balance').eq('id', user.id).single()
     const rate = agentData?.commission_rates?.[selectedPkg] || 0
     if (rate > 0) {
-      const commissionAmount = Math.round(finalAmountNum * rate / 100)
+      const commissionAmount = Math.round(commissionBase * rate / 100)
       const monthYear = new Date().toISOString().slice(0, 7)
       await supabase.from('commissions').insert({
         user_id: user.id, order_id: order.id, package_id: selectedPkg,
@@ -477,17 +539,17 @@ export default function CustomerDetailPage() {
       if (user) setUser({ ...user, wallet_balance: newBalance })
     }
 
-    // Log interactions
+    // ── Log interaction ───────────────────────────────────
     const assignedWorker = workers.find(w => w.id === selectedAssignee)
     const invoiceNote = generatedInvoiceUrl ? ` | Invoice: ${generatedInvoiceUrl}` : ''
-    const installmentNote = isInstallment
+    const installmentNote = installment
       ? ` | Installment: 1st LKR ${inst1Num.toLocaleString()}, remaining LKR ${inst2Num.toLocaleString()}`
       : ''
     await supabase.from('interactions').insert([
       {
         customer_id: id,
         type: 'order',
-        description: `Order created: ${displayPkgName} — LKR ${finalAmountNum.toLocaleString()} (paid: LKR ${actualAmountNum.toLocaleString()}) via ${paymentLabel}${kokoNote}${installmentNote}${invoiceNote}`,
+        description: `Order created: ${displayPkgName} — Total LKR ${actualPaidNum.toLocaleString()} via ${paymentLabel}${bankNote}${kokoNote}${installmentNote}${invoiceNote}`,
         created_by: user.id,
       },
       ...(selectedAssignee ? [{
@@ -500,6 +562,45 @@ export default function CustomerDetailPage() {
 
     setShowOrderForm(false); setTimerActive(false); setSelectedAssignee('')
     await fetchAll()
+    setActionLoading(false)
+  }
+
+  // ── Generate 2nd installment invoice (called from 2nd-payment panel) ──
+  const handleGenerate2ndInvoice = async () => {
+    if (!activeOrder || !customer) return
+    setActionLoading(true)
+    const inst1 = Number((activeOrder as any).installment_1_amount || 0)
+    const inst2 = Number((activeOrder as any).installment_2_amount || 0)
+    const pkgTotal = inst1 + inst2
+
+    try {
+      const invRes = await fetch('/api/generate-invoice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: activeOrder.id,
+          clientName: customer.name || customer.phone,
+          clientNumber: customer.phone,
+          paymentMethod: activeOrder.payment_type === 'bank_transfer' ? 'Bank Transfer'
+            : activeOrder.payment_type === 'koko' ? 'KOKO' : 'Genie',
+          bankName: (activeOrder as any).payment_bank || undefined,
+          packageName: (activeOrder as any).package?.name || '',
+          finalAmount: inst2,
+          discountPercent: 0,
+          installmentType: '2nd',
+          packageTotal: pkgTotal,
+          otherInstallmentAmount: inst1,
+        })
+      })
+      if (invRes.ok) {
+        const invData = await invRes.json()
+        if (invData.invoiceUrl) {
+          setInvoice2ndUrl(invData.invoiceUrl)
+          await logAction(`2nd installment invoice generated | Invoice: ${invData.invoiceUrl}`)
+          await fetchAll()
+        }
+      }
+    } catch (_) { /* silent */ }
     setActionLoading(false)
   }
 
@@ -587,32 +688,77 @@ export default function CustomerDetailPage() {
             <ArrowLeft size={13} /> Back
           </button>
           <div className="flex items-start justify-between">
-            <div className="flex items-center gap-3">
-              <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shadow-sm ${customer.is_priority ? 'bg-red-100' : 'bg-white'}`}>
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shadow-sm flex-shrink-0 ${customer.is_priority ? 'bg-red-100' : 'bg-white'}`}>
                 {customer.is_priority
                   ? <Star size={18} className="text-red-500 fill-red-500" />
                   : <Phone size={18} className="text-pink-400" />}
               </div>
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <p className={`text-sm font-bold ${customer.is_priority ? 'text-red-700' : 'text-gray-800'}`}>
-                    {customer.name || customer.phone}
-                  </p>
-                  {customer.is_priority && (
-                    <span className="text-[8px] font-bold bg-red-500 text-white px-2 py-0.5 rounded-full uppercase tracking-wide">Priority</span>
-                  )}
-                </div>
-                {customer.name && <p className={`text-xs font-medium ${customer.is_priority ? 'text-red-400' : 'text-gray-400'}`}>{customer.phone}</p>}
+              <div className="flex-1 min-w-0">
+                {editingName ? (
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      autoFocus
+                      type="text"
+                      value={nameDraft}
+                      onChange={e => setNameDraft(e.target.value)}
+                      placeholder="Customer name"
+                      onKeyDown={async e => {
+                        if (e.key === 'Enter') {
+                          const v = nameDraft.trim()
+                          await supabase.from('customers').update({ name: v || null }).eq('id', customer.id)
+                          setCustomer(c => c ? { ...c, name: v || undefined } : c)
+                          await logAction(v ? `Customer name updated: ${v}` : 'Customer name cleared')
+                          setEditingName(false)
+                        }
+                        if (e.key === 'Escape') setEditingName(false)
+                      }}
+                      className="flex-1 bg-white border border-pink-200 rounded-lg px-2 py-1 text-sm font-bold outline-none focus:border-pink-400"
+                    />
+                    <button
+                      onClick={async () => {
+                        const v = nameDraft.trim()
+                        await supabase.from('customers').update({ name: v || null }).eq('id', customer.id)
+                        setCustomer(c => c ? { ...c, name: v || undefined } : c)
+                        await logAction(v ? `Customer name updated: ${v}` : 'Customer name cleared')
+                        setEditingName(false)
+                      }}
+                      className="text-[9px] font-bold text-pink-600 px-2 py-1 bg-white rounded-lg border border-pink-200">Save</button>
+                    <button
+                      onClick={() => setEditingName(false)}
+                      className="text-[9px] font-bold text-gray-400 px-2 py-1 bg-white rounded-lg border border-gray-200">Cancel</button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-1.5">
+                      <p className={`text-sm font-bold truncate ${customer.is_priority ? 'text-red-700' : 'text-gray-800'}`}>
+                        {customer.name || customer.phone}
+                      </p>
+                      {(role === 'crm_agent' || role === 'admin') && (
+                        <button
+                          onClick={() => { setNameDraft(customer.name || ''); setEditingName(true) }}
+                          title="Edit customer name"
+                          className="text-gray-400 hover:text-pink-500 flex-shrink-0">
+                          <Pencil size={12} />
+                        </button>
+                      )}
+                      {customer.is_priority && (
+                        <span className="text-[8px] font-bold bg-red-500 text-white px-2 py-0.5 rounded-full uppercase tracking-wide flex-shrink-0">Priority</span>
+                      )}
+                    </div>
+                    {customer.name && <p className={`text-xs font-medium ${customer.is_priority ? 'text-red-400' : 'text-gray-400'}`}>{customer.phone}</p>}
+                  </>
+                )}
               </div>
             </div>
-            {role === 'crm_agent' && (
+            {role === 'crm_agent' && !editingName && (
               <button onClick={async () => {
                 const newPriority = !customer.is_priority
                 await supabase.from('customers').update({ is_priority: newPriority }).eq('id', customer.id)
                 await logAction(newPriority ? 'Marked as priority lead' : 'Priority removed')
                 setCustomer(c => c ? { ...c, is_priority: newPriority } : c)
                 await fetchAll()
-              }} className={`text-[8px] font-bold px-3 py-1.5 rounded-full border transition-all ${customer.is_priority ? 'bg-red-100 border-red-200 text-red-600' : 'bg-white border-gray-200 text-gray-400'}`}>
+              }} className={`text-[8px] font-bold px-3 py-1.5 rounded-full border transition-all flex-shrink-0 ml-2 ${customer.is_priority ? 'bg-red-100 border-red-200 text-red-600' : 'bg-white border-gray-200 text-gray-400'}`}>
                 {customer.is_priority ? 'Remove priority' : 'Mark priority'}
               </button>
             )}
@@ -645,12 +791,12 @@ export default function CustomerDetailPage() {
 
           {/* ── 2ND INSTALLMENT PAYMENT PANEL ─────────────── */}
           {isInstallmentPending && (role === 'back_office' || role === 'admin' || role === 'crm_agent') && (
-            <div className="bg-amber-50 border border-amber-200 rounded-2xl overflow-hidden">
-              <div className="px-4 py-3 bg-amber-100 flex items-center gap-2">
-                <CreditCard size={14} className="text-amber-600" />
-                <div>
-                  <p className="text-[9px] font-bold text-amber-700 uppercase tracking-wide">2nd Installment Pending</p>
-                  <p className="text-[8px] text-amber-600 font-medium">
+            <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl overflow-hidden shadow-sm">
+              <div className="px-4 py-3 bg-amber-500 flex items-center gap-2.5">
+                <CreditCard size={18} className="text-white" />
+                <div className="flex-1">
+                  <p className="text-sm font-extrabold text-white uppercase tracking-wide">2nd Installment Pending</p>
+                  <p className="text-[10px] text-amber-50 font-medium">
                     Balance due: LKR {Number((activeOrder as any)?.installment_2_amount || 0).toLocaleString()}
                   </p>
                 </div>
@@ -658,15 +804,15 @@ export default function CustomerDetailPage() {
               {!show2ndInstallment ? (
                 <div className="p-4">
                   <div className="flex justify-between text-xs font-medium text-gray-600 mb-3">
-                    <span>1st paid:</span>
-                    <span>LKR {Number((activeOrder as any)?.installment_1_amount || 0).toLocaleString()}</span>
+                    <span>1st installment paid:</span>
+                    <span className="font-bold">LKR {Number((activeOrder as any)?.installment_1_amount || 0).toLocaleString()}</span>
                   </div>
-                  <div className="flex justify-between text-xs font-bold text-amber-700 pb-3 border-b border-amber-200 mb-3">
-                    <span>Remaining:</span>
+                  <div className="flex justify-between text-sm font-bold text-amber-700 pb-3 border-b border-amber-200 mb-3">
+                    <span>Remaining (2nd):</span>
                     <span>LKR {Number((activeOrder as any)?.installment_2_amount || 0).toLocaleString()}</span>
                   </div>
                   <button onClick={() => setShow2ndInstallment(true)}
-                    className="w-full bg-amber-500 text-white rounded-xl py-3 text-xs font-bold">
+                    className="w-full bg-amber-500 text-white rounded-xl py-3.5 text-sm font-extrabold shadow-md shadow-amber-200">
                     Mark 2nd Installment as Paid
                   </button>
                 </div>
@@ -703,6 +849,49 @@ export default function CustomerDetailPage() {
                       {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Confirm Payment ✓'}
                     </button>
                   </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── 2ND INSTALLMENT INVOICE (after 2nd payment confirmed) ─── */}
+          {!isInstallmentPending && (activeOrder as any)?.installment_1_amount && (activeOrder as any)?.installment_2_amount && (role === 'crm_agent' || role === 'back_office' || role === 'admin') && (
+            <div className="bg-green-50 border-2 border-green-200 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <CheckCircle size={16} className="text-green-600" />
+                <p className="text-sm font-extrabold text-green-700 uppercase tracking-wide">Installment Complete</p>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-[10px]">
+                <div className="bg-white rounded-lg px-2.5 py-2">
+                  <p className="text-gray-400 font-semibold">1st Installment</p>
+                  <p className="text-gray-800 font-bold">LKR {Number((activeOrder as any).installment_1_amount).toLocaleString()}</p>
+                </div>
+                <div className="bg-white rounded-lg px-2.5 py-2">
+                  <p className="text-gray-400 font-semibold">2nd Installment</p>
+                  <p className="text-gray-800 font-bold">LKR {Number((activeOrder as any).installment_2_amount).toLocaleString()}</p>
+                </div>
+              </div>
+              {!(activeOrder as any).invoice_html_2nd && !invoice2ndUrl ? (
+                <button onClick={handleGenerate2ndInvoice} disabled={actionLoading}
+                  className="w-full bg-green-600 text-white rounded-xl py-3 text-xs font-bold disabled:opacity-40 flex items-center justify-center gap-2">
+                  {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <><Receipt size={13} /> Generate 2nd Installment Invoice</>}
+                </button>
+              ) : (
+                <div className="space-y-2">
+                  <a
+                    href={invoice2ndUrl || `${process.env.NEXT_PUBLIC_APP_URL}/invoice/${activeOrder.id}?type=2nd`}
+                    target="_blank" rel="noreferrer"
+                    className="w-full flex items-center justify-center gap-2 bg-white border border-green-200 text-green-700 rounded-xl py-2.5 text-xs font-bold">
+                    <ExternalLink size={13} /> View 2nd installment invoice
+                  </a>
+                  <button onClick={() => {
+                    const url = invoice2ndUrl || `${process.env.NEXT_PUBLIC_APP_URL}/invoice/${activeOrder.id}?type=2nd`
+                    openWa(buildWaLink(customer.phone, WA.send2ndInstallmentInvoice(customer.name || customer.phone, url)))
+                    logAction('2nd installment invoice sent via WhatsApp')
+                  }}
+                    className="w-full bg-green-600 text-white rounded-xl py-2.5 text-xs font-bold flex items-center justify-center gap-2">
+                    Send 2nd installment invoice via WhatsApp
+                  </button>
                 </div>
               )}
             </div>
@@ -1126,16 +1315,16 @@ export default function CustomerDetailPage() {
                   </div>
                   <div className="p-4 space-y-3">
 
-                    {/* ── AGENT NAME ── */}
+                    {/* ── CUSTOMER NAME (shown on invoice) ── */}
                     <div>
                       <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
-                        Your name <span className="text-pink-500">*</span>
+                        Customer name <span className="text-gray-300 font-normal">(optional — appears on invoice)</span>
                       </label>
                       <input
                         type="text"
-                        value={agentName}
-                        onChange={e => setAgentName(e.target.value)}
-                        placeholder="Enter your name"
+                        value={orderCustomerName}
+                        onChange={e => setOrderCustomerName(e.target.value)}
+                        placeholder="Customer's full name"
                         className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none focus:border-pink-300"
                       />
                     </div>
@@ -1153,13 +1342,30 @@ export default function CustomerDetailPage() {
                     {selectedPkg && (
                       <div>
                         <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Discount</label>
-                        <div className="flex flex-wrap gap-1.5">
+                        <div className="flex flex-wrap gap-1.5 items-center">
                           {DISCOUNT_OPTIONS.map(opt => (
-                            <button key={opt.value} onClick={() => setDiscount(opt.value)}
-                              className={`px-3 py-2 rounded-xl text-[10px] font-bold transition-all ${discount === opt.value ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                            <button key={opt.value} onClick={() => { setDiscount(opt.value); setCustomDiscount('') }}
+                              className={`px-3 py-2 rounded-xl text-[10px] font-bold transition-all ${discount === opt.value && !customDiscount ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
                               {opt.label}
                             </button>
                           ))}
+                          <div className="flex items-center bg-gray-100 rounded-xl overflow-hidden">
+                            <input
+                              type="number"
+                              min={0} max={99}
+                              value={customDiscount}
+                              onChange={e => {
+                                const v = e.target.value
+                                setCustomDiscount(v)
+                                const n = parseFloat(v)
+                                if (!isNaN(n) && n >= 0 && n <= 99) setDiscount(Math.round(n))
+                                else if (v === '') setDiscount(0)
+                              }}
+                              placeholder="Custom"
+                              className={`w-16 bg-transparent px-2 py-2 text-[10px] font-bold outline-none ${customDiscount ? 'text-pink-600' : 'text-gray-500'}`}
+                            />
+                            <span className="text-[10px] font-bold text-gray-400 pr-2">%</span>
+                          </div>
                         </div>
                         {selectedPkgObj && (
                           <div className="mt-2 bg-pink-50 border border-pink-100 rounded-xl px-3 py-2.5">
@@ -1175,9 +1381,35 @@ export default function CustomerDetailPage() {
 
                     {selectedPkg && (
                       <div>
-                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Amount paid (LKR)</label>
+                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+                          Amount paid (LKR) <span className="text-gray-300 font-normal">— actual amount received</span>
+                        </label>
                         <input type="number" value={amountPaid} onChange={e => setAmountPaid(e.target.value)}
                           className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none focus:border-pink-300" />
+                        {amountPaidNum > 0 && discountedPrice > 0 && !isInstallment && !isKoko && amountPaidNum !== discountedPrice && (
+                          <p className="text-[9px] text-gray-400 font-medium mt-1">
+                            Package: LKR {discountedPrice.toLocaleString()} · Difference: LKR {(amountPaidNum - discountedPrice).toLocaleString()}
+                          </p>
+                        )}
+                        {/* KOKO breakdown — show what will appear on the invoice */}
+                        {isKoko && !isInstallment && discountedPrice > 0 && (
+                          <div className="mt-2 bg-blue-50 border border-blue-100 rounded-xl p-2.5 space-y-1">
+                            <p className="text-[9px] font-bold text-blue-600 uppercase tracking-wide">KOKO Breakdown</p>
+                            <div className="flex justify-between text-[10px] text-gray-700 font-medium">
+                              <span>Package amount:</span>
+                              <span>LKR {discountedPrice.toLocaleString()}</span>
+                            </div>
+                            <div className="flex justify-between text-[10px] text-gray-700 font-medium">
+                              <span>KOKO 12.36% Service Charge:</span>
+                              <span>LKR {kokoChargeAmount.toLocaleString()}</span>
+                            </div>
+                            <div className="flex justify-between text-[10px] font-bold text-blue-700 pt-1 border-t border-blue-200">
+                              <span>Total customer pays:</span>
+                              <span>LKR {kokoTotal.toLocaleString()}</span>
+                            </div>
+                            <p className="text-[8px] text-blue-500 font-medium pt-0.5">Commission is calculated on the package amount only.</p>
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -1190,13 +1422,30 @@ export default function CustomerDetailPage() {
                           { value: 'genie', label: 'Genie' },
                           { value: 'koko', label: 'KOKO' },
                         ] as const).map(opt => (
-                          <button key={opt.value} onClick={() => { setPaymentType(opt.value); setSlipFile(null); setSlipUrl(''); setKokoId('') }}
+                          <button key={opt.value} onClick={() => { setPaymentType(opt.value); setSlipFile(null); setSlipUrl(''); setKokoId(''); if (opt.value !== 'bank_transfer') setBankName('') }}
                             className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${paymentType === opt.value ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
                             {opt.label}
                           </button>
                         ))}
                       </div>
                     </div>
+
+                    {/* ── BANK SELECTION (only for bank transfer) ── */}
+                    {paymentType === 'bank_transfer' && (
+                      <div>
+                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+                          Bank <span className="text-pink-500">*</span> <span className="text-gray-300 font-normal">— for accounting purposes</span>
+                        </label>
+                        <div className="relative">
+                          <Building2 size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                          <select value={bankName} onChange={e => setBankName(e.target.value)}
+                            className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-8 pr-3 py-2.5 text-xs font-medium outline-none focus:border-pink-300">
+                            <option value="">Select bank...</option>
+                            {BANKS.map(b => <option key={b} value={b}>{b}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                    )}
 
                     {/* ── PAYMENT TYPE: Full / Installment ── */}
                     {selectedPkg && (
@@ -1205,12 +1454,12 @@ export default function CustomerDetailPage() {
                         <div className="flex gap-2">
                           <button
                             onClick={() => { setInstallmentType('full'); setInstallment1Amount('') }}
-                            className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${installmentType === 'full' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                            className={`flex-1 py-3.5 rounded-xl text-sm font-extrabold transition-all ${installmentType === 'full' ? 'bg-pink-600 text-white shadow-md shadow-pink-200' : 'bg-gray-100 text-gray-500'}`}>
                             Full Payment
                           </button>
                           <button
                             onClick={() => setInstallmentType('installment')}
-                            className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${installmentType === 'installment' ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                            className={`flex-1 py-3.5 rounded-xl text-sm font-extrabold transition-all ${installmentType === 'installment' ? 'bg-amber-500 text-white shadow-md shadow-amber-200' : 'bg-gray-100 text-gray-500'}`}>
                             Installment
                           </button>
                         </div>
@@ -1306,14 +1555,19 @@ export default function CustomerDetailPage() {
                       disabled={
                         !selectedPkg ||
                         !amountPaid ||
-                        !agentName.trim() ||
+                        (paymentType === 'bank_transfer' && !bankName) ||
                         (needsSlip && !slipFile && !slipUrl) ||
                         (installmentType === 'installment' && inst1Num <= 0) ||
                         (installmentType === 'installment' && inst1Num >= discountedPrice) ||
                         actionLoading
                       }
                       className="w-full bg-pink-600 text-white rounded-xl py-3 text-xs font-bold disabled:opacity-40 flex items-center justify-center gap-2">
-                      {actionLoading ? <><Loader2 size={14} className="animate-spin" /> Processing...</> : 'Generate invoice + Submit'}
+                      {actionLoading ? <><Loader2 size={14} className="animate-spin" /> Processing...</> : (
+                        <>
+                          <Receipt size={13} />
+                          {isInstallment ? 'Generate 1st Installment Invoice + Submit' : 'Generate Invoice + Submit'}
+                        </>
+                      )}
                     </button>
                     {invoiceUrl && (
                       <a href={invoiceUrl} target="_blank" rel="noreferrer"

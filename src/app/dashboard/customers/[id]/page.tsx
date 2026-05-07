@@ -855,7 +855,7 @@ export default function CustomerDetailPage() {
           )}
 
           {/* ── 2ND INSTALLMENT INVOICE (after 2nd payment confirmed) ─── */}
-          {!isInstallmentPending && (activeOrder as any)?.installment_1_amount && (activeOrder as any)?.installment_2_amount && (role === 'crm_agent' || role === 'back_office' || role === 'admin') && (
+          {!isInstallmentPending && activeOrder && (activeOrder as any)?.installment_1_amount && (activeOrder as any)?.installment_2_amount && (role === 'crm_agent' || role === 'back_office' || role === 'admin') && (
             <div className="bg-green-50 border-2 border-green-200 rounded-2xl p-4 space-y-3">
               <div className="flex items-center gap-2">
                 <CheckCircle size={16} className="text-green-600" />

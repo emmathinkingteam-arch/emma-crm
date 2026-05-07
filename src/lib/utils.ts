@@ -15,7 +15,7 @@ export function normalisePhone(phone: string, countryCode = '94'): string {
 
 // ── WhatsApp wa.me link builder ──────────────────────────────
 export function buildWaLink(phone: string, message: string): string {
-  const normalised = normalisePhone(phone)
+  const normalised = phone.replace(/\D/g, '')
   return `https://wa.me/${normalised}?text=${encodeURIComponent(message)}`
 }
 
@@ -141,8 +141,8 @@ export interface InvoiceParams {
   bankName?: string               // "BOC", "Commercial Bank" etc. — only when bank transfer
   packageName: string
   finalAmount: number             // For non-KOKO non-installment: actual amount paid (= line item & total)
-                                  // For KOKO: package amount (X). KOKO charge & total are derived.
-                                  // For installment: amount of THIS installment payment.
+  // For KOKO: package amount (X). KOKO charge & total are derived.
+  // For installment: amount of THIS installment payment.
   discountPercent?: number
   // KOKO breakdown
   isKoko?: boolean                // when true, render Package + KOKO 12.36% charge + Total

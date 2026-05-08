@@ -14,9 +14,31 @@ export function normalisePhone(phone: string, countryCode = '94'): string {
 }
 
 // ── WhatsApp wa.me link builder ──────────────────────────────
+// Always normalises to international format (94XXXXXXXXX) — wa.me silently
+// rejects local-format numbers and shows an "Invalid phone number" page.
 export function buildWaLink(phone: string, message: string): string {
-  const normalised = phone.replace(/\D/g, '')
+  const normalised = normalisePhone(phone)
   return `https://wa.me/${normalised}?text=${encodeURIComponent(message)}`
+}
+
+// ── Popup-blocker-safe WhatsApp opener ───────────────────────
+// window.open() is blocked by iOS Safari and many mobile browsers when
+// the call stack passes through an async function (even without awaits).
+// The synthetic anchor click below preserves the user-gesture context
+// across more browsers and is the most reliable way to open wa.me.
+//
+// IMPORTANT: this MUST be called inside a click handler BEFORE any await.
+// If you do `await something(); openWaLink(...)`, the browser still drops
+// the gesture and blocks the tab. Always: openWaLink first, then await.
+export function openWaLink(url: string): void {
+  if (typeof window === 'undefined') return
+  const a = document.createElement('a')
+  a.href = url
+  a.target = '_blank'
+  a.rel = 'noopener noreferrer'
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
 }
 
 // ── WA Message templates ─────────────────────────────────────
@@ -41,6 +63,10 @@ export const WA = {
 
   planningConfirmation: (name: string, date: string, time: string) =>
     `Hi ${name},\n\nYour post has been planned for publication on ${date} at ${time}.\n\nWe will take care of everything and notify you once it goes live.\n\nEmma Thinking (Pvt) Ltd`,
+
+  // Combined plan + expiry confirmation — sent by the designer in one go
+  planAndExpiry: (name: string, postDate: string, postTime: string, expiryDate: string) =>
+    `Hi ${name},\n\nYour Emma Thinking profile post has been planned. Please find the details below.\n\n   Post Date    : ${postDate}\n   Post Time    : ${postTime}\n   Plan Expires : ${expiryDate}\n\nWe will take care of everything and notify you once your post goes live. Your post will remain active until the expiry date above.\n\nThank you for choosing Emma Thinking.\n\nEmma Thinking (Pvt) Ltd`,
 }
 
 // ── Post ID code generator ────────────────────────────────────

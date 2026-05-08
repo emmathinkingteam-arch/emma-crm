@@ -12,7 +12,7 @@ import {
   CreditCard, AlertCircle, Pencil, Receipt, Building2
 } from 'lucide-react'
 import { Customer, Order, OrderStep, Interaction, Package as Pkg, MONTH_CODES } from '@/types'
-import { fmtDate, fmtTime, buildWaLink, WA, KOKO_SERVICE_CHARGE_RATE } from '@/lib/utils'
+import { fmtDate, fmtTime, buildWaLink, openWaLink, WA, KOKO_SERVICE_CHARGE_RATE } from '@/lib/utils'
 
 const SLOT_LABELS: Record<string, string> = { W: '6:30am', X: '11:30am', Y: '3:30pm', Z: '8:30pm' }
 const SLOTS = ['W', 'X', 'Y', 'Z'] as const
@@ -79,6 +79,10 @@ export default function CustomerDetailPage() {
   const [packages, setPackages] = useState<Pkg[]>([])
   const [activeOrder, setActiveOrder] = useState<Order | null>(null)
   const [activeStep, setActiveStep] = useState<OrderStep | null>(null)
+  // The latest completed step that has a brief — used to show the brief
+  // and plan summary in read-only mode AFTER the designer has locked the plan.
+  const [completedBrief, setCompletedBrief] = useState<string | null>(null)
+  const [plannedSlot, setPlannedSlot] = useState<{ slot_date: string; slot_time: string; post_id_code: string } | null>(null)
   const [orderCreator, setOrderCreator] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
@@ -133,6 +137,10 @@ export default function CustomerDetailPage() {
   const [showReject, setShowReject] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
   const [rejectAssignee, setRejectAssignee] = useState('')
+
+  // Manager — edit brief inline
+  const [editingBrief, setEditingBrief] = useState(false)
+  const [savingBriefEdit, setSavingBriefEdit] = useState(false)
 
   // Designer calendar
   const [showCalendar, setShowCalendar] = useState(false)
@@ -208,7 +216,10 @@ export default function CustomerDetailPage() {
   }
 
   const fmtTimer = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
-  const openWa = (url: string) => window.open(url, '_blank')
+  // Use the popup-blocker-safe helper from lib/utils.
+  // This MUST be called synchronously before any await in click handlers
+  // — otherwise iOS Safari and mobile browsers drop the user gesture.
+  const openWa = (url: string) => openWaLink(url)
 
   const getCountdown = (deadline?: string, extended?: string) => {
     const target = extended || deadline
@@ -348,10 +359,25 @@ export default function CustomerDetailPage() {
     await fetchAll()
   }
 
+  // Parse selectedCell like '2026-05-08-W' into [date, slot]
+  // BUG IN OLD CODE: const [date, slot] = selectedCell.split('-')
+  // gave date='2026' and slot='05' which silently stored garbage in
+  // calendar_slots. Always parse with slice/join + last-element pattern.
+  const parseSelectedCell = (cell: string): { date: string; slot: string } | null => {
+    const parts = cell.split('-')
+    if (parts.length < 4) return null
+    return {
+      date: parts.slice(0, 3).join('-'),
+      slot: parts[parts.length - 1],
+    }
+  }
+
   const handlePlanSlot = async () => {
     if (!selectedCell || !activeOrder || !activeStep || !customer) return
+    const parsed = parseSelectedCell(selectedCell)
+    if (!parsed) return
     setActionLoading(true)
-    const [date, slot] = selectedCell.split('-')
+    const { date, slot } = parsed
     const code = generatePostCode(date, slot)
     await supabase.from('calendar_slots').insert({
       order_id: activeOrder.id,
@@ -367,6 +393,63 @@ export default function CustomerDetailPage() {
     const msg = `Ayubowan ${customer.name || customer.phone}!\n\nYour Emma Thinking profile post has been planned!\n\nPost Date: ${date}\nTime: ${SLOT_LABELS[slot]}\nPost ID: ${code}\n\nThank you for choosing Emma Thinking!`
     openWa(buildWaLink(customer.phone, msg))
     setSelectedCell(null); setShowCalendar(false)
+    await fetchCalendarSlots(); await fetchAll()
+    setActionLoading(false)
+  }
+
+  // Combined: plan slot + set expiry + send single WhatsApp + mark step done.
+  // This is the new "all done" path: after this runs, the step has status='done',
+  // the work panel auto-hides (no more working windows), and the customer
+  // shows up as planned in the FR PLAN calendar coloured by package.
+  const handlePlanAndExpiry = async () => {
+    if (!selectedCell || !activeOrder || !activeStep || !customer || !expiryDate) return
+    const parsed = parseSelectedCell(selectedCell)
+    if (!parsed) return
+    const { date, slot } = parsed
+    const code = generatePostCode(date, slot)
+    const fmtPostDate = new Date(date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+    const fmtExpiryDate = new Date(expiryDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+
+    // OPEN WHATSAPP FIRST — synchronous within click handler.
+    openWa(buildWaLink(
+      customer.phone,
+      WA.planAndExpiry(customer.name || customer.phone, fmtPostDate, SLOT_LABELS[slot], fmtExpiryDate)
+    ))
+
+    setActionLoading(true)
+
+    // 1. Insert calendar slot with post id, planned date, AND expiry.
+    await supabase.from('calendar_slots').insert({
+      order_id: activeOrder.id,
+      order_step_id: activeStep.id,
+      slot_date: date,
+      slot_time: slot,
+      post_id_code: code,
+      assigned_to: user?.id,
+      planned_at: new Date().toISOString(),
+      validity_expires_at: new Date(expiryDate).toISOString(),
+    })
+
+    // 2. Update the order with both planned date and validity expiry.
+    await supabase.from('orders').update({
+      planned_post_date: new Date(date).toISOString(),
+      validity_expires_at: new Date(expiryDate).toISOString(),
+    }).eq('id', activeOrder.id)
+
+    // 3. Mark designer's step as DONE so the work panel hides.
+    //    fetchAll filters active steps by status, so once status='done',
+    //    activeStep becomes null and the entire panel disappears.
+    await supabase.from('order_steps').update({
+      status: 'done',
+      completed_at: new Date().toISOString(),
+      planned_post_date: new Date(date).toISOString(),
+    }).eq('id', activeStep.id)
+
+    await logAction(
+      `Plan locked — ${date} at ${SLOT_LABELS[slot]} | Post ID: ${code} | Expires: ${expiryDate} | WhatsApp sent`
+    )
+
+    setSelectedCell(null); setShowCalendar(false); setExpiryDate('')
     await fetchCalendarSlots(); await fetchAll()
     setActionLoading(false)
   }
@@ -639,15 +722,45 @@ export default function CustomerDetailPage() {
           .from('order_steps')
           .select('*, assigned_user:users!assigned_to(full_name, role, meeting_link)')
           .eq('order_id', active.id)
-          .in('status', ['pending', 'in_progress'])
+          // IMPORTANT: include 'overdue' so the work window NEVER disappears
+          // until the step is actually transferred (status = 'done').
+          // Without 'overdue' in this list, an overdue counsellor/manager/designer
+          // would lose their work panel and be unable to finish or hand off.
+          .in('status', ['pending', 'in_progress', 'overdue'])
           .order('step_number', { ascending: false })
           .limit(1)
           .single()
         if (stepData) {
           setActiveStep(stepData as any)
           if (stepData.description) setBrief(stepData.description)
+          // there's still active work — clear the read-only summary state
+          setCompletedBrief(null)
+          setPlannedSlot(null)
         } else {
           setActiveStep(null)
+          // No active step: this customer is fully planned (or in a quiet state).
+          // Pull the latest completed step that has a brief so we can show
+          // the description in read-only mode, plus the planned calendar slot.
+          const [{ data: lastStep }, { data: slotRow }] = await Promise.all([
+            supabase
+              .from('order_steps')
+              .select('description, step_number')
+              .eq('order_id', active.id)
+              .eq('status', 'done')
+              .not('description', 'is', null)
+              .order('step_number', { ascending: false })
+              .limit(1)
+              .maybeSingle(),
+            supabase
+              .from('calendar_slots')
+              .select('slot_date, slot_time, post_id_code')
+              .eq('order_id', active.id)
+              .order('planned_at', { ascending: false })
+              .limit(1)
+              .maybeSingle(),
+          ])
+          setCompletedBrief(lastStep?.description ?? null)
+          setPlannedSlot(slotRow ?? null)
         }
       } else {
         setActiveOrder(null)
@@ -975,8 +1088,13 @@ export default function CustomerDetailPage() {
                 <div className="p-4 space-y-2">
                   {!stepAccepted && (
                     <button onClick={async () => {
-                      await doAccept()
+                      // OPEN WHATSAPP FIRST — calling openWa() before any await
+                      // keeps the user-gesture context so iOS Safari / mobile
+                      // browsers don't block the new tab. The previous order
+                      // (`await doAccept()` first) is what was breaking the
+                      // WhatsApp button after the counsellor clicked Accept.
                       openWa(buildWaLink(customer.phone, WA.sessionStart(customer.name || customer.phone)))
+                      await doAccept()
                       await logAction('Session start message sent via WhatsApp')
                       await fetchAll()
                     }} className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold">
@@ -1097,9 +1215,73 @@ export default function CustomerDetailPage() {
                   )}
                   {stepAccepted && (
                     <>
+                      {/* ── BRIEF FROM COUNSELOR (editable by manager) ── */}
                       <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
-                        <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1.5">Brief from counselor</p>
-                        <p className="text-xs text-gray-700 font-medium leading-relaxed whitespace-pre-wrap">{activeStep.description || 'No brief provided'}</p>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">
+                            Brief from counselor
+                            {brief !== (activeStep.description || '') && (
+                              <span className="ml-2 text-amber-600">· Edited</span>
+                            )}
+                          </p>
+                          {!editingBrief ? (
+                            <button
+                              onClick={() => {
+                                // Make sure brief state is in sync before editing
+                                setBrief(activeStep.description || '')
+                                setEditingBrief(true)
+                              }}
+                              className="flex items-center gap-1 text-[9px] font-bold text-pink-600 hover:text-pink-700">
+                              <Pencil size={10} /> Edit
+                            </button>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => {
+                                  setBrief(activeStep.description || '')
+                                  setEditingBrief(false)
+                                }}
+                                disabled={savingBriefEdit}
+                                className="text-[9px] font-bold text-gray-400">
+                                Cancel
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  if (!brief.trim()) { alert('Brief cannot be empty.'); return }
+                                  setSavingBriefEdit(true)
+                                  // Persist the manager's edit to the current step row
+                                  // so the designer (next step) sees the latest version.
+                                  await supabase
+                                    .from('order_steps')
+                                    .update({
+                                      description: brief,
+                                      brief_version: ((activeStep as any).brief_version || 1) + 1,
+                                    })
+                                    .eq('id', activeStep.id)
+                                  await logAction('Manager edited the brief')
+                                  setEditingBrief(false)
+                                  setSavingBriefEdit(false)
+                                  await fetchAll()
+                                }}
+                                disabled={savingBriefEdit || !brief.trim()}
+                                className="text-[9px] font-bold text-green-600 disabled:opacity-40">
+                                {savingBriefEdit ? 'Saving…' : 'Save edit ✓'}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        {editingBrief ? (
+                          <textarea
+                            value={brief}
+                            onChange={e => setBrief(e.target.value)}
+                            rows={12}
+                            className="w-full bg-white border border-pink-200 rounded-lg px-2.5 py-2 text-xs font-medium outline-none focus:border-pink-400 resize-y leading-relaxed"
+                          />
+                        ) : (
+                          <p className="text-xs text-gray-700 font-medium leading-relaxed whitespace-pre-wrap">
+                            {brief || activeStep.description || 'No brief provided'}
+                          </p>
+                        )}
                       </div>
 
                       {/* ── INSTALLMENT BLOCK ── */}
@@ -1126,8 +1308,10 @@ export default function CustomerDetailPage() {
                           </div>
                           <button onClick={() => {
                             const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'designer'
-                            doComplete(6, {}, selectedAssignee, `Manager approved — assigned to designer: ${name}`, activeStep.description || '')
-                          }} disabled={!selectedAssignee || actionLoading}
+                            // Pass the possibly-edited brief — manager edits flow forward to designer.
+                            const finalBrief = brief || activeStep.description || ''
+                            doComplete(6, { description: finalBrief }, selectedAssignee, `Manager approved — assigned to designer: ${name}`, finalBrief)
+                          }} disabled={!selectedAssignee || actionLoading || editingBrief}
                             className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
                             {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Approve and assign to designer'}
                           </button>
@@ -1241,33 +1425,86 @@ export default function CustomerDetailPage() {
                               <p className="text-[9px] font-bold text-gray-500 mb-2">
                                 Post ID: {generatePostCode(selectedCell.split('-').slice(0, 3).join('-'), selectedCell.split('-')[3])}
                               </p>
-                              <button onClick={handlePlanSlot} disabled={actionLoading}
-                                className="w-full bg-pink-600 text-white rounded-lg py-2 text-[10px] font-bold disabled:opacity-40">
-                                {actionLoading ? <Loader2 size={12} className="animate-spin mx-auto" /> : 'Plan this slot + send WhatsApp'}
+                              {/* Expiry date — required to lock the plan in one go */}
+                              <label className="block text-[9px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Plan expires on</label>
+                              <input
+                                type="date"
+                                value={expiryDate}
+                                onChange={e => setExpiryDate(e.target.value)}
+                                min={selectedCell.split('-').slice(0, 3).join('-')}
+                                className="w-full bg-white border border-pink-200 rounded-lg px-2.5 py-1.5 text-[10px] font-medium outline-none focus:border-pink-400 mb-2"
+                              />
+                              <button
+                                onClick={handlePlanAndExpiry}
+                                disabled={!expiryDate || actionLoading}
+                                className="w-full bg-pink-600 text-white rounded-lg py-2.5 text-[10px] font-bold disabled:opacity-40">
+                                {actionLoading
+                                  ? <Loader2 size={12} className="animate-spin mx-auto" />
+                                  : 'Plan + lock expiry + send WhatsApp →'}
                               </button>
+                              <p className="text-[8px] text-gray-400 font-medium mt-1.5 leading-snug">
+                                One action: saves the slot, locks the expiry date,
+                                sends the customer a single WhatsApp with both dates,
+                                and marks this step done.
+                              </p>
                             </div>
                           )}
                         </div>
                       )}
-                      <button onClick={handleMarkPublished} disabled={actionLoading}
-                        className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
-                        {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Mark as published'}
-                      </button>
-                      <div>
-                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Validity expiry date</label>
-                        <input type="date" value={expiryDate} onChange={e => setExpiryDate(e.target.value)}
-                          className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none" />
-                      </div>
-                      <button onClick={handleSetExpiry} disabled={!expiryDate || actionLoading}
-                        className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
-                        Set validity expiry — finalise
-                      </button>
                     </>
                   )}
                 </div>
               )}
             </div>
           )}
+
+          {/* ── PLAN LOCKED — read-only summary ─────────────── */}
+          {/* Shown when there's no active step (designer has locked the plan) */}
+          {/* and the customer has a planned slot. Visible to everyone — designer, */}
+          {/* manager, counselor, back office, admin — so they can review what was */}
+          {/* planned without any working controls. */}
+          {activeOrder && !activeStep && !isExpired && (plannedSlot || activeOrder.planned_post_date) && (
+            <div className="border-2 border-pink-100 rounded-2xl overflow-hidden">
+              <div className="bg-pink-50 px-4 py-3 flex items-center gap-2">
+                <CheckCircle size={14} className="text-pink-600" />
+                <p className="text-xs font-extrabold text-pink-700 uppercase tracking-wide">Plan locked</p>
+              </div>
+              <div className="p-4 space-y-3">
+                {plannedSlot && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2">
+                      <p className="text-[8px] font-bold text-gray-400 uppercase tracking-wide">Post date</p>
+                      <p className="text-xs font-bold text-gray-800 mt-0.5">
+                        {new Date(plannedSlot.slot_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </p>
+                      <p className="text-[9px] text-gray-500 font-medium">{SLOT_LABELS[plannedSlot.slot_time]}</p>
+                    </div>
+                    <div className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2">
+                      <p className="text-[8px] font-bold text-gray-400 uppercase tracking-wide">Plan expires</p>
+                      <p className="text-xs font-bold text-gray-800 mt-0.5">
+                        {activeOrder.validity_expires_at
+                          ? new Date(activeOrder.validity_expires_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+                          : '—'}
+                      </p>
+                      <p className="text-[9px] text-gray-500 font-medium font-mono">{plannedSlot.post_id_code}</p>
+                    </div>
+                  </div>
+                )}
+                {completedBrief && (
+                  <div className="bg-gray-50 border border-gray-100 rounded-xl p-3">
+                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1.5">Brief (read-only)</p>
+                    <p className="text-xs text-gray-700 font-medium leading-relaxed whitespace-pre-wrap">
+                      {completedBrief}
+                    </p>
+                  </div>
+                )}
+                <p className="text-[9px] text-gray-400 font-medium leading-snug">
+                  This order's process is complete. The full history is shown below.
+                </p>
+              </div>
+            </div>
+          )}
+
 
           {/* PARTNER LINK */}
           {(role === 'back_office' || role === 'admin') && activeOrder && (

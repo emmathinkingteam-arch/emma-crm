@@ -9,10 +9,8 @@ export function normalisePhone(phone: string, countryCode = '94'): string {
   const digits = phone.replace(/\D/g, '')
   if (digits.startsWith('00')) return digits.slice(2)
   if (digits.startsWith('0')) return countryCode + digits.slice(1)
-  if (digits.startsWith(countryCode)) return digits
-  return countryCode + digits
+  return digits
 }
-
 // ── WhatsApp wa.me link builder ──────────────────────────────
 // Always normalises to international format (94XXXXXXXXX) — wa.me silently
 // rejects local-format numbers and shows an "Invalid phone number" page.

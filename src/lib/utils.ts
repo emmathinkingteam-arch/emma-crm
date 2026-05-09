@@ -29,14 +29,21 @@ export function normalisePhone(phone: string, countryCode = '94'): string {
   return countryCode + digits
 }
 // ── WhatsApp wa.me link builder ──────────────────────────────
-// Customer phones are stored in international format
-// (e.g. "94777887542", "919876543210", "971557876839") so we trust that
-// and just strip non-digits / a stray "00" prefix. We do NOT re-run
-// normalisePhone here because its default dial code is Sri Lanka's 94,
-// which would mangle numbers from any other country.
+// Customer phones are stored in international format (e.g. "94777887542",
+// "919876543210", "971557876839") so we trust that and just strip
+// non-digits / a stray "00" prefix.
+//
+// DEFENSIVE FALLBACK: legacy entries created before the smart-paste fix
+// got saved without any country code (e.g. "723092676") because a bare
+// SL local number starting with "7" was misclassified as Russia (+7),
+// the "7" stripped, and "94" never prepended. International numbers
+// with their dial code are always ≥10 digits, so anything shorter is
+// assumed to be a bare Sri Lankan local — prepend "94" so the WhatsApp
+// link still works for those legacy customers.
 export function buildWaLink(phone: string, message: string): string {
   let digits = phone.replace(/\D/g, '')
   if (digits.startsWith('00')) digits = digits.slice(2)
+  if (digits.length < 10) digits = '94' + digits.replace(/^0+/, '')
   return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`
 }
 

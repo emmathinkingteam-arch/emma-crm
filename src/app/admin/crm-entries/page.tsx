@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { fmtDate, fmtTime } from '@/lib/utils'
+import { fmtDate, fmtTime, normalisePhone } from '@/lib/utils'
+import { detectCountryFromPaste } from '@/lib/country-codes'
 import {
   ChevronDown, ChevronUp, MessageCircle, PhoneCall,
   ThumbsUp, ShoppingCart, Phone, Search, Loader2,
-  Star, Package, Filter
+  Star, Package, Filter, Pencil, Check, X, AlertCircle
 } from 'lucide-react'
 
 interface Interaction {
@@ -34,6 +35,31 @@ const TYPE_CONFIG = {
   order: { icon: ShoppingCart, bg: 'bg-green-50', text: 'text-green-600', badge: 'bg-green-50 text-green-600', label: 'Order' },
 }
 
+// ── Phone input → clean international digits ─────────────────
+// Accepts any format the admin types or pastes:
+//   "+94 72 309 2676"  → "94723092676"   (explicit + → detect country)
+//   "0094 72 309 2676" → "94723092676"   (00 prefix → detect country)
+//   "0723092676"       → "94723092676"   (leading 0 → assume SL)
+//   "723092676"        → "94723092676"   (bare local → assume SL)
+//   "+1 234 567 8901"  → "12345678901"   (US, detected via +)
+// Returns '' if the digits are too short to be a real phone number.
+function cleanPhoneInput(input: string): string {
+  const trimmed = input.trim()
+  const digitsRaw = trimmed.replace(/\D/g, '')
+  if (digitsRaw.length < 7) return ''
+
+  // Explicit international prefix → try country auto-detect
+  const hasPlus = /^\s*\+/.test(trimmed)
+  if (hasPlus) {
+    const detected = detectCountryFromPaste(trimmed)
+    if (detected) return detected.dial + detected.local
+  }
+  if (digitsRaw.startsWith('00')) return digitsRaw.slice(2)
+
+  // No international prefix → default to Sri Lanka (94)
+  return normalisePhone(digitsRaw, '94')
+}
+
 export default function CRMEntriesPage() {
   const [entries, setEntries] = useState<CustomerRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -48,6 +74,12 @@ export default function CRMEntriesPage() {
   const [interactions, setInteractions] = useState<Interaction[]>([])
   const [interactionsLoading, setInteractionsLoading] = useState(false)
   const [typeFilter, setTypeFilter] = useState<'all' | 'message' | 'call' | 'feedback' | 'order'>('all')
+
+  // Phone-edit state
+  const [editingPhoneId, setEditingPhoneId] = useState<string | null>(null)
+  const [phoneDraft, setPhoneDraft] = useState('')
+  const [phoneSaving, setPhoneSaving] = useState(false)
+  const [phoneError, setPhoneError] = useState('')
 
   useEffect(() => {
     supabase.from('users').select('id,full_name').eq('role', 'crm_agent')
@@ -78,6 +110,9 @@ export default function CRMEntriesPage() {
   }
 
   const toggleExpand = async (customerId: string) => {
+    // Don't toggle while editing this row's phone
+    if (editingPhoneId === customerId) return
+
     // Collapse if same row
     if (expandedId === customerId) {
       setExpandedId(null)
@@ -98,6 +133,64 @@ export default function CRMEntriesPage() {
 
     if (data) setInteractions(data as Interaction[])
     setInteractionsLoading(false)
+  }
+
+  // ── Phone editing handlers ──────────────────────────────────
+  const startEditPhone = (entry: CustomerRow) => {
+    setEditingPhoneId(entry.id)
+    setPhoneDraft('+' + entry.phone)
+    setPhoneError('')
+  }
+
+  const cancelEditPhone = () => {
+    setEditingPhoneId(null)
+    setPhoneDraft('')
+    setPhoneError('')
+  }
+
+  const savePhone = async (entry: CustomerRow) => {
+    const newPhone = cleanPhoneInput(phoneDraft)
+    if (!newPhone) {
+      setPhoneError('Phone number is too short or invalid')
+      return
+    }
+    if (newPhone === entry.phone) {
+      cancelEditPhone()
+      return
+    }
+
+    setPhoneSaving(true)
+    setPhoneError('')
+
+    // Duplicate check — another customer must not already own this phone
+    const { data: dupe } = await supabase
+      .from('customers')
+      .select('id')
+      .eq('phone', newPhone)
+      .neq('id', entry.id)
+      .maybeSingle()
+
+    if (dupe) {
+      setPhoneError(`Already used by another customer (+${newPhone})`)
+      setPhoneSaving(false)
+      return
+    }
+
+    const { error } = await supabase
+      .from('customers')
+      .update({ phone: newPhone })
+      .eq('id', entry.id)
+
+    if (error) {
+      setPhoneError(error.message || 'Could not save')
+      setPhoneSaving(false)
+      return
+    }
+
+    // Update local state so the UI reflects the change without a full refetch
+    setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, phone: newPhone } : e))
+    setPhoneSaving(false)
+    cancelEditPhone()
   }
 
   // Search filter
@@ -197,13 +290,14 @@ export default function CRMEntriesPage() {
             {displayed.map(entry => {
               const isExpanded = expandedId === entry.id
               const hasOrder = (entry.orders?.length || 0) > 0
+              const isEditingPhone = editingPhoneId === entry.id
 
               return (
                 <div key={entry.id}>
                   {/* ── Customer Row ── */}
                   <div
                     onClick={() => toggleExpand(entry.id)}
-                    className={`grid grid-cols-[2fr_2fr_2fr_1.5fr_1fr_1fr_40px] gap-0 cursor-pointer transition-colors ${isExpanded
+                    className={`grid grid-cols-[2fr_2fr_2fr_1.5fr_1fr_1fr_40px] gap-0 transition-colors ${isEditingPhone ? 'cursor-default' : 'cursor-pointer'} ${isExpanded
                       ? 'bg-pink-50 border-l-4 border-l-pink-500'
                       : 'hover:bg-gray-50/80 border-l-4 border-l-transparent'
                       }`}
@@ -214,7 +308,50 @@ export default function CRMEntriesPage() {
                           ? <Star size={12} className="text-red-500 fill-red-500" />
                           : <Phone size={12} className="text-pink-400" />}
                       </div>
-                      <span className="text-xs font-semibold text-gray-800">{entry.phone}</span>
+
+                      {isEditingPhone ? (
+                        // Edit mode — input + Save / Cancel
+                        <div className="flex-1 flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                          <input
+                            type="tel"
+                            autoFocus
+                            value={phoneDraft}
+                            onChange={e => { setPhoneDraft(e.target.value); setPhoneError('') }}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') savePhone(entry)
+                              if (e.key === 'Escape') cancelEditPhone()
+                            }}
+                            placeholder="+94 72 309 2676"
+                            disabled={phoneSaving}
+                            className={`flex-1 min-w-0 text-xs font-semibold bg-white border rounded-lg px-2 py-1.5 outline-none focus:border-pink-400 disabled:opacity-60 ${phoneError ? 'border-red-300' : 'border-gray-200'}`}
+                          />
+                          <button
+                            onClick={() => savePhone(entry)}
+                            disabled={phoneSaving}
+                            title="Save"
+                            className="w-7 h-7 rounded-lg bg-pink-600 text-white flex items-center justify-center hover:bg-pink-700 disabled:opacity-60 flex-shrink-0">
+                            {phoneSaving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                          </button>
+                          <button
+                            onClick={cancelEditPhone}
+                            disabled={phoneSaving}
+                            title="Cancel"
+                            className="w-7 h-7 rounded-lg bg-white border border-gray-200 text-gray-500 flex items-center justify-center hover:bg-gray-50 disabled:opacity-60 flex-shrink-0">
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ) : (
+                        // View mode — phone text + pencil edit button
+                        <>
+                          <span className="text-xs font-semibold text-gray-800">+{entry.phone}</span>
+                          <button
+                            onClick={e => { e.stopPropagation(); startEditPhone(entry) }}
+                            title="Edit phone number"
+                            className="text-gray-300 hover:text-pink-500 transition-colors flex-shrink-0">
+                            <Pencil size={11} />
+                          </button>
+                        </>
+                      )}
                     </div>
                     <div className="px-4 py-3.5 flex items-center">
                       <span className="text-xs font-medium text-gray-600">{entry.name || '—'}</span>
@@ -241,6 +378,23 @@ export default function CRMEntriesPage() {
                         : <ChevronDown size={14} className="text-gray-300" />}
                     </div>
                   </div>
+
+                  {/* ── Phone-edit error / preview banner ── */}
+                  {isEditingPhone && (
+                    <div className="bg-pink-50/60 border-t border-pink-100 px-6 py-2.5 flex items-center justify-between gap-3 flex-wrap">
+                      {phoneError ? (
+                        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-red-600">
+                          <AlertCircle size={12} />
+                          {phoneError}
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-gray-500 font-medium">
+                          Will save as <span className="font-bold text-gray-800">+{cleanPhoneInput(phoneDraft) || '—'}</span>
+                          <span className="text-gray-300"> · Press Enter to save, Esc to cancel</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* ── Expanded History Panel ── */}
                   {isExpanded && (

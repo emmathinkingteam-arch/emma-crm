@@ -4,19 +4,40 @@ import { MONTH_CODES, TimeSlot } from '@/types'
 export const KOKO_SERVICE_CHARGE_RATE = 0.1236 // 12.36%
 
 // ── Phone normalisation ──────────────────────────────────────
-// Converts any Sri Lankan format to international (94XXXXXXXXX)
+// Converts any local/international format to plain international digits
+// (e.g. "94777887542") given a dial-code hint.
+//
+// Handles four input shapes:
+//   "+94 77 788 7542"  → already international with +     → "94777887542"
+//   "0094 77 788 7542" → already international with 00    → "94777887542"
+//   "0777887542"       → local with leading 0             → "94777887542"
+//   "777887542"        → bare local digits (no leading 0) → "94777887542"
+//
+// The last case is the important one: paste-detector strips the dial code
+// before handing the number to us, so by the time we save it the leading
+// zero is gone too. Without prepending the dial, the CRM saves the number
+// without any country code and wa.me later interprets the leading "7"
+// as the Russia/Kazakhstan dial.
 export function normalisePhone(phone: string, countryCode = '94'): string {
   const digits = phone.replace(/\D/g, '')
+  if (!digits) return ''
   if (digits.startsWith('00')) return digits.slice(2)
   if (digits.startsWith('0')) return countryCode + digits.slice(1)
-  return digits
+  // Already starts with the supplied dial code — assume international.
+  if (digits.startsWith(countryCode)) return digits
+  // Bare local digits (no leading 0, no dial code) — prepend the dial.
+  return countryCode + digits
 }
 // ── WhatsApp wa.me link builder ──────────────────────────────
-// Always normalises to international format (94XXXXXXXXX) — wa.me silently
-// rejects local-format numbers and shows an "Invalid phone number" page.
+// Customer phones are stored in international format
+// (e.g. "94777887542", "919876543210", "971557876839") so we trust that
+// and just strip non-digits / a stray "00" prefix. We do NOT re-run
+// normalisePhone here because its default dial code is Sri Lanka's 94,
+// which would mangle numbers from any other country.
 export function buildWaLink(phone: string, message: string): string {
-  const normalised = normalisePhone(phone)
-  return `https://wa.me/${normalised}?text=${encodeURIComponent(message)}`
+  let digits = phone.replace(/\D/g, '')
+  if (digits.startsWith('00')) digits = digits.slice(2)
+  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`
 }
 
 // ── Popup-blocker-safe WhatsApp opener ───────────────────────

@@ -9,6 +9,7 @@ import BottomNav from '@/components/shared/BottomNav'
 import { Customer } from '@/types'
 import { Search, Phone, ChevronRight, Loader2, Star, CalendarDays, CreditCard } from 'lucide-react'
 import Link from 'next/link'
+import { formatPhoneDisplay } from '@/lib/country-codes'
 
 type NoteFilter = 'all' | 'package_sent' | 'bank_sent' | 'will_buy_on'
 
@@ -332,12 +333,12 @@ export default function CustomersPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <p className={`text-xs font-bold truncate ${nameColor}`}>
-                        {c.name || c.phone}
+                        {c.name || formatPhoneDisplay(c.phone)}
                       </p>
                       {badge}
                     </div>
                     <p className={`text-[9px] font-medium ${subColor}`}>
-                      {c.name ? c.phone : new Date(c.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      {c.name ? formatPhoneDisplay(c.phone) : new Date(c.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </p>
                     {/* Note type indicators */}
                     {(c.packageSent || c.bankSent) && (

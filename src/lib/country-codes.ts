@@ -223,25 +223,53 @@ export const COUNTRY_CODES: CountryCode[] = [
 // number like "72 309 2676" would falsely match dial '7' (Russia/
 // Kazakhstan), strip the leading '7', and save '723092676' with no
 // SL country code — breaking every WhatsApp link from there on.
+//
+// Now also handles pastes where the number is embedded inside other
+// text (e.g. "Call me on +44 20 7946 0958 thanks") — we scan the
+// string for a "+xx" or "00xx" pattern first, then fall back to the
+// original "starts-with-+" check for backward compatibility.
 export function detectCountryFromPaste(text: string): { dial: string; local: string } | null {
   if (!text) return null
   const cleaned = text.trim()
-  const digitsRaw = cleaned.replace(/\D/g, '')
-  if (digitsRaw.length < 6) return null
 
-  const hasPlusPrefix = /^\s*\+/.test(cleaned)
-  let digits = digitsRaw
-  let hasIntlPrefix = hasPlusPrefix
+  let digits = ''
+  let hasIntlPrefix = false
 
-  // Some users copy "0094..." instead of "+94..."
-  if (digits.startsWith('00')) {
-    digits = digits.slice(2)
+  // ── Pass 1: find a "+XX..." anywhere in the pasted text ────
+  // Matches +, then 7-25 chars of digits/spaces/-/.()
+  const plusMatch = cleaned.match(/\+(\d[\d\s\-().]{6,25})/)
+  if (plusMatch) {
+    digits = plusMatch[1].replace(/\D/g, '')
     hasIntlPrefix = true
+  }
+
+  // ── Pass 2: find a "00XX..." anywhere in the pasted text ───
+  if (!hasIntlPrefix) {
+    const zeroMatch = cleaned.match(/(?:^|[^\d])00(\d[\d\s\-().]{6,25})/)
+    if (zeroMatch) {
+      digits = zeroMatch[1].replace(/\D/g, '')
+      hasIntlPrefix = true
+    }
+  }
+
+  // ── Pass 3: legacy fallback — paste is just digits with + at start ──
+  if (!hasIntlPrefix) {
+    const digitsRaw = cleaned.replace(/\D/g, '')
+    if (digitsRaw.length < 6) return null
+    const hasPlusPrefix = /^\s*\+/.test(cleaned)
+    if (digitsRaw.startsWith('00')) {
+      digits = digitsRaw.slice(2)
+      hasIntlPrefix = true
+    } else if (hasPlusPrefix) {
+      digits = digitsRaw
+      hasIntlPrefix = true
+    }
   }
 
   // No clear international prefix → don't guess. Caller will use the
   // dropdown's selected country dial code (defaults to Sri Lanka 94).
   if (!hasIntlPrefix) return null
+  if (digits.length < 7) return null
 
   // Sort longest dial first so "971" is tried before "97" (none) and "9"
   // (none), and "1" doesn't accidentally swallow other countries' numbers.
@@ -258,4 +286,40 @@ export function detectCountryFromPaste(text: string): { dial: string; local: str
   }
 
   return null
+}
+
+// ── Display formatter ─────────────────────────────────────────
+// Stored phones are bare international digits like "94777887542" or
+// "442079460958". For the UI we want to show "+94 77 788 7542" or
+// "+44 20 7946 0958" so the country is obvious to the agent.
+//
+// We split the dial code first (longest match wins, same algo as
+// detectCountryFromPaste), then group the local part in chunks of
+// 3-4 digits from the right for readability. If we can't match a
+// dial code, we just prefix '+' and return the digits unchanged.
+export function formatPhoneDisplay(phone: string): string {
+  if (!phone) return ''
+  let digits = phone.replace(/\D/g, '')
+  if (digits.startsWith('00')) digits = digits.slice(2)
+  if (!digits) return ''
+
+  const sorted = [...COUNTRY_CODES].sort((a, b) => b.dial.length - a.dial.length)
+  for (const cc of sorted) {
+    if (digits.startsWith(cc.dial)) {
+      const local = digits.slice(cc.dial.length)
+      if (local.length >= 6 && local.length <= 14) {
+        // Group in 3s from the right, leaving a 2-4 digit head
+        let grouped = ''
+        let rest = local
+        while (rest.length > 4) {
+          grouped = ' ' + rest.slice(-3) + grouped
+          rest = rest.slice(0, -3)
+        }
+        grouped = rest + grouped
+        return `+${cc.dial} ${grouped}`
+      }
+    }
+  }
+  // Fallback — just prefix +
+  return `+${digits}`
 }

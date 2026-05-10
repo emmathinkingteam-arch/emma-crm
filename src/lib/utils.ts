@@ -78,8 +78,11 @@ export const WA = {
   send2ndInstallmentInvoice: (name: string, invoiceUrl: string) =>
     `Hi ${name},\n\nPlease find your 2nd installment invoice below for your reference.\n\n${invoiceUrl}\n\n---\n\nThank you for completing your payment.\n\nEmma Thinking (Pvt) Ltd`,
 
-  sessionStart: (name: string) =>
-    `Hi ${name},\n\nYour counselling session has now started and I will be your personal counselor throughout this process.\n\nCould you please share your available dates and times so we can schedule our meeting at a time that suits you?\n\nLooking forward to speaking with you.\n\nEmma Thinking (Pvt) Ltd`,
+  sessionStart: (name: string, availability?: string | null) =>
+    `Hi ${name},\n\nYour counselling session has now started and I will be your personal counselor throughout this process.\n\n${availability
+      ? availability + '\n\n'
+      : 'Could you please share your available dates and times so we can schedule our meeting at a time that suits you?\n\n'
+    }Looking forward to speaking with you.\n\nEmma Thinking (Pvt) Ltd`,
 
   confirmTime: (name: string, date: string, time: string, meetLink: string) =>
     `Hi ${name},\n\nYour counselling session has been confirmed. Please find the details below.\n\n   Date     : ${date}\n   Time     : ${time}\n   Meeting  : ${meetLink}\n\nKindly join the meeting on time. If you need to reschedule, please let us know in advance.\n\nWe look forward to speaking with you.\n\nEmma Thinking (Pvt) Ltd`,
@@ -355,4 +358,31 @@ td{padding:14px 8px;font-size:12px;border-bottom:1px solid #eee}
 </div>
 </body>
 </html>`
+}
+
+// ── Counselor availability ───────────────────────────────────
+// Some counselors have fixed booking windows. When that counselor
+// accepts a job, the WhatsApp "session start" message should tell
+// the customer when the counselor is free instead of asking the
+// customer to propose times.
+//
+// Match is by full_name (case-insensitive substring). Add new entries
+// here as more counselors come on board with fixed slots.
+const COUNSELOR_AVAILABILITY: { match: string; text: string }[] = [
+  {
+    match: 'rashi',
+    text:
+      'My available time slots for the meeting are Monday to Saturday, ' +
+      'between 7:00 PM and 10:00 PM. Please reply with the date and time ' +
+      'that works best for you within this window so I can confirm the booking.',
+  },
+]
+
+export function getCounselorAvailability(user?: { full_name?: string } | null): string | null {
+  if (!user?.full_name) return null
+  const name = user.full_name.toLowerCase()
+  for (const entry of COUNSELOR_AVAILABILITY) {
+    if (name.includes(entry.match)) return entry.text
+  }
+  return null
 }

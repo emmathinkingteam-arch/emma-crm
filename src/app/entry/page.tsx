@@ -6,9 +6,9 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
-import { Loader2, ChevronRight, ClipboardCheck } from 'lucide-react'
+import { Loader2, ChevronRight, ClipboardCheck, ClipboardPaste } from 'lucide-react'
 import { normalisePhone } from '@/lib/utils'
-import { COUNTRY_CODES, detectCountryFromPaste } from '@/lib/country-codes'
+import { COUNTRY_CODES, detectCountryFromPaste, formatPhoneDisplay } from '@/lib/country-codes'
 
 export default function EntryPage() {
   const router = useRouter()
@@ -19,6 +19,7 @@ export default function EntryPage() {
   const [dailyCount, setDailyCount] = useState(0)
   const [pasted, setPasted] = useState(false)
   const [detectedFlag, setDetectedFlag] = useState('')
+  const [pasteError, setPasteError] = useState('')
 
   useEffect(() => {
     if (role && role !== 'crm_agent') {
@@ -39,8 +40,14 @@ export default function EntryPage() {
   }
 
   const handleSmartPaste = async () => {
+    setPasteError('')
     try {
       const text = await navigator.clipboard.readText()
+      if (!text) {
+        setPasteError('Clipboard is empty')
+        setTimeout(() => setPasteError(''), 2500)
+        return
+      }
       const detected = detectCountryFromPaste(text)
 
       if (detected) {
@@ -59,9 +66,14 @@ export default function EntryPage() {
         setPhone(digits)
         setPasted(true)
         setTimeout(() => setPasted(false), 2000)
+      } else {
+        setPasteError("Couldn't find a phone number in clipboard")
+        setTimeout(() => setPasteError(''), 3000)
       }
     } catch {
       // clipboard permission denied
+      setPasteError('Clipboard permission denied — paste manually')
+      setTimeout(() => setPasteError(''), 3500)
     }
   }
 
@@ -87,6 +99,11 @@ export default function EntryPage() {
     setLoading(false)
   }
 
+  // Pre-formatted preview of the full international number
+  const fullPhonePreview = phone
+    ? formatPhoneDisplay(normalisePhone(phone, countryDial))
+    : ''
+
   return (
     <div className="h-screen flex flex-col bg-white overflow-hidden">
       <TopNav />
@@ -95,13 +112,36 @@ export default function EntryPage() {
         <div className="max-w-sm mx-auto">
 
           {/* Header */}
-          <div className="text-center pt-6 pb-8">
+          <div className="text-center pt-6 pb-6">
             <div className="w-12 h-12 bg-pink-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <span className="text-2xl">📞</span>
             </div>
             <h1 className="text-xl font-bold text-gray-900 tracking-tight">New Job Entry</h1>
             <p className="text-xs text-gray-400 font-medium mt-1">Paste from WhatsApp — auto-detects country</p>
           </div>
+
+          {/* Big visible paste button — works whether the input is empty or filled */}
+          <button
+            onClick={handleSmartPaste}
+            className="w-full bg-pink-50 border-2 border-dashed border-pink-300 rounded-2xl py-4 mb-3 flex items-center justify-center gap-2 text-pink-600 font-bold text-sm active:scale-95 transition-all"
+          >
+            {pasted && detectedFlag ? (
+              <>
+                <span className="text-lg">{detectedFlag}</span>
+                <span>Pasted — country auto-detected</span>
+              </>
+            ) : (
+              <>
+                <ClipboardPaste size={18} /> Paste number from clipboard
+              </>
+            )}
+          </button>
+
+          {pasteError && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mb-3 text-[11px] font-semibold text-amber-700 text-center">
+              {pasteError}
+            </div>
+          )}
 
           {/* Input */}
           <div className="flex gap-2 mb-3">
@@ -134,8 +174,17 @@ export default function EntryPage() {
             </div>
           </div>
 
+          {/* Live preview of the full international number — shows the
+              agent exactly what will be saved & used by WhatsApp links. */}
+          {fullPhonePreview && (
+            <div className="bg-green-50 border border-green-200 rounded-2xl px-4 py-2.5 mb-3 flex items-center justify-between">
+              <span className="text-[10px] font-bold text-green-600 uppercase tracking-wide">Will save as</span>
+              <span className="text-sm font-bold text-green-700 tracking-wide">{fullPhonePreview}</span>
+            </div>
+          )}
+
           <div className="bg-pink-50 border border-pink-100 rounded-2xl px-4 py-3 mb-6 text-xs text-gray-500 font-medium">
-            Tap the paste icon — supports formats like <span className="font-bold text-gray-700">+94 76 259 8504</span>, <span className="font-bold text-gray-700">+39 366 936 8901</span>, <span className="font-bold text-gray-700">+971 55 787 6839</span>. Spaces and symbols are stripped automatically.
+            Tap the paste button — supports formats like <span className="font-bold text-gray-700">+94 76 259 8504</span>, <span className="font-bold text-gray-700">+39 366 936 8901</span>, <span className="font-bold text-gray-700">+44 20 7946 0958</span>. Spaces and symbols are stripped automatically.
           </div>
 
           <button

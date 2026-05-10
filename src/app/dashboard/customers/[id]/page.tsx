@@ -12,7 +12,8 @@ import {
   CreditCard, AlertCircle, Pencil, Receipt, Building2
 } from 'lucide-react'
 import { Customer, Order, OrderStep, Interaction, Package as Pkg, MONTH_CODES } from '@/types'
-import { fmtDate, fmtTime, buildWaLink, openWaLink, WA, KOKO_SERVICE_CHARGE_RATE } from '@/lib/utils'
+import { fmtDate, fmtTime, buildWaLink, openWaLink, WA, KOKO_SERVICE_CHARGE_RATE, getCounselorAvailability } from '@/lib/utils'
+import { formatPhoneDisplay } from '@/lib/country-codes'
 
 const SLOT_LABELS: Record<string, string> = { W: '6:30am', X: '11:30am', Y: '3:30pm', Z: '8:30pm' }
 const SLOTS = ['W', 'X', 'Y', 'Z'] as const
@@ -351,11 +352,28 @@ export default function CustomerDetailPage() {
   }
 
   const handleConfirmMeeting = async () => {
-    if (!meetingDate || !meetingTime || !customer) return
+    if (!meetingDate || !meetingTime || !customer || !activeStep) return
     const link = (user as any)?.meeting_link || 'https://meet.google.com'
     const msg = `Ayubowan ${customer.name || customer.phone}!\n\nYour Emma Thinking counselling session has been confirmed.\n\nDate: ${meetingDate}\nTime: ${meetingTime}\nGoogle Meet: ${link}\n\nThank you for choosing Emma Thinking!`
     openWa(buildWaLink(customer.phone, msg))
-    await logAction(`Meeting confirmed — ${meetingDate} at ${meetingTime}`)
+
+    // Reset the counselor's step deadline to (meeting datetime + 2 days).
+    // The original 48hr deadline was only meant to cover the acceptance
+    // window. Once the meeting is locked in, the counselor needs the
+    // meeting itself + 2 days after to wrap up the brief — otherwise
+    // they go overdue before the meeting even happens. We also clear
+    // any prior admin-granted extension since this new deadline
+    // supersedes it.
+    const meetingDateTime = new Date(`${meetingDate}T${meetingTime}`)
+    const newDeadline = new Date(meetingDateTime.getTime() + 2 * 86400000).toISOString()
+    await supabase.from('order_steps').update({
+      deadline: newDeadline,
+      extended_deadline: null,
+      extension_reason: null,
+      extended_by_days: null,
+    }).eq('id', activeStep.id)
+
+    await logAction(`Meeting confirmed — ${meetingDate} at ${meetingTime} · deadline reset to 2 days after meeting`)
     await fetchAll()
   }
 
@@ -845,7 +863,7 @@ export default function CustomerDetailPage() {
                   <>
                     <div className="flex items-center gap-1.5">
                       <p className={`text-sm font-bold truncate ${customer.is_priority ? 'text-red-700' : 'text-gray-800'}`}>
-                        {customer.name || customer.phone}
+                        {customer.name || formatPhoneDisplay(customer.phone)}
                       </p>
                       {(role === 'crm_agent' || role === 'admin') && (
                         <button
@@ -859,7 +877,7 @@ export default function CustomerDetailPage() {
                         <span className="text-[8px] font-bold bg-red-500 text-white px-2 py-0.5 rounded-full uppercase tracking-wide flex-shrink-0">Priority</span>
                       )}
                     </div>
-                    {customer.name && <p className={`text-xs font-medium ${customer.is_priority ? 'text-red-400' : 'text-gray-400'}`}>{customer.phone}</p>}
+                    {customer.name && <p className={`text-xs font-medium ${customer.is_priority ? 'text-red-400' : 'text-gray-400'}`}>{formatPhoneDisplay(customer.phone)}</p>}
                   </>
                 )}
               </div>
@@ -1093,7 +1111,12 @@ export default function CustomerDetailPage() {
                       // browsers don't block the new tab. The previous order
                       // (`await doAccept()` first) is what was breaking the
                       // WhatsApp button after the counsellor clicked Accept.
-                      openWa(buildWaLink(customer.phone, WA.sessionStart(customer.name || customer.phone)))
+                      //
+                      // If the logged-in counselor has fixed booking hours
+                      // (e.g. Rashi: Mon-Sat 7-10 PM), include those hours
+                      // in the message so the customer doesn't have to ask.
+                      const availability = getCounselorAvailability(user)
+                      openWa(buildWaLink(customer.phone, WA.sessionStart(customer.name || customer.phone, availability)))
                       await doAccept()
                       await logAction('Session start message sent via WhatsApp')
                       await fetchAll()
@@ -1940,7 +1963,7 @@ function LogInteractionForm({ customerId, userId, onSaved }: { customerId: strin
       <div className="flex gap-1.5">
         {(['message', 'call', 'feedback'] as const).map(t => (
           <button key={t} onClick={() => setType(t)}
-            className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase transition-all capitalize ${type === t ? 'bg-pink-600 text-white' : 'bg-white text-gray-400 border border-gray-200'}`}>
+            className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase transition-all ${type === t ? 'bg-pink-600 text-white' : 'bg-white text-gray-400 border border-gray-200'}`}>
             {t}
           </button>
         ))}

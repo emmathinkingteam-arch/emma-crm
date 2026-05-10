@@ -6,9 +6,30 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
-import { Loader2, Camera, LogOut, MapPin, Wallet } from 'lucide-react'
+import { Loader2, Camera, LogOut, MapPin, FileText, Download, Wallet } from 'lucide-react'
 import { canPunchOut, currentMonthYear, fmtDate } from '@/lib/utils'
 import { Attendance, LeaveRequest, RewardMilestone } from '@/types'
+
+// ── Document storage layout ─────────────────────────────────
+// All worker-facing documents live in the `attendance-records`
+// bucket. We split by doc_type with a path prefix so a single
+// bucket can hold both salary sheets and attendance sheets:
+//   salary/{user_id}/<filename>.pdf
+//   attendance/{user_id}/<filename>.pdf
+// Files are listed with .list() and shown to the worker as a
+// clickable list. URLs are SIGNED (1 hour) so we don't depend on
+// the bucket being public — it works either way.
+const DOC_BUCKET = 'attendance-records'
+const SIGNED_URL_TTL = 60 * 60 // 1 hour
+
+interface WorkerDoc {
+  name: string         // filename only — used for display & download
+  path: string         // full path within the bucket
+  signedUrl: string
+  uploadedAt?: string
+  size?: number
+  type: 'salary' | 'attendance'
+}
 
 export default function ProfilePage() {
   const router = useRouter()
@@ -22,6 +43,7 @@ export default function ProfilePage() {
   const [dailyCount, setDailyCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState('')
   const [punchLoading, setPunchLoading] = useState(false)
   const [photoTs, setPhotoTs] = useState(Date.now())
   const [punchOutInfo, setPunchOutInfo] = useState({ canPunch: false, minsLeft: 0 })
@@ -29,11 +51,19 @@ export default function ProfilePage() {
   const [leaveType, setLeaveType] = useState<'annual' | 'casual' | 'sick'>('annual')
   const [leaveDate, setLeaveDate] = useState('')
   const [leaveReason, setLeaveReason] = useState('')
+
+  // Documents state (Task 3)
+  const [salaryDocs, setSalaryDocs] = useState<WorkerDoc[]>([])
+  const [attendanceDocs, setAttendanceDocs] = useState<WorkerDoc[]>([])
+  const [docsLoading, setDocsLoading] = useState(false)
+  const [docTab, setDocTab] = useState<'salary' | 'attendance'>('salary')
+
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!user) { router.replace('/auth/login'); return }
     fetchAll()
+    fetchDocuments()
   }, [user])
 
   const fetchAll = async () => {
@@ -63,6 +93,60 @@ export default function ProfilePage() {
     if ((dailyRes as any).count !== undefined) setDailyCount((dailyRes as any).count ?? 0)
     setLeaveBalance({ annual: user.annual_leaves_remaining, casual: user.casual_leaves_remaining })
     setLoading(false)
+  }
+
+  // ── Fetch worker documents (Task 3) ─────────────────────────
+  // Lists files under salary/{user_id}/ and attendance/{user_id}/
+  // and generates 1-hour signed URLs for each. Signed URLs work
+  // even when the bucket is private, so this is safe regardless of
+  // the bucket's public/private setting.
+  const fetchDocuments = async () => {
+    if (!user) return
+    setDocsLoading(true)
+    try {
+      const [salaryList, attendanceList] = await Promise.all([
+        supabase.storage.from(DOC_BUCKET).list(`salary/${user.id}`, { limit: 100, sortBy: { column: 'created_at', order: 'desc' } }),
+        supabase.storage.from(DOC_BUCKET).list(`attendance/${user.id}`, { limit: 100, sortBy: { column: 'created_at', order: 'desc' } }),
+      ])
+
+      const buildDocs = async (
+        items: any[] | null,
+        type: 'salary' | 'attendance',
+      ): Promise<WorkerDoc[]> => {
+        if (!items || items.length === 0) return []
+        // .list() returns folder placeholders too — filter to real files
+        const files = items.filter(i => i.name && i.id !== null)
+        const docs: WorkerDoc[] = []
+        for (const f of files) {
+          const path = `${type}/${user.id}/${f.name}`
+          const { data: signed } = await supabase.storage
+            .from(DOC_BUCKET)
+            .createSignedUrl(path, SIGNED_URL_TTL)
+          if (signed?.signedUrl) {
+            docs.push({
+              name: f.name,
+              path,
+              signedUrl: signed.signedUrl,
+              uploadedAt: f.created_at,
+              size: f.metadata?.size,
+              type,
+            })
+          }
+        }
+        return docs
+      }
+
+      const [s, a] = await Promise.all([
+        buildDocs(salaryList.data, 'salary'),
+        buildDocs(attendanceList.data, 'attendance'),
+      ])
+      setSalaryDocs(s)
+      setAttendanceDocs(a)
+    } catch (err) {
+      // Worker doesn't see fetch errors — empty lists just show "No documents"
+      console.error('Failed to fetch worker documents:', err)
+    }
+    setDocsLoading(false)
   }
 
   const handlePunchIn = async () => {
@@ -116,17 +200,62 @@ export default function ProfilePage() {
     setPunchLoading(false)
   }
 
+  // ── Photo upload (Task 4 — fixed) ───────────────────────────
+  // Bug-fixes vs the previous version:
+  //   1. Path was `avatars/<id>-<ts>.<ext>` INSIDE the `avatars` bucket
+  //      → object stored at avatars/avatars/<id>-... which is ugly and,
+  //      depending on RLS policies, can fail. New path: `<id>/photo-<ts>.<ext>`
+  //   2. All errors were swallowed silently (no `error` check), so the
+  //      user saw the spinner stop and nothing happen. Now we surface the
+  //      error message and clear it on next attempt.
+  //   3. We no longer rely on `setUser` updating the persisted Zustand
+  //      store before the next render — we cache-bust with photoTs which
+  //      already worked, and refresh `user` only after Supabase confirms.
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file || !user) return
+    // Reset the input so the same file can be re-selected after an error
+    e.target.value = ''
     setUploading(true)
-    const path = `avatars/${user.id}-${Date.now()}.${file.name.split('.').pop()}`
-    await supabase.storage.from('avatars').upload(path, file, { upsert: true })
-    const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path)
-    await supabase.from('users').update({ profile_photo_url: publicUrl }).eq('id', user.id)
-    setUser({ ...user, profile_photo_url: publicUrl })
-    setPhotoTs(Date.now())
-    setUploading(false)
+    setUploadError('')
+
+    try {
+      // Basic client-side validation
+      if (!file.type.startsWith('image/')) {
+        throw new Error('Please choose an image file (JPG, PNG, etc.)')
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        throw new Error('Image is larger than 5 MB — please pick a smaller one')
+      }
+
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase()
+      const path = `${user.id}/photo-${Date.now()}.${ext}`
+
+      const { error: upErr } = await supabase.storage
+        .from('avatars')
+        .upload(path, file, { upsert: true, contentType: file.type })
+      if (upErr) throw upErr
+
+      const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(path)
+      const publicUrl = urlData?.publicUrl
+      if (!publicUrl) throw new Error('Could not get public URL for the photo')
+
+      const { error: dbErr } = await supabase
+        .from('users')
+        .update({ profile_photo_url: publicUrl })
+        .eq('id', user.id)
+      if (dbErr) throw dbErr
+
+      setUser({ ...user, profile_photo_url: publicUrl })
+      setPhotoTs(Date.now())
+    } catch (err: any) {
+      const msg = err?.message || 'Upload failed — please try again'
+      setUploadError(msg)
+      // Auto-clear after 5 seconds
+      setTimeout(() => setUploadError(''), 5000)
+    } finally {
+      setUploading(false)
+    }
   }
 
   const submitLeave = async () => {
@@ -144,6 +273,20 @@ export default function ProfilePage() {
     await supabase.auth.signOut()
     clear()
     router.replace('/auth/login')
+  }
+
+  // ── Document download helper (Task 3) ───────────────────────
+  // Opens the signed URL in a new tab. Modern browsers will preview
+  // the PDF inline; the user gets a download icon in the PDF viewer.
+  const openDoc = (doc: WorkerDoc) => {
+    if (typeof window === 'undefined') return
+    const a = document.createElement('a')
+    a.href = doc.signedUrl
+    a.target = '_blank'
+    a.rel = 'noopener noreferrer'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
   }
 
   if (loading || !user) return (
@@ -164,6 +307,8 @@ export default function ProfilePage() {
     if (a.status === 'approved_leave') return '#9CA3AF'
     return '#E5E7EB'
   }
+
+  const activeDocs = docTab === 'salary' ? salaryDocs : attendanceDocs
 
   return (
     <div className="h-screen flex flex-col bg-white overflow-hidden">
@@ -191,6 +336,12 @@ export default function ProfilePage() {
           <span className="inline-block text-[9px] font-bold text-pink-600 bg-pink-50 px-3 py-1 rounded-full mt-1 uppercase tracking-wide">
             {user.role.replace('_', ' ')}
           </span>
+          {/* Photo upload error toast (Task 4) */}
+          {uploadError && (
+            <div className="mt-3 mx-auto max-w-xs bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-[11px] font-semibold text-red-600">
+              {uploadError}
+            </div>
+          )}
         </div>
 
         {/* Wallet card */}
@@ -273,6 +424,56 @@ export default function ProfilePage() {
                 <p className="text-[8px] font-bold text-gray-400 uppercase tracking-wide">Casual leaves</p>
                 <p className="text-base font-bold text-gray-700 mt-0.5">{leaveBalance.casual} left</p>
               </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── My documents (Task 3) ───────────────────────────── */}
+        {/* Salary sheets and attendance sheets that admin uploaded.
+            Workers can preview / download as PDF. */}
+        <div className="bg-gray-50 border border-gray-100 rounded-3xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+              <FileText size={12} /> My documents
+            </p>
+            <span className="text-[8px] text-gray-300 font-medium">{salaryDocs.length + attendanceDocs.length} total</span>
+          </div>
+          <div className="flex gap-1.5 mb-3">
+            <button onClick={() => setDocTab('salary')}
+              className={`flex-1 py-2 rounded-xl text-[10px] font-bold transition-all ${docTab === 'salary' ? 'bg-pink-600 text-white' : 'bg-white text-gray-400 border border-gray-200'}`}>
+              Salary sheets <span className="opacity-70">({salaryDocs.length})</span>
+            </button>
+            <button onClick={() => setDocTab('attendance')}
+              className={`flex-1 py-2 rounded-xl text-[10px] font-bold transition-all ${docTab === 'attendance' ? 'bg-pink-600 text-white' : 'bg-white text-gray-400 border border-gray-200'}`}>
+              Attendance sheets <span className="opacity-70">({attendanceDocs.length})</span>
+            </button>
+          </div>
+          {docsLoading ? (
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="animate-spin text-pink-400" size={18} />
+            </div>
+          ) : activeDocs.length === 0 ? (
+            <p className="text-[11px] text-gray-300 font-medium text-center py-4">
+              No {docTab === 'salary' ? 'salary' : 'attendance'} sheets uploaded yet
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {activeDocs.map(doc => (
+                <button key={doc.path} onClick={() => openDoc(doc)}
+                  className="w-full flex items-center gap-3 bg-white border border-gray-100 rounded-2xl px-3 py-2.5 hover:border-pink-200 active:scale-[0.98] transition-all text-left">
+                  <div className="w-8 h-8 rounded-xl bg-pink-50 flex items-center justify-center flex-shrink-0">
+                    <FileText size={14} className="text-pink-500" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-gray-700 truncate">{doc.name}</p>
+                    <p className="text-[9px] text-gray-400 font-medium">
+                      {doc.uploadedAt ? fmtDate(doc.uploadedAt) : '—'}
+                      {doc.size ? ` · ${(doc.size / 1024).toFixed(0)} KB` : ''}
+                    </p>
+                  </div>
+                  <Download size={13} className="text-gray-300 flex-shrink-0" />
+                </button>
+              ))}
             </div>
           )}
         </div>

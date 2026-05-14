@@ -357,15 +357,16 @@ export default function CustomerDetailPage() {
     const msg = `Ayubowan ${customer.name || customer.phone}!\n\nYour Emma Thinking counselling session has been confirmed.\n\nDate: ${meetingDate}\nTime: ${meetingTime}\nGoogle Meet: ${link}\n\nThank you for choosing Emma Thinking!`
     openWa(buildWaLink(customer.phone, msg))
 
-    // Reset the counselor's step deadline to (meeting datetime + 2 days).
-    // The original 48hr deadline was only meant to cover the acceptance
-    // window. Once the meeting is locked in, the counselor needs the
-    // meeting itself + 2 days after to wrap up the brief — otherwise
-    // they go overdue before the meeting even happens. We also clear
-    // any prior admin-granted extension since this new deadline
-    // supersedes it.
+    // Reset the counselor's step deadline to (meeting datetime + 48 hours).
+    // PHASE 1 (assignment → meeting confirmation): the initial 48hr timer
+    // from STEP_DEADLINE_HOURS[4] covers the acceptance + scheduling window.
+    // PHASE 2 (meeting confirmation → brief done): once the meeting is
+    // locked in, we restart a fresh 48hr countdown from the meeting time
+    // so the counsellor has 48hr AFTER the meeting to wrap up the brief.
+    // Any prior admin-granted extension is cleared since this new
+    // deadline supersedes it.
     const meetingDateTime = new Date(`${meetingDate}T${meetingTime}`)
-    const newDeadline = new Date(meetingDateTime.getTime() + 2 * 86400000).toISOString()
+    const newDeadline = new Date(meetingDateTime.getTime() + 48 * 3600000).toISOString()
     await supabase.from('order_steps').update({
       deadline: newDeadline,
       extended_deadline: null,
@@ -373,7 +374,7 @@ export default function CustomerDetailPage() {
       extended_by_days: null,
     }).eq('id', activeStep.id)
 
-    await logAction(`Meeting confirmed — ${meetingDate} at ${meetingTime} · deadline reset to 2 days after meeting`)
+    await logAction(`Meeting confirmed — ${meetingDate} at ${meetingTime} · new 48hr deadline starts from meeting time`)
     await fetchAll()
   }
 
@@ -1057,7 +1058,12 @@ export default function CustomerDetailPage() {
               </div>
 
               {/* STEP 3 — Back Office */}
-              {isActiveStep && myStep === 3 && (
+              {/* sub_step === 'customer_facing' means this row was created by the
+                  counselor returning a silver_bronze order back to Back Office.
+                  In that second pass the work is: review brief → send brief to
+                  customer → mark approved → transfer to manager. The first-pass
+                  greeting/invoice/assign-counselor UI does NOT apply here. */}
+              {isActiveStep && myStep === 3 && activeStep.sub_step !== 'customer_facing' && (
                 <div className="p-4 space-y-2">
                   {!stepAccepted && (
                     <button onClick={doAccept} disabled={actionLoading}
@@ -1096,6 +1102,87 @@ export default function CustomerDetailPage() {
                         className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
                         {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Assign to counselor'}
                       </button>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* STEP 3 (SECOND PASS) — Back Office after counselor return (silver_bronze) */}
+              {/* This block runs when the counselor of a silver/bronze package
+                  has finished the brief and bounced the order back to Back
+                  Office. The brief is already in activeStep.description.
+                  Workflow: accept → send brief to customer → mark approved →
+                  assign manager → transfer to manager. */}
+              {isActiveStep && myStep === 3 && activeStep.sub_step === 'customer_facing' && (
+                <div className="p-4 space-y-2">
+                  <div className="bg-purple-50 border border-purple-200 rounded-xl px-3 py-2 flex items-center gap-2">
+                    <span className="text-[8px] font-bold bg-purple-600 text-white px-2 py-0.5 rounded-full uppercase">Returned by counselor</span>
+                    <span className="text-[10px] text-purple-700 font-semibold">Silver/Bronze — send brief to customer</span>
+                  </div>
+
+                  {!stepAccepted && (
+                    <button onClick={doAccept} disabled={actionLoading}
+                      className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
+                      {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Accept — review counselor brief'}
+                    </button>
+                  )}
+
+                  {stepAccepted && (
+                    <>
+                      {/* ── Brief from counselor (read-only) ── */}
+                      <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
+                        <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1.5">
+                          Brief from counselor
+                        </p>
+                        <p className="text-xs text-gray-700 font-medium leading-relaxed whitespace-pre-wrap">
+                          {activeStep.description || brief || '(No brief content)'}
+                        </p>
+                      </div>
+
+                      {/* ── Send brief to customer via WhatsApp ── */}
+                      <button onClick={async () => {
+                        const b = activeStep.description || brief
+                        if (!b) return
+                        openWa(buildWaLink(customer.phone, WA.sendBriefToCustomer(customer.name || customer.phone, b)))
+                        await logAction('Brief sent to customer via WhatsApp (Back Office)')
+                        await fetchAll()
+                      }} disabled={!(activeStep.description || brief)}
+                        className={`w-full flex items-center gap-3 border rounded-xl px-4 py-3 text-xs font-semibold transition-all ${(activeStep.description || brief) ? 'bg-white border-green-100 text-green-700' : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'}`}>
+                        <span className={`w-2 h-2 rounded-full ${(activeStep.description || brief) ? 'bg-green-500' : 'bg-gray-300'}`} />
+                        Send brief to customer
+                      </button>
+
+                      {/* ── Mark customer approved ── */}
+                      <button onClick={async () => {
+                        setCustomerApproved(true)
+                        await logAction('Customer approved the brief (confirmed by Back Office)')
+                        await fetchAll()
+                      }} disabled={customerApproved}
+                        className={`w-full rounded-xl px-4 py-3 text-xs font-bold transition-all ${customerApproved ? 'bg-green-50 border border-green-200 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
+                        {customerApproved ? 'Customer approved' : 'Mark customer approved'}
+                      </button>
+
+                      {/* ── Assign manager + transfer ── */}
+                      {customerApproved && (
+                        <>
+                          <div>
+                            <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign manager</label>
+                            <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
+                              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
+                              <option value="">Select manager...</option>
+                              {workers.filter(w => w.role === 'manager').map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
+                            </select>
+                          </div>
+                          <button onClick={() => {
+                            const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'manager'
+                            const finalBrief = activeStep.description || brief
+                            doComplete(5, { description: finalBrief }, selectedAssignee, `Brief submitted to manager: ${name} — 6hr deadline set`, finalBrief)
+                          }} disabled={!selectedAssignee || actionLoading}
+                            className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
+                            {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Transfer to manager'}
+                          </button>
+                        </>
+                      )}
                     </>
                   )}
                 </div>

@@ -79,6 +79,11 @@ export default function CustomerDetailPage() {
   const [interactions, setInteractions] = useState<Interaction[]>([])
   const [packages, setPackages] = useState<Pkg[]>([])
   const [activeOrder, setActiveOrder] = useState<Order | null>(null)
+  // All orders (past + active) for this customer. Used to look up
+  // payment_slip_url + installment_2_slip_url when rendering history
+  // entries — so the "View payment slip" button can show even for
+  // old orders whose interaction descriptions don't carry the slip URL.
+  const [allOrders, setAllOrders] = useState<Order[]>([])
   const [activeStep, setActiveStep] = useState<OrderStep | null>(null)
   // The latest completed step that has a brief — used to show the brief
   // and plan summary in read-only mode AFTER the designer has locked the plan.
@@ -518,8 +523,10 @@ export default function CustomerDetailPage() {
     }).eq('id', activeOrder.id)
 
     const amt = (activeOrder as any).installment_2_amount
+    // Include the slip URL itself (not just "Slip uploaded") so the
+    // history list can render a "View payment slip" button.
     await logAction(
-      `2nd installment paid — LKR ${amt ? Number(amt).toLocaleString() : '?'}${uploadedSlip2Url ? ` | Slip uploaded` : ''}`
+      `2nd installment paid — LKR ${amt ? Number(amt).toLocaleString() : '?'}${uploadedSlip2Url ? ` | Slip: ${uploadedSlip2Url}` : ''}`
     )
 
     setShow2ndInstallment(false); setSlip2File(null); setSlip2Url('')
@@ -644,6 +651,11 @@ export default function CustomerDetailPage() {
     // ── Log interaction ───────────────────────────────────
     const assignedWorker = workers.find(w => w.id === selectedAssignee)
     const invoiceNote = generatedInvoiceUrl ? ` | Invoice: ${generatedInvoiceUrl}` : ''
+    // Embed the payment slip URL in the log so the history list can
+    // render a "View payment slip" button alongside "View invoice".
+    // Past orders are handled separately by looking up the order row
+    // from allOrders state at render time.
+    const slipNote = uploadedSlipUrl ? ` | Slip: ${uploadedSlipUrl}` : ''
     const installmentNote = installment
       ? ` | Installment: 1st LKR ${inst1Num.toLocaleString()}, remaining LKR ${inst2Num.toLocaleString()}`
       : ''
@@ -651,7 +663,7 @@ export default function CustomerDetailPage() {
       {
         customer_id: id,
         type: 'order',
-        description: `Order created: ${displayPkgName} — Total LKR ${actualPaidNum.toLocaleString()} via ${paymentLabel}${bankNote}${kokoNote}${installmentNote}${invoiceNote}`,
+        description: `Order created: ${displayPkgName} — Total LKR ${actualPaidNum.toLocaleString()} via ${paymentLabel}${bankNote}${kokoNote}${installmentNote}${invoiceNote}${slipNote}`,
         created_by: user.id,
       },
       ...(selectedAssignee ? [{
@@ -732,6 +744,10 @@ export default function CustomerDetailPage() {
     if (custRes.data) setCustomer(custRes.data)
     if (workersRes.data) setWorkers(workersRes.data)
     if (ordersRes.data) {
+      // Keep ALL orders for this customer in state so the history list
+      // can look up payment_slip_url / installment_2_slip_url for each
+      // "order" interaction (works for past orders without a migration).
+      setAllOrders(ordersRes.data as any[])
       const active = (ordersRes.data as any[]).find((o: Order) => o.status === 'active')
       if (active) {
         setActiveOrder(active)
@@ -1967,7 +1983,50 @@ export default function CustomerDetailPage() {
               {filteredInteractions.map(interaction => {
                 const invoiceLinkMatch = interaction.description.match(/Invoice: (https?:\/\/\S+)/)
                 const invoiceLink = invoiceLinkMatch ? invoiceLinkMatch[1] : null
-                const cleanDescription = interaction.description.replace(/ \| Invoice: https?:\/\/\S+/, '')
+                // Extract slip URL the same way as invoice. Set by
+                // handleCreateOrder / handlePay2ndInstallment for new orders.
+                const slipLinkMatch = interaction.description.match(/Slip: (https?:\/\/\S+)/)
+                let slipLink: string | null = slipLinkMatch ? slipLinkMatch[1] : null
+
+                // ── Fallback for old orders ───────────────────────
+                // For past "order" interactions whose description doesn't
+                // carry a Slip: URL (because they were created before this
+                // feature shipped), look up the matching order row from
+                // allOrders by timestamp proximity (within 5 minutes) and
+                // use its payment_slip_url. Covers both the original order
+                // creation and the 2nd installment payment log.
+                if (!slipLink && interaction.type === 'order' && allOrders.length > 0) {
+                  const interactionTime = new Date(interaction.created_at).getTime()
+                  const FIVE_MIN_MS = 5 * 60 * 1000
+                  const desc = interaction.description.toLowerCase()
+                  const is2ndInstallmentLog = desc.includes('2nd installment paid')
+
+                  // Find the order whose created_at (or installment_2_paid_at)
+                  // is closest to this interaction's timestamp, within 5min.
+                  let bestMatch: Order | null = null
+                  let bestDiff = Infinity
+                  for (const ord of allOrders) {
+                    const refTime = is2ndInstallmentLog && (ord as any).installment_2_paid_at
+                      ? new Date((ord as any).installment_2_paid_at).getTime()
+                      : new Date(ord.created_at).getTime()
+                    const diff = Math.abs(interactionTime - refTime)
+                    if (diff < bestDiff && diff <= FIVE_MIN_MS) {
+                      bestDiff = diff
+                      bestMatch = ord
+                    }
+                  }
+
+                  if (bestMatch) {
+                    slipLink = is2ndInstallmentLog
+                      ? ((bestMatch as any).installment_2_slip_url || null)
+                      : (bestMatch.payment_slip_url || null)
+                  }
+                }
+
+                // Strip both Invoice: and Slip: URLs from the visible text
+                const cleanDescription = interaction.description
+                  .replace(/ \| Invoice: https?:\/\/\S+/, '')
+                  .replace(/ \| Slip: https?:\/\/\S+/, '')
 
                 return (
                   <div key={interaction.id} className="relative">
@@ -1995,11 +2054,21 @@ export default function CustomerDetailPage() {
                         <span className="text-[8px] text-gray-300 font-medium">{fmtDate(interaction.created_at)} {fmtTime(interaction.created_at)}</span>
                       </div>
                       <p className="text-xs text-gray-600 font-medium leading-relaxed">{cleanDescription}</p>
-                      {invoiceLink && (
-                        <a href={invoiceLink} target="_blank" rel="noreferrer"
-                          className="inline-flex items-center gap-1.5 mt-2 text-[9px] font-bold text-pink-600 bg-pink-50 border border-pink-100 px-2.5 py-1.5 rounded-lg">
-                          <ExternalLink size={9} /> View invoice
-                        </a>
+                      {(invoiceLink || slipLink) && (
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {invoiceLink && (
+                            <a href={invoiceLink} target="_blank" rel="noreferrer"
+                              className="inline-flex items-center gap-1.5 text-[9px] font-bold text-pink-600 bg-pink-50 border border-pink-100 px-2.5 py-1.5 rounded-lg">
+                              <ExternalLink size={9} /> View invoice
+                            </a>
+                          )}
+                          {slipLink && (
+                            <a href={slipLink} target="_blank" rel="noreferrer"
+                              className="inline-flex items-center gap-1.5 text-[9px] font-bold text-blue-600 bg-blue-50 border border-blue-100 px-2.5 py-1.5 rounded-lg">
+                              <ExternalLink size={9} /> View payment slip
+                            </a>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>

@@ -7,27 +7,28 @@ import {
   LayoutDashboard, Users, ClipboardList, History,
   MapPin, Briefcase, UserPlus, BarChart2,
   CalendarRange, ShieldCheck, Settings, LogOut,
-  Bell, DollarSign, Target
+  Bell, DollarSign, Target, Archive
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 
 const TABS = [
-  { href: '/admin',                    icon: LayoutDashboard, label: 'Dashboard' },
-  { href: '/admin/crm-entries',        icon: History,         label: 'CRM Entries' },
-  { href: '/admin/orders',             icon: ClipboardList,   label: 'Orders' },
-  { href: '/admin/workers',            icon: Users,           label: 'Workers' },
-  { href: '/admin/attendance',         icon: CalendarRange,   label: 'Attendance' },
-  { href: '/admin/approvals',          icon: ShieldCheck,     label: 'Approvals', badge: true },
-  { href: '/admin/commission-rates',   icon: DollarSign,      label: 'Commission Rates' },
-  { href: '/admin/targets-rewards',    icon: Target,          label: 'Targets & Rewards' },
-  { href: '/admin/packages',           icon: Briefcase,       label: 'Packages' },
-  { href: '/admin/tasks',              icon: ClipboardList,   label: 'Tasks' },
-  { href: '/admin/calendar',           icon: CalendarRange,   label: 'Calendar' },
-  { href: '/admin/alerts',             icon: Bell,            label: 'Overdue Alerts', badge: true },
-  { href: '/admin/locations',          icon: MapPin,          label: 'Locations' },
-  { href: '/admin/add-worker',         icon: UserPlus,        label: 'Add Worker' },
-  { href: '/admin/settings',           icon: Settings,        label: 'Settings' },
+  { href: '/admin', icon: LayoutDashboard, label: 'Dashboard' },
+  { href: '/admin/crm-entries', icon: History, label: 'CRM Entries' },
+  { href: '/admin/orders', icon: ClipboardList, label: 'Orders' },
+  { href: '/dashboard/legacy-history', icon: Archive, label: 'Legacy History' },
+  { href: '/admin/workers', icon: Users, label: 'Workers' },
+  { href: '/admin/attendance', icon: CalendarRange, label: 'Attendance' },
+  { href: '/admin/approvals', icon: ShieldCheck, label: 'Approvals', badge: true },
+  { href: '/admin/commission-rates', icon: DollarSign, label: 'Commission Rates' },
+  { href: '/admin/targets-rewards', icon: Target, label: 'Targets & Rewards' },
+  { href: '/admin/packages', icon: Briefcase, label: 'Packages' },
+  { href: '/admin/tasks', icon: ClipboardList, label: 'Tasks' },
+  { href: '/admin/calendar', icon: CalendarRange, label: 'Calendar' },
+  { href: '/admin/alerts', icon: Bell, label: 'Overdue Alerts', badge: true },
+  { href: '/admin/locations', icon: MapPin, label: 'Locations' },
+  { href: '/admin/add-worker', icon: UserPlus, label: 'Add Worker' },
+  { href: '/admin/settings', icon: Settings, label: 'Settings' },
 ]
 
 export default function AdminSidebar() {

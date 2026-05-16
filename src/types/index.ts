@@ -266,10 +266,51 @@ export interface CalendarCell {
 // Format: L/[year2d]/[agentCode]/[monthCode][day]/[timeSlot]
 // Month codes: A=Jan B=Feb C=Mar D=Apr E=May F=Jun G=Jul H=Aug I=Sep J=Oct K=Nov L=Dec
 export const MONTH_CODES: Record<number, string> = {
-  1:'A', 2:'B', 3:'C', 4:'D', 5:'E', 6:'F',
-  7:'G', 8:'H', 9:'I', 10:'J', 11:'K', 12:'L'
+  1: 'A', 2: 'B', 3: 'C', 4: 'D', 5: 'E', 6: 'F',
+  7: 'G', 8: 'H', 9: 'I', 10: 'J', 11: 'K', 12: 'L'
 }
 
 export const TIME_SLOT_LABELS: Record<TimeSlot, string> = {
   W: '6:30am', X: '11:30am', Y: '3:30pm', Z: '8:30pm'
+}
+// ── Legacy Invoices (from old Kalpani Back Office) ──
+
+export interface LegacyInvoice {
+  id: string
+  customer_name: string
+  phone_number: string | null
+  invoice_date: string | null
+  invoice_number: string
+  slip_number: string | null
+  payment_method: string | null
+  service_date: string | null
+  package_name: string | null
+  description: string | null
+  total_amount: number | null
+  invoice_link: string | null
+  payment_slip_link: string | null
+  first_post_code: string | null
+  first_post_content: string | null
+  second_post_code: string | null
+  second_post_content: string | null
+  sent_number_1: string | null
+  sent_number_2: string | null
+  sent_number_3: string | null
+  sent_number_4: string | null
+  sent_number_5: string | null
+  sent_number_6: string | null
+  sent_number_7: string | null
+  sent_number_8: string | null
+  sent_number_9: string | null
+  sent_number_10: string | null
+  sent_number_11: string | null
+  sent_number_12: string | null
+  sent_number_13: string | null
+  sent_number_14: string | null
+  sent_number_15: string | null
+  sent_number_16: string | null
+  sent_number_17: string | null
+  sent_number_18: string | null
+  numbers_sent_count: number
+  imported_at: string
 }

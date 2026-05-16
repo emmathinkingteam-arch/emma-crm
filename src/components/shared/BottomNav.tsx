@@ -4,45 +4,45 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Users, CalendarRange,
-  PlusCircle, Wallet, Award, ClipboardList
+  PlusCircle, Wallet, Award, ClipboardList, History
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 
 const NAV_CONFIG = {
   crm_agent: [
-    { href: '/dashboard',           icon: LayoutDashboard, label: 'Home' },
-    { href: '/entry',               icon: PlusCircle,       label: 'Entry' },
-    { href: '/dashboard/customers', icon: Users,            label: 'Clients' },
-    { href: '/dashboard/wallet',    icon: Wallet,           label: 'Wallet' },
-    { href: '/dashboard/profile',   icon: Award,            label: 'Profile' },
+    { href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
+    { href: '/entry', icon: PlusCircle, label: 'Entry' },
+    { href: '/dashboard/customers', icon: Users, label: 'Clients' },
+    { href: '/dashboard/wallet', icon: Wallet, label: 'Wallet' },
+    { href: '/dashboard/profile', icon: Award, label: 'Profile' },
   ],
   back_office: [
-    { href: '/dashboard',           icon: LayoutDashboard, label: 'Home' },
-    { href: '/dashboard/customers', icon: Users,            label: 'Clients' },
-    { href: '/dashboard/calendar',  icon: CalendarRange,    label: 'Plan' },
-    { href: '/dashboard/wallet',    icon: Wallet,           label: 'Wallet' },
-    { href: '/dashboard/profile',   icon: Award,            label: 'Profile' },
+    { href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
+    { href: '/dashboard/customers', icon: Users, label: 'Clients' },
+    { href: '/dashboard/legacy-history', icon: History, label: 'Legacy' },
+    { href: '/dashboard/calendar', icon: CalendarRange, label: 'Plan' },
+    { href: '/dashboard/profile', icon: Award, label: 'Profile' },
   ],
   counselor: [
-    { href: '/dashboard',           icon: LayoutDashboard, label: 'Home' },
-    { href: '/dashboard/customers', icon: Users,            label: 'Clients' },
-    { href: '/dashboard/calendar',  icon: CalendarRange,    label: 'Plan' },
-    { href: '/dashboard/wallet',    icon: Wallet,           label: 'Wallet' },
-    { href: '/dashboard/profile',   icon: Award,            label: 'Profile' },
+    { href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
+    { href: '/dashboard/customers', icon: Users, label: 'Clients' },
+    { href: '/dashboard/calendar', icon: CalendarRange, label: 'Plan' },
+    { href: '/dashboard/wallet', icon: Wallet, label: 'Wallet' },
+    { href: '/dashboard/profile', icon: Award, label: 'Profile' },
   ],
   manager: [
-    { href: '/dashboard',           icon: LayoutDashboard, label: 'Home' },
-    { href: '/dashboard/customers', icon: Users,            label: 'Clients' },
-    { href: '/dashboard/tasks',     icon: ClipboardList,    label: 'Tasks' },
-    { href: '/dashboard/calendar',  icon: CalendarRange,    label: 'Plan' },
-    { href: '/dashboard/profile',   icon: Award,            label: 'Profile' },
+    { href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
+    { href: '/dashboard/customers', icon: Users, label: 'Clients' },
+    { href: '/dashboard/tasks', icon: ClipboardList, label: 'Tasks' },
+    { href: '/dashboard/calendar', icon: CalendarRange, label: 'Plan' },
+    { href: '/dashboard/profile', icon: Award, label: 'Profile' },
   ],
   designer: [
-    { href: '/dashboard',           icon: LayoutDashboard, label: 'Home' },
-    { href: '/dashboard/customers', icon: Users,            label: 'Clients' },
-    { href: '/dashboard/calendar',  icon: CalendarRange,    label: 'Plan' },
-    { href: '/dashboard/wallet',    icon: Wallet,           label: 'Wallet' },
-    { href: '/dashboard/profile',   icon: Award,            label: 'Profile' },
+    { href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
+    { href: '/dashboard/customers', icon: Users, label: 'Clients' },
+    { href: '/dashboard/calendar', icon: CalendarRange, label: 'Plan' },
+    { href: '/dashboard/wallet', icon: Wallet, label: 'Wallet' },
+    { href: '/dashboard/profile', icon: Award, label: 'Profile' },
   ],
 }
 

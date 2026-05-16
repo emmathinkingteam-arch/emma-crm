@@ -331,6 +331,12 @@ export default function CustomerDetailPage() {
         assigned_to: assignTo || null,
         description: nextDescription || null,
         deadline: deadline,
+        // Forward sub_step from caller so the NEW step row carries it.
+        // Critical for the counselor → back-office return on silver_bronze,
+        // where doComplete(3, { sub_step: 'customer_facing' }, ...) must
+        // make the inserted Step 3 row show the "returned by counselor"
+        // UI instead of the original Step 3 (invoice/greeting) UI.
+        sub_step: (data && (data as any).sub_step) || null,
       })
     }
 

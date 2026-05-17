@@ -339,6 +339,19 @@ export default function CustomerDetailPage() {
         // instead of the original Step 3 (invoice/greeting/assign counselor) UI.
         sub_step: (data && (data as any).sub_step) || null,
       })
+
+      // 🔔 Fire SMS to the newly-assigned worker.
+      // Fire-and-forget — never block the handoff if SMS fails.
+      if (assignTo) {
+        fetch('/api/sms/handoff', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            orderId: activeOrder.id,
+            assignedUserId: assignTo,
+          }),
+        }).catch(() => { })
+      }
     }
 
     if (logMsg) await logAction(logMsg)
@@ -385,6 +398,21 @@ export default function CustomerDetailPage() {
       extension_reason: null,
       extended_by_days: null,
     }).eq('id', activeStep.id)
+
+    // 🔔 Fire counselor phase-2 SMS — meeting confirmed, fresh 48hr deadline.
+    if (activeStep.assigned_to && activeOrder) {
+      fetch('/api/sms/handoff', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: activeOrder.id,
+          assignedUserId: activeStep.assigned_to,
+          event: 'meeting_confirmed',
+          meetingDate,
+          meetingTime,
+        }),
+      }).catch(() => { })
+    }
 
     await logAction(`Meeting confirmed — ${meetingDate} at ${meetingTime} · new 48hr deadline starts from meeting time`)
     await fetchAll()
@@ -594,6 +622,18 @@ export default function CustomerDetailPage() {
       assigned_to: selectedAssignee || null,
       deadline: stepDeadline,
     })
+
+    // 🔔 Fire SMS to the back office worker — first handoff in the chain.
+    if (selectedAssignee) {
+      fetch('/api/sms/handoff', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: order.id,
+          assignedUserId: selectedAssignee,
+        }),
+      }).catch(() => { })
+    }
 
     // ── Generate 1st (or only) invoice ─────────────────────
     // For KOKO: pass package amount X (template adds 12.36% line)

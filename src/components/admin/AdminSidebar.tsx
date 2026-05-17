@@ -7,10 +7,12 @@ import {
   LayoutDashboard, Users, ClipboardList, History,
   MapPin, Briefcase, UserPlus, BarChart2,
   CalendarRange, ShieldCheck, Settings, LogOut,
-  Bell, DollarSign, Target, Archive
+  Bell, DollarSign, Target, Archive, MessageSquare,
 } from 'lucide-react'
+
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
+
 
 const TABS = [
   { href: '/admin', icon: LayoutDashboard, label: 'Dashboard' },
@@ -29,6 +31,7 @@ const TABS = [
   { href: '/admin/locations', icon: MapPin, label: 'Locations' },
   { href: '/admin/add-worker', icon: UserPlus, label: 'Add Worker' },
   { href: '/admin/settings', icon: Settings, label: 'Settings' },
+  { href: '/admin/notifications/worker-phones', icon: MessageSquare, label: 'Notifications' },
 ]
 
 export default function AdminSidebar() {

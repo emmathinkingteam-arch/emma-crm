@@ -31,7 +31,9 @@ const TABS = [
   { href: '/admin/locations', icon: MapPin, label: 'Locations' },
   { href: '/admin/add-worker', icon: UserPlus, label: 'Add Worker' },
   { href: '/admin/settings', icon: Settings, label: 'Settings' },
-  { href: '/admin/notifications/worker-phones', icon: MessageSquare, label: 'Notifications' },
+  // Notifications now points to the index (redirects to SMS Logs by default).
+  // The notifications section has its own sub-tabs: SMS Logs · Cron Status · Worker Phones.
+  { href: '/admin/notifications', icon: MessageSquare, label: 'Notifications' },
 ]
 
 export default function AdminSidebar() {
@@ -63,7 +65,12 @@ export default function AdminSidebar() {
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
         {TABS.map(({ href, icon: Icon, label, badge }) => {
-          const active = pathname === href
+          // For the Notifications top-level entry, mark it active for ANY
+          // /admin/notifications/* sub-route too.
+          const active =
+            href === '/admin/notifications'
+              ? pathname.startsWith('/admin/notifications')
+              : pathname === href
           return (
             <Link
               key={href}

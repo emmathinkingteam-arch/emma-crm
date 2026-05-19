@@ -214,6 +214,11 @@ export default function DashboardPage() {
                         </p>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                        {(order as any).installment_status === 'partial' && (
+                          <span className="text-[8px] font-bold px-2 py-1 rounded-full bg-amber-50 text-amber-600 border border-amber-100">
+                            Awaiting payment
+                          </span>
+                        )}
                         <span className={`text-[8px] font-bold px-2 py-1 rounded-full border ${stepColor[step.step_number] || 'bg-gray-50 text-gray-500 border-gray-100'}`}>
                           Step {step.step_number}
                         </span>

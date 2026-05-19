@@ -1457,39 +1457,46 @@ export default function CustomerDetailPage() {
                         )}
                       </div>
 
-                      {/* ── INSTALLMENT BLOCK ── */}
-                      {isInstallmentPending ? (
+                      {/* ── INSTALLMENT NOTICE (info only — does NOT block assignment) ── */}
+                      {/*
+                        Manager can ALWAYS assign the designer, even when installment
+                        is partial. The post will be locked on the designer side until
+                        the 2nd installment is confirmed by Back Office or the CRM agent
+                        who took the order. This keeps the order moving instead of
+                        getting stuck at the Manager step.
+                      */}
+                      {isInstallmentPending && (
                         <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 flex items-start gap-2">
-                          <Lock size={14} className="text-amber-600 mt-0.5 flex-shrink-0" />
+                          <CreditCard size={14} className="text-amber-600 mt-0.5 flex-shrink-0" />
                           <div>
-                            <p className="text-xs font-bold text-amber-700">Designer step blocked</p>
-                            <p className="text-[9px] text-amber-600 font-medium mt-0.5">
-                              2nd installment of LKR {Number((activeOrder as any)?.installment_2_amount || 0).toLocaleString()} is still pending.
-                              Back office must confirm payment before you can assign the designer.
+                            <p className="text-xs font-bold text-amber-700">Installment pending — designer will see locked step</p>
+                            <p className="text-[9px] text-amber-600 font-medium mt-0.5 leading-relaxed">
+                              2nd installment of LKR {Number((activeOrder as any)?.installment_2_amount || 0).toLocaleString()} is still due.
+                              You can still approve and assign a designer now — the designer will see the post as locked
+                              until the CRM agent or Back Office confirms the 2nd payment.
                             </p>
                           </div>
                         </div>
-                      ) : (
-                        <>
-                          <div>
-                            <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign designer</label>
-                            <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
-                              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
-                              <option value="">Select designer...</option>
-                              {workers.filter(w => w.role === 'designer').map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
-                            </select>
-                          </div>
-                          <button onClick={() => {
-                            const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'designer'
-                            // Pass the possibly-edited brief — manager edits flow forward to designer.
-                            const finalBrief = brief || activeStep.description || ''
-                            doComplete(6, { description: finalBrief }, selectedAssignee, `Manager approved — assigned to designer: ${name}`, finalBrief)
-                          }} disabled={!selectedAssignee || actionLoading || editingBrief}
-                            className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
-                            {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Approve and assign to designer'}
-                          </button>
-                        </>
                       )}
+
+                      <div>
+                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign designer</label>
+                        <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
+                          className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
+                          <option value="">Select designer...</option>
+                          {workers.filter(w => w.role === 'designer').map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
+                        </select>
+                      </div>
+                      <button onClick={() => {
+                        const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'designer'
+                        // Pass the possibly-edited brief — manager edits flow forward to designer.
+                        const finalBrief = brief || activeStep.description || ''
+                        const lockNote = isInstallmentPending ? ' — post locked pending 2nd installment' : ''
+                        doComplete(6, { description: finalBrief }, selectedAssignee, `Manager approved — assigned to designer: ${name}${lockNote}`, finalBrief)
+                      }} disabled={!selectedAssignee || actionLoading || editingBrief}
+                        className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
+                        {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Approve and assign to designer'}
+                      </button>
 
                       <div className="border-t border-gray-100 pt-2">
                         {!showReject ? (
@@ -1539,7 +1546,23 @@ export default function CustomerDetailPage() {
                         <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1">Creative brief</p>
                         <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap">{activeStep.description}</p>
                       </div>
-                      {!showCalendar ? (
+                      {isInstallmentPending ? (
+                        <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4 flex items-start gap-3">
+                          <Lock size={18} className="text-amber-600 mt-0.5 flex-shrink-0" />
+                          <div className="flex-1">
+                            <p className="text-xs font-extrabold text-amber-700">Post locked — 2nd installment pending</p>
+                            <p className="text-[10px] text-amber-700 font-medium mt-1 leading-relaxed">
+                              Customer still owes LKR {Number((activeOrder as any)?.installment_2_amount || 0).toLocaleString()}.
+                              {orderCreator?.full_name
+                                ? ` ${orderCreator.full_name} (CRM agent who took the order) or Back Office must confirm the 2nd payment before you can plan the post.`
+                                : ' The CRM agent who took the order or Back Office must confirm the 2nd payment first.'}
+                            </p>
+                            <p className="text-[9px] text-amber-600 font-medium mt-2">
+                              Once payment is confirmed, refresh this page — the calendar planner will unlock automatically.
+                            </p>
+                          </div>
+                        </div>
+                      ) : !showCalendar ? (
                         <button onClick={async () => { await fetchCalendarSlots(); setShowCalendar(true) }}
                           className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold">
                           Open calendar planner

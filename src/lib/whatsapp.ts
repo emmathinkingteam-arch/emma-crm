@@ -80,8 +80,9 @@ async function sendOne({ imageUrl, description, profileUrl, number }: SendArgs):
     }
 
     const cleanDescription = description
-        .replace(/\t/g, ' ')
-        .replace(/ {4,}/g, ' ')
+        .replace(/\t/g, ' ')              // tabs → space
+        .replace(/\r\n|\r|\n/g, ' ')      // newlines → space (Meta rejects these in vars)
+        .replace(/ {2,}/g, ' ')           // collapse multi-spaces (Meta rejects 4+)
         .trim()
 
     const payload = {

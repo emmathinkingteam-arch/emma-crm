@@ -1,28 +1,6 @@
 // ============================================================================
 // Emma Thinking CRM — WhatsApp Cloud API service
 // ============================================================================
-//
-// Separate from sms.ts (Text.lk). This handles Meta's WhatsApp Cloud API
-// for the admin broadcast feature: send an approved template message
-// (profile_share_si) with an image header to many numbers.
-//
-// Template structure (already approved in Meta Business Manager):
-//   Header: IMAGE (dynamic)
-//   Body:
-//     💕 ඔබට ගැලපෙන සහකරුවෙක් සොයමින්ද?
-//     {{1}}   ← description
-//     🔗 මෙම Profile එක හරහා ඍජුව සම්බන්ධ වන්න:
-//     {{2}}   ← profile URL
-//   Footer: Emma Thinking
-//   Button: Visit website (STATIC URL — no variable, no payload needed)
-//
-// Required env vars:
-//   WHATSAPP_ACCESS_TOKEN
-//   WHATSAPP_PHONE_NUMBER_ID
-//   WHATSAPP_TEMPLATE_NAME       (default: profile_share_si)
-//   WHATSAPP_TEMPLATE_LANG       (default: si)
-//   WHATSAPP_API_VERSION         (default: v21.0)
-// ============================================================================
 
 import { supabaseAdmin } from './supabase-admin'
 
@@ -38,6 +16,8 @@ export interface BroadcastSendResult {
     status: 'sent' | 'failed'
     messageId?: string
     error?: string
+    metaRaw?: unknown          // full Meta response for debugging
+    sentPayload?: unknown      // what we sent to Meta
 }
 
 interface SendArgs {
@@ -50,18 +30,8 @@ interface SendArgs {
 // ─────────────────────────────────────────────────────────────────────────────
 // Phone normalisation
 // ─────────────────────────────────────────────────────────────────────────────
-//
-// Accepts many shapes copied from WhatsApp Web / docs / spreadsheets:
-//   +94771234567
-//   94771234567
-//   0771234567
-//   771234567
-//   [+94771234567](https://wa.me/94771234567)
-//
-// Returns 94XXXXXXXXX (no +). Invalid inputs return null.
 
 export function normaliseWhatsappNumber(raw: string): string | null {
-    // Strip markdown link wrappers — keep the label, drop the URL
     const stripped = raw.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     const digits = stripped.replace(/\D/g, '')
 
@@ -72,8 +42,6 @@ export function normaliseWhatsappNumber(raw: string): string | null {
     return null
 }
 
-// Parse a bulk input string (comma, newline, semicolon, or space separated)
-// into a deduplicated array of 94XXXXXXXXX numbers.
 export function parseBulkNumbers(input: string): { valid: string[]; invalid: string[] } {
     const stripped = input.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     const tokens = stripped.split(/[,\n;]+/).map(t => t.trim()).filter(Boolean)
@@ -104,15 +72,13 @@ async function sendOne({ imageUrl, description, profileUrl, number }: SendArgs):
     const token = process.env.WHATSAPP_ACCESS_TOKEN
     const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID
     const templateName = process.env.WHATSAPP_TEMPLATE_NAME || 'profile_share_si'
-    const lang = process.env.WHATSAPP_TEMPLATE_LANG || 'si'
+    const lang = process.env.WHATSAPP_TEMPLATE_LANG || 'si_LK'
     const version = process.env.WHATSAPP_API_VERSION || 'v21.0'
 
     if (!token || !phoneId) {
         return { number, status: 'failed', error: 'WhatsApp env vars not set' }
     }
 
-    // Clean description: tabs → space, collapse 4+ spaces → 1, trim.
-    // Meta rejects body params with tabs or 4+ consecutive spaces.
     const cleanDescription = description
         .replace(/\t/g, ' ')
         .replace(/ {4,}/g, ' ')
@@ -137,8 +103,6 @@ async function sendOne({ imageUrl, description, profileUrl, number }: SendArgs):
                         { type: 'text', text: profileUrl },
                     ],
                 },
-                // No button component — the template's button is a STATIC URL
-                // (no {{var}}), so Meta uses the hard-coded URL automatically.
             ],
         },
     }
@@ -158,8 +122,19 @@ async function sendOne({ imageUrl, description, profileUrl, number }: SendArgs):
         const data = await res.json()
 
         if (!res.ok || data.error) {
-            const msg = data?.error?.message || `HTTP ${res.status}`
-            return { number, status: 'failed', error: msg }
+            const e = data?.error
+            const details = e?.error_data?.details
+            const msg = details
+                ? `(#${e?.code ?? '?'}) ${details}`
+                : e?.message || `HTTP ${res.status}`
+            console.error('[WhatsApp] Meta error for', number, JSON.stringify(data, null, 2))
+            return {
+                number,
+                status: 'failed',
+                error: msg,
+                metaRaw: data,
+                sentPayload: payload,
+            }
         }
 
         const messageId = data?.messages?.[0]?.id
@@ -171,7 +146,7 @@ async function sendOne({ imageUrl, description, profileUrl, number }: SendArgs):
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Send to many — sequential with small delay to stay under rate limit
+// Send to many
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function sendBroadcast(args: {
@@ -190,7 +165,6 @@ export async function sendBroadcast(args: {
             number,
         })
         results.push(r)
-        // Small spacing to avoid Meta's per-second rate limits.
         await new Promise(res => setTimeout(res, 250))
     }
 
@@ -198,12 +172,8 @@ export async function sendBroadcast(args: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Lazy cleanup — delete images older than 48 hours from storage
+// Lazy cleanup — delete images older than 48 hours
 // ─────────────────────────────────────────────────────────────────────────────
-//
-// Called before each broadcast send so the bucket stays small and Meta no
-// longer needs those URLs after delivery (it caches the image after first
-// fetch, then the public URL can safely vanish).
 
 export async function cleanupOldBroadcastImages(): Promise<{ removed: number }> {
     try {
@@ -227,7 +197,6 @@ export async function cleanupOldBroadcastImages(): Promise<{ removed: number }> 
         await sb.storage.from(BUCKET).remove(toDelete)
         return { removed: toDelete.length }
     } catch {
-        // Never let cleanup break a send.
         return { removed: 0 }
     }
 }

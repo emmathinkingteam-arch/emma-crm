@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Users, ClipboardList, History,
   MapPin, Briefcase, UserPlus, BarChart2,
   CalendarRange, ShieldCheck, Settings, LogOut,
-  Bell, DollarSign, Target, Archive, MessageSquare,
+  Bell, DollarSign, Target, Archive, MessageSquare, MessageCircle,
 } from 'lucide-react'
 
 import { supabase } from '@/lib/supabase'
@@ -31,6 +31,7 @@ const TABS = [
   { href: '/admin/locations', icon: MapPin, label: 'Locations' },
   { href: '/admin/add-worker', icon: UserPlus, label: 'Add Worker' },
   { href: '/admin/settings', icon: Settings, label: 'Settings' },
+  { href: '/admin/whatsapp', icon: MessageCircle, label: 'WhatsApp' },
   // Notifications now points to the index (redirects to SMS Logs by default).
   // The notifications section has its own sub-tabs: SMS Logs · Cron Status · Worker Phones.
   { href: '/admin/notifications', icon: MessageSquare, label: 'Notifications' },

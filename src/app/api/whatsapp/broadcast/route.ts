@@ -40,7 +40,7 @@ export async function POST(req: Request) {
         const { data: profile } = await sb
             .from('users')
             .select('role')
-            .eq('id', user.id)
+            .eq('auth_user_id', user.id)
             .single()
 
         if (profile?.role !== 'admin') {

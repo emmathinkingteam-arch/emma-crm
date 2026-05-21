@@ -19,8 +19,9 @@ async function getNextInvoiceNumber(supabase: any): Promise<string> {
   for (const row of data || []) {
     for (const html of [row.invoice_html, row.invoice_html_2nd]) {
       if (!html) continue
-      const matches = html.matchAll(/Invoice\s+(EM\d+)/g)
-      for (const m of matches) {
+      const re = /Invoice\s+(EM\d+)/g
+      let m: RegExpExecArray | null
+      while ((m = re.exec(html)) !== null) {
         const n = parseInt(m[1].replace('EM', ''), 10)
         if (!isNaN(n) && n > maxNum) maxNum = n
       }

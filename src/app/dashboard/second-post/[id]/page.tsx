@@ -445,8 +445,20 @@ export default function SecondPostPage() {
                         </div>
                     )}
 
+                    {/* ── AWAITING ADMIN APPROVAL ── */}
+                    {req.status === 'pending_approval' && (
+                        <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 text-center">
+                            <Clock size={18} className="text-amber-400 mx-auto mb-1.5" />
+                            <p className="text-xs font-bold text-amber-700">Awaiting admin approval</p>
+                            <p className="text-[10px] text-amber-400 font-medium mt-0.5">This 2nd post request was sent to the admin panel and hasn&apos;t been approved yet.</p>
+                            {req.request_reason && (
+                                <p className="text-[11px] text-gray-500 font-medium mt-2 italic">&quot;{req.request_reason}&quot;</p>
+                            )}
+                        </div>
+                    )}
+
                     {/* ── READ-ONLY (waiting on someone else / not your stage) ── */}
-                    {!isCounselorStage && !isManagerStage && !isDesignerStage && req.status !== 'planned' && req.status !== 'cancelled' && (
+                    {!isCounselorStage && !isManagerStage && !isDesignerStage && req.status !== 'planned' && req.status !== 'cancelled' && req.status !== 'pending_approval' && (
                         <div className="bg-gray-50 border border-gray-100 rounded-2xl p-4 text-center">
                             <Lock size={18} className="text-gray-300 mx-auto mb-1.5" />
                             <p className="text-xs font-bold text-gray-400">{STATUS_LABELS[req.status]}</p>

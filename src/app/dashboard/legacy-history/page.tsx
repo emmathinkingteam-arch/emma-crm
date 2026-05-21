@@ -251,45 +251,50 @@ export default function SearchHubPage() {
         setSending(false)
     }
 
-    // ── Request 2nd Post → spins up a fresh counselor pipeline ──
+    // ── Request 2nd Post → composer (reason + counselor) → admin approval ──
     const [requesting, setRequesting] = useState<string | null>(null)
     const [requestedKeys, setRequestedKeys] = useState<Set<string>>(new Set())
+    const [reqFor, setReqFor] = useState<string | null>(null)   // which row's composer is open
+    const [reqReason, setReqReason] = useState('')
+    const [reqCounselor, setReqCounselor] = useState('')
+    const [counselorList, setCounselorList] = useState<{ id: string; full_name: string }[]>([])
+
+    // Load counselors once (for the request composer).
+    useEffect(() => {
+        supabase.from('users').select('id, full_name').eq('role', 'counselor').eq('is_active', true)
+            .then(({ data }) => { if (data) setCounselorList(data) })
+    }, [])
 
     async function handleRequest2ndPost(result: Result) {
-        if (!user) return
+        if (!user || !reqReason.trim() || !reqCounselor) return
         setRequesting(result.key)
 
-        // List of active counselors to choose the first handler.
-        const { data: cns } = await supabase
-            .from('users').select('id, agent_code').eq('role', 'counselor').eq('is_active', true)
-        const firstCounselor = cns?.[0]?.id || null
-
+        // Request goes to the admin panel first. It is NOT assigned to act
+        // until an admin approves it.
         const insertRow: Record<string, any> = {
-            status: 'counselor_review',
-            counselor_id: firstCounselor,
+            status: 'pending_approval',
+            approval_status: 'pending',
+            request_reason: reqReason.trim(),
+            counselor_id: reqCounselor,            // chosen counselor (acts after approval)
             requested_by: user.id,
-            counselor_deadline: new Date(Date.now() + 5 * 86400000).toISOString(),
+            counselor_deadline: null,              // 5-day clock starts on approval
         }
 
         if (result.kind === 'new') {
-            // Derive base agent code from the order creator.
             const { data: ord } = await supabase
                 .from('orders')
-                .select('created_by, package_id, customer_id')
+                .select('created_by, customer_id')
                 .eq('id', result.orderId).maybeSingle()
             let agentCode = 'X'
-            let originalCounselor: string | null = null
             if (ord?.created_by) {
                 const { data: creator } = await supabase
                     .from('users').select('agent_code').eq('id', ord.created_by).maybeSingle()
                 if (creator?.agent_code) agentCode = creator.agent_code
             }
-            // original counselor = whoever ran step 4 (counselor) on this order
             const { data: cStep } = await supabase
                 .from('order_steps').select('assigned_to')
                 .eq('order_id', result.orderId).eq('step_number', 4)
                 .maybeSingle()
-            originalCounselor = cStep?.assigned_to || null
 
             insertRow.order_id = result.orderId
             insertRow.customer_id = result.customerId
@@ -298,15 +303,14 @@ export default function SearchHubPage() {
             insertRow.package_name = result.packageName
             insertRow.agent_code = agentCode
             insertRow.first_post_code = result.postCodes[0] || null
-            insertRow.original_counselor_id = originalCounselor
+            insertRow.original_counselor_id = cStep?.assigned_to || null
         } else {
             const inv = result.inv
-            // Legacy: pull base letter out of the first post code  L/26/H/D7/X → H
             let agentCode = 'X'
             const code = inv.first_post_code || inv.second_post_code
             if (code) {
                 const parts = code.split('/')
-                if (parts[2]) agentCode = parts[2].replace(/2$/, '')  // strip any trailing 2
+                if (parts[2]) agentCode = parts[2].replace(/2$/, '')
             }
             insertRow.legacy_invoice_id = inv.id
             insertRow.customer_name = inv.customer_name
@@ -319,8 +323,11 @@ export default function SearchHubPage() {
 
         const { error } = await supabase.from('second_post_requests').insert(insertRow)
         setRequesting(null)
-        if (error) { alert('Could not create 2nd post request: ' + error.message); return }
+        if (error) { alert('Could not submit 2nd post request: ' + error.message); return }
         setRequestedKeys(prev => new Set(prev).add(result.key))
+        setReqFor(null)
+        setReqReason('')
+        setReqCounselor('')
     }
 
     function toggleRow(key: string) {
@@ -514,6 +521,14 @@ export default function SearchHubPage() {
                                                     onRequest2nd={() => handleRequest2ndPost(r)}
                                                     requesting={requesting === r.key}
                                                     requested={requestedKeys.has(r.key)}
+                                                    reqOpen={reqFor === r.key}
+                                                    openReq={() => { setReqFor(r.key); setReqReason(''); setReqCounselor('') }}
+                                                    closeReq={() => setReqFor(null)}
+                                                    reqReason={reqReason}
+                                                    setReqReason={setReqReason}
+                                                    reqCounselor={reqCounselor}
+                                                    setReqCounselor={setReqCounselor}
+                                                    counselorList={counselorList}
                                                 />
                                             </div>
                                         )}
@@ -609,6 +624,14 @@ export default function SearchHubPage() {
                                                 onRequest2nd={() => handleRequest2ndPost(r)}
                                                 requesting={requesting === r.key}
                                                 requested={requestedKeys.has(r.key)}
+                                                reqOpen={reqFor === r.key}
+                                                openReq={() => { setReqFor(r.key); setReqReason(''); setReqCounselor('') }}
+                                                closeReq={() => setReqFor(null)}
+                                                reqReason={reqReason}
+                                                setReqReason={setReqReason}
+                                                reqCounselor={reqCounselor}
+                                                setReqCounselor={setReqCounselor}
+                                                counselorList={counselorList}
                                             />
                                         </div>
                                     )}
@@ -651,6 +674,7 @@ function PostBlock({ label, code, content }: { label: string; code: string | nul
 function ProfileShareSection({
     result, sentList, legacyNumbers, composeFor, composeText, sending,
     setComposeFor, setComposeText, onSend, onRequest2nd, requesting, requested,
+    reqOpen, openReq, closeReq, reqReason, setReqReason, reqCounselor, setReqCounselor, counselorList,
 }: {
     result: Result
     sentList: ShareRow[]
@@ -664,6 +688,14 @@ function ProfileShareSection({
     onRequest2nd: () => void
     requesting: boolean
     requested: boolean
+    reqOpen: boolean
+    openReq: () => void
+    closeReq: () => void
+    reqReason: string
+    setReqReason: (t: string) => void
+    reqCounselor: string
+    setReqCounselor: (id: string) => void
+    counselorList: { id: string; full_name: string }[]
 }) {
     const open = composeFor === result.key
     // Combine the imported legacy numbers with anything sent via the hub.
@@ -672,7 +704,7 @@ function ProfileShareSection({
     return (
         <div className="space-y-3">
             {/* Action row: Send Profile Links + Request 2nd Post */}
-            {!open && (
+            {!open && !reqOpen && (
                 <div className="flex flex-wrap gap-2">
                     <button
                         onClick={() => { setComposeFor(result.key); setComposeText('') }}
@@ -682,18 +714,62 @@ function ProfileShareSection({
                     </button>
                     {requested ? (
                         <span className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-50 text-indigo-600 rounded-full text-sm font-semibold">
-                            <Sparkles className="w-4 h-4" /> 2nd post requested
+                            <Sparkles className="w-4 h-4" /> Sent for approval
                         </span>
                     ) : (
                         <button
-                            onClick={onRequest2nd}
-                            disabled={requesting}
-                            className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-full text-sm font-semibold hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                            onClick={openReq}
+                            className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-full text-sm font-semibold hover:bg-indigo-700 transition-colors"
                         >
-                            {requesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                            Request 2nd Post
+                            <Sparkles className="w-4 h-4" /> Request 2nd Post
                         </button>
                     )}
+                </div>
+            )}
+
+            {/* Request 2nd Post composer — reason + counselor → admin approval */}
+            {reqOpen && (
+                <div className="bg-white border-2 border-indigo-200 rounded-2xl p-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-indigo-500" />
+                        <p className="text-sm font-bold text-gray-800">Request a 2nd post</p>
+                    </div>
+                    <p className="text-[11px] text-gray-400 font-medium -mt-1">This goes to the admin panel for approval before reaching the counselor.</p>
+
+                    <div>
+                        <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Reason for request</label>
+                        <textarea
+                            autoFocus
+                            value={reqReason}
+                            onChange={e => setReqReason(e.target.value)}
+                            rows={2}
+                            placeholder="Why does this customer need a 2nd post?"
+                            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-indigo-300 resize-none"
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign counselor</label>
+                        <select
+                            value={reqCounselor}
+                            onChange={e => setReqCounselor(e.target.value)}
+                            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-indigo-300"
+                        >
+                            <option value="">Select counselor...</option>
+                            {counselorList.map(c => <option key={c.id} value={c.id}>{c.full_name}</option>)}
+                        </select>
+                    </div>
+
+                    <div className="flex gap-2">
+                        <button onClick={closeReq}
+                            className="flex-1 border border-gray-200 text-gray-500 rounded-xl py-2.5 text-sm font-semibold">
+                            Cancel
+                        </button>
+                        <button onClick={onRequest2nd} disabled={!reqReason.trim() || !reqCounselor || requesting}
+                            className="flex-1 bg-indigo-600 text-white rounded-xl py-2.5 text-sm font-bold disabled:opacity-40 flex items-center justify-center gap-2">
+                            {requesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Sparkles className="w-4 h-4" /> Send for approval</>}
+                        </button>
+                    </div>
                 </div>
             )}
             {open && (

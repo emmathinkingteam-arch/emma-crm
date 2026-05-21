@@ -265,24 +265,51 @@ export default function CustomerDetailPage() {
   // Upload payment slip
   const handleSlipUpload = async (file: File): Promise<string> => {
     setSlipUploading(true)
-    const ext = file.name.split('.').pop()
-    const path = `slips/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-    await supabase.storage.from('invoices').upload(path, file, { upsert: true })
-    const { data: { publicUrl } } = supabase.storage.from('invoices').getPublicUrl(path)
-    setSlipUrl(publicUrl)
-    setSlipUploading(false)
-    return publicUrl
+    try {
+      const ext = file.name.split('.').pop()
+      const path = `slips/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+      const { error: upErr } = await supabase.storage
+        .from('invoices')
+        .upload(path, file, { upsert: true, contentType: file.type })
+      if (upErr) {
+        // Surface the real reason instead of silently returning a dead URL.
+        alert('Payment slip upload FAILED: ' + upErr.message + '\n\nThe slip was NOT saved. Please try again or tell admin.')
+        setSlipUploading(false)
+        return ''
+      }
+      const { data: { publicUrl } } = supabase.storage.from('invoices').getPublicUrl(path)
+      setSlipUrl(publicUrl)
+      setSlipUploading(false)
+      return publicUrl
+    } catch (e: any) {
+      alert('Payment slip upload error: ' + (e?.message || 'unknown') + '\n\nThe slip was NOT saved.')
+      setSlipUploading(false)
+      return ''
+    }
   }
 
   const handleSlip2Upload = async (file: File): Promise<string> => {
     setSlip2Uploading(true)
-    const ext = file.name.split('.').pop()
-    const path = `slips/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-    await supabase.storage.from('invoices').upload(path, file, { upsert: true })
-    const { data: { publicUrl } } = supabase.storage.from('invoices').getPublicUrl(path)
-    setSlip2Url(publicUrl)
-    setSlip2Uploading(false)
-    return publicUrl
+    try {
+      const ext = file.name.split('.').pop()
+      const path = `slips/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+      const { error: upErr } = await supabase.storage
+        .from('invoices')
+        .upload(path, file, { upsert: true, contentType: file.type })
+      if (upErr) {
+        alert('2nd slip upload FAILED: ' + upErr.message + '\n\nThe slip was NOT saved.')
+        setSlip2Uploading(false)
+        return ''
+      }
+      const { data: { publicUrl } } = supabase.storage.from('invoices').getPublicUrl(path)
+      setSlip2Url(publicUrl)
+      setSlip2Uploading(false)
+      return publicUrl
+    } catch (e: any) {
+      alert('2nd slip upload error: ' + (e?.message || 'unknown') + '\n\nThe slip was NOT saved.')
+      setSlip2Uploading(false)
+      return ''
+    }
   }
 
   const doAccept = async () => {

@@ -32,7 +32,7 @@ export default function LoginPage() {
     }
 
     if (data.user) {
-      const { data: profile, error: profileError } = await supabase
+      const { data: profile } = await supabase
         .from('users')
         .select('*')
         .eq('auth_user_id', data.user.id)
@@ -40,12 +40,19 @@ export default function LoginPage() {
 
       if (profile) {
         setUser(profile)
-        await new Promise(r => setTimeout(r, 500))
+        await new Promise(r => setTimeout(r, 300))
+        // Only confirmed admins go to /admin. Every other role — and any
+        // case where the role is missing/unexpected — goes to /dashboard.
+        // We never default an unknown user into the admin panel.
         if (profile.role === 'admin') {
           router.replace('/admin')
         } else {
           router.replace('/dashboard')
         }
+      } else {
+        // No profile row found: do not assume anything. Send to the worker
+        // dashboard (the middleware will re-gate on the next navigation).
+        router.replace('/dashboard')
       }
     }
 

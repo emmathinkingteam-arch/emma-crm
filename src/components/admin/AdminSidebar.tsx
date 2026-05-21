@@ -2,7 +2,6 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useRouter } from 'next/navigation'
 import {
   LayoutDashboard, Users, ClipboardList, History,
   MapPin, Briefcase, UserPlus, BarChart2,
@@ -39,13 +38,16 @@ const TABS = [
 
 export default function AdminSidebar() {
   const pathname = usePathname()
-  const router = useRouter()
   const { clear } = useAuthStore()
 
   const handleLogout = async () => {
-    await supabase.auth.signOut()
+    // Clear the local store FIRST so no stale admin role survives the
+    // redirect, then sign out, then hard-navigate to login. Using a full
+    // location replace (not router) guarantees a clean reload with no
+    // lingering client state that could bounce back into admin.
     clear()
-    router.replace('/auth/login')
+    await supabase.auth.signOut()
+    window.location.replace('/auth/login')
   }
 
   return (

@@ -16,7 +16,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     }
   }, [role, isLoading])
 
-  if (isLoading) {
+  // Show a loader while auth is rehydrating OR while a non-admin is being
+  // redirected away. We must NOT render the admin UI (sidebar/content) for
+  // anyone who isn't a confirmed admin — not even for a single frame. The
+  // server middleware already blocks non-admins, this is the client backstop.
+  if (isLoading || role !== 'admin') {
     return (
       <div className="h-screen flex items-center justify-center">
         <Loader2 className="animate-spin text-pink-600" size={28} />

@@ -270,9 +270,11 @@ export default function ProfilePage() {
   }
 
   const handleLogout = async () => {
-    await supabase.auth.signOut()
+    // Clear local store first so no stale role survives, then sign out and
+    // hard-navigate. A full location replace avoids any client-state lag.
     clear()
-    router.replace('/auth/login')
+    await supabase.auth.signOut()
+    window.location.replace('/auth/login')
   }
 
   // ── Document download helper (Task 3) ───────────────────────

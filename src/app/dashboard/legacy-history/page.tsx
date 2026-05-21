@@ -9,7 +9,7 @@ import BottomNav from '@/components/shared/BottomNav'
 import { LegacyInvoice } from '@/types'
 import {
     Search, FileText, Receipt, ChevronDown, Loader2, Lock,
-    Send, Clock, History, ExternalLink, Hash,
+    Send, Clock, History, ExternalLink, Hash, Sparkles,
 } from 'lucide-react'
 import { buildWaLink, openWaLink } from '@/lib/utils'
 
@@ -118,7 +118,7 @@ export default function SearchHubPage() {
         }
 
         const newResults: NewResult[] = []
-        const idList = Array.from(orderIds)
+        const idList = [...orderIds]
 
         if (idList.length) {
             const [{ data: orders }, { data: slots }] = await Promise.all([
@@ -249,6 +249,78 @@ export default function SearchHubPage() {
         setComposeText('')
         setComposeFor(null)
         setSending(false)
+    }
+
+    // ── Request 2nd Post → spins up a fresh counselor pipeline ──
+    const [requesting, setRequesting] = useState<string | null>(null)
+    const [requestedKeys, setRequestedKeys] = useState<Set<string>>(new Set())
+
+    async function handleRequest2ndPost(result: Result) {
+        if (!user) return
+        setRequesting(result.key)
+
+        // List of active counselors to choose the first handler.
+        const { data: cns } = await supabase
+            .from('users').select('id, agent_code').eq('role', 'counselor').eq('is_active', true)
+        const firstCounselor = cns?.[0]?.id || null
+
+        const insertRow: Record<string, any> = {
+            status: 'counselor_review',
+            counselor_id: firstCounselor,
+            requested_by: user.id,
+            counselor_deadline: new Date(Date.now() + 5 * 86400000).toISOString(),
+        }
+
+        if (result.kind === 'new') {
+            // Derive base agent code from the order creator.
+            const { data: ord } = await supabase
+                .from('orders')
+                .select('created_by, package_id, customer_id')
+                .eq('id', result.orderId).maybeSingle()
+            let agentCode = 'X'
+            let originalCounselor: string | null = null
+            if (ord?.created_by) {
+                const { data: creator } = await supabase
+                    .from('users').select('agent_code').eq('id', ord.created_by).maybeSingle()
+                if (creator?.agent_code) agentCode = creator.agent_code
+            }
+            // original counselor = whoever ran step 4 (counselor) on this order
+            const { data: cStep } = await supabase
+                .from('order_steps').select('assigned_to')
+                .eq('order_id', result.orderId).eq('step_number', 4)
+                .maybeSingle()
+            originalCounselor = cStep?.assigned_to || null
+
+            insertRow.order_id = result.orderId
+            insertRow.customer_id = result.customerId
+            insertRow.customer_name = result.customerName
+            insertRow.customer_phone = result.phone
+            insertRow.package_name = result.packageName
+            insertRow.agent_code = agentCode
+            insertRow.first_post_code = result.postCodes[0] || null
+            insertRow.original_counselor_id = originalCounselor
+        } else {
+            const inv = result.inv
+            // Legacy: pull base letter out of the first post code  L/26/H/D7/X → H
+            let agentCode = 'X'
+            const code = inv.first_post_code || inv.second_post_code
+            if (code) {
+                const parts = code.split('/')
+                if (parts[2]) agentCode = parts[2].replace(/2$/, '')  // strip any trailing 2
+            }
+            insertRow.legacy_invoice_id = inv.id
+            insertRow.customer_name = inv.customer_name
+            insertRow.customer_phone = inv.phone_number
+            insertRow.package_name = inv.package_name
+            insertRow.agent_code = agentCode
+            insertRow.first_post_code = inv.first_post_code || null
+            insertRow.first_post_content = inv.first_post_content || inv.second_post_content || null
+        }
+
+        const { error } = await supabase.from('second_post_requests').insert(insertRow)
+        setRequesting(null)
+        if (error) { alert('Could not create 2nd post request: ' + error.message); return }
+        setRequestedKeys(prev => new Set(prev).add(result.key))
     }
 
     function toggleRow(key: string) {
@@ -439,6 +511,9 @@ export default function SearchHubPage() {
                                                     setComposeFor={setComposeFor}
                                                     setComposeText={setComposeText}
                                                     onSend={() => handleSendProfileLinks(r)}
+                                                    onRequest2nd={() => handleRequest2ndPost(r)}
+                                                    requesting={requesting === r.key}
+                                                    requested={requestedKeys.has(r.key)}
                                                 />
                                             </div>
                                         )}
@@ -531,6 +606,9 @@ export default function SearchHubPage() {
                                                 setComposeFor={setComposeFor}
                                                 setComposeText={setComposeText}
                                                 onSend={() => handleSendProfileLinks(r)}
+                                                onRequest2nd={() => handleRequest2ndPost(r)}
+                                                requesting={requesting === r.key}
+                                                requested={requestedKeys.has(r.key)}
                                             />
                                         </div>
                                     )}
@@ -572,7 +650,7 @@ function PostBlock({ label, code, content }: { label: string; code: string | nul
 // Shared "Numbers / Links Sent" + Send Profile Links composer.
 function ProfileShareSection({
     result, sentList, legacyNumbers, composeFor, composeText, sending,
-    setComposeFor, setComposeText, onSend,
+    setComposeFor, setComposeText, onSend, onRequest2nd, requesting, requested,
 }: {
     result: Result
     sentList: ShareRow[]
@@ -583,6 +661,9 @@ function ProfileShareSection({
     setComposeFor: (k: string | null) => void
     setComposeText: (t: string) => void
     onSend: () => void
+    onRequest2nd: () => void
+    requesting: boolean
+    requested: boolean
 }) {
     const open = composeFor === result.key
     // Combine the imported legacy numbers with anything sent via the hub.
@@ -590,15 +671,32 @@ function ProfileShareSection({
 
     return (
         <div className="space-y-3">
-            {/* Send Profile Links — sits at the top of the actions */}
-            {!open ? (
-                <button
-                    onClick={() => { setComposeFor(result.key); setComposeText('') }}
-                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#EA1E63] text-white rounded-full text-sm font-semibold hover:bg-[#d1185a] transition-colors"
-                >
-                    <Send className="w-4 h-4" /> Send Profile Links
-                </button>
-            ) : (
+            {/* Action row: Send Profile Links + Request 2nd Post */}
+            {!open && (
+                <div className="flex flex-wrap gap-2">
+                    <button
+                        onClick={() => { setComposeFor(result.key); setComposeText('') }}
+                        className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#EA1E63] text-white rounded-full text-sm font-semibold hover:bg-[#d1185a] transition-colors"
+                    >
+                        <Send className="w-4 h-4" /> Send Profile Links
+                    </button>
+                    {requested ? (
+                        <span className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-50 text-indigo-600 rounded-full text-sm font-semibold">
+                            <Sparkles className="w-4 h-4" /> 2nd post requested
+                        </span>
+                    ) : (
+                        <button
+                            onClick={onRequest2nd}
+                            disabled={requesting}
+                            className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-full text-sm font-semibold hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                        >
+                            {requesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                            Request 2nd Post
+                        </button>
+                    )}
+                </div>
+            )}
+            {open && (
                 <div className="bg-white border-2 border-pink-200 rounded-2xl p-4 space-y-3">
                     <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wide">
                         Partner profile link / numbers to share

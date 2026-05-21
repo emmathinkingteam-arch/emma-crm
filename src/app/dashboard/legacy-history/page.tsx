@@ -118,7 +118,7 @@ export default function SearchHubPage() {
         }
 
         const newResults: NewResult[] = []
-        const idList = [...orderIds]
+        const idList = Array.from(orderIds)
 
         if (idList.length) {
             const [{ data: orders }, { data: slots }] = await Promise.all([

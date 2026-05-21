@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Users, CalendarRange,
-  PlusCircle, Wallet, Award, ClipboardList, History
+  PlusCircle, Wallet, Award, ClipboardList, Search
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 
@@ -19,7 +19,7 @@ const NAV_CONFIG = {
   back_office: [
     { href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
     { href: '/dashboard/customers', icon: Users, label: 'Clients' },
-    { href: '/dashboard/legacy-history', icon: History, label: 'Legacy' },
+    { href: '/dashboard/legacy-history', icon: Search, label: 'Search' },
     { href: '/dashboard/calendar', icon: CalendarRange, label: 'Plan' },
     { href: '/dashboard/profile', icon: Award, label: 'Profile' },
   ],

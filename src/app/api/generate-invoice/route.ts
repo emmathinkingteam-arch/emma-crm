@@ -40,8 +40,8 @@ export async function POST(req: Request) {
     bankName,
     packageName,
     finalAmount,         // For non-KOKO non-instalment: actual amount paid
-                         // For KOKO: package amount X (charge calculated in template)
-                         // For installment: amount of THIS installment
+    // For KOKO: package amount X (charge calculated in template)
+    // For installment: amount of THIS installment
     discountPercent,
     isKoko,
     installmentType,     // '1st' | '2nd' | null
@@ -54,6 +54,17 @@ export async function POST(req: Request) {
   }
 
   const invoiceNumber = await getNextInvoiceNumber(supabase)
+
+  // Look up the order's public tracking token so we can print the
+  // tracking link on the invoice. Every order gets a token by default.
+  const { data: ord } = await supabase
+    .from('orders')
+    .select('tracking_token')
+    .eq('id', orderId)
+    .maybeSingle()
+  const trackingUrl = ord?.tracking_token
+    ? `${process.env.NEXT_PUBLIC_APP_URL}/track/${ord.tracking_token}`
+    : undefined
 
   const html = generateInvoiceHtml({
     invoiceNumber,
@@ -70,13 +81,24 @@ export async function POST(req: Request) {
     otherInstallmentAmount: typeof otherInstallmentAmount === 'number'
       ? otherInstallmentAmount
       : (otherInstallmentAmount ? Number(otherInstallmentAmount) : undefined),
+    trackingUrl,
   })
 
-  // Save into appropriate column
+  // Save into appropriate column.
   const updateField = installmentType === '2nd' ? 'invoice_html_2nd' : 'invoice_html'
+  const updatePayload: Record<string, any> = { [updateField]: html }
+
+  // NEW: persist the human-facing invoice number on the order row so the
+  // Search Hub can search it and the dashboard tiles can show it without
+  // parsing HTML. Only the 1st/primary invoice owns invoice_number — we
+  // don't overwrite it with the 2nd-installment number.
+  if (installmentType !== '2nd') {
+    updatePayload.invoice_number = invoiceNumber
+  }
+
   const { error } = await supabase
     .from('orders')
-    .update({ [updateField]: html })
+    .update(updatePayload)
     .eq('id', orderId)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })

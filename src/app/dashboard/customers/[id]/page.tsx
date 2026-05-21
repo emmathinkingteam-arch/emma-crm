@@ -2015,6 +2015,22 @@ export default function CustomerDetailPage() {
           )}
 
           {/* ── HISTORY ──────────────────────────────────── */}
+          {/* ── ORDER TRACKING LINK (public, no-login) ─────── */}
+          {activeOrder && (activeOrder as any).tracking_token && (
+            <a
+              href={`/track/${(activeOrder as any).tracking_token}`}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center justify-between gap-2 border border-pink-200 bg-pink-50 rounded-2xl px-4 py-3 active:scale-[0.99] transition-all"
+            >
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-pink-700">Customer tracking page</p>
+                <p className="text-[10px] text-pink-400 font-medium truncate">Share this link — no login needed</p>
+              </div>
+              <ExternalLink size={14} className="text-pink-500 flex-shrink-0" />
+            </a>
+          )}
+
           <div>
             <div className="flex items-center justify-between mb-3">
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">History</p>
@@ -2121,9 +2137,9 @@ export default function CustomerDetailPage() {
                             </span>
                           )}
                         </div>
-                        <span className="text-[8px] text-gray-300 font-medium">{fmtDate(interaction.created_at)} {fmtTime(interaction.created_at)}</span>
+                        <span className="text-[11px] text-gray-500 font-semibold">{fmtDate(interaction.created_at)} {fmtTime(interaction.created_at)}</span>
                       </div>
-                      <p className="text-xs text-gray-600 font-medium leading-relaxed">{cleanDescription}</p>
+                      <p className="text-[13px] text-gray-700 font-medium leading-relaxed">{cleanDescription}</p>
                       {(invoiceLink || slipLink) && (
                         <div className="flex flex-wrap gap-1.5 mt-2">
                           {invoiceLink && (

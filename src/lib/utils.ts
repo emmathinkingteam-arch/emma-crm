@@ -205,6 +205,7 @@ export interface InvoiceParams {
   installmentType?: '1st' | '2nd' | null
   packageTotal?: number           // Full package price (after discount) — needed for installment context
   otherInstallmentAmount?: number // For 1st invoice: 2nd installment amount (remaining). For 2nd invoice: 1st installment amount.
+  trackingUrl?: string            // Public order-tracking link printed on the invoice
 }
 
 export function generateInvoiceHtml(params: InvoiceParams): string {
@@ -308,6 +309,9 @@ td{padding:14px 8px;font-size:12px;border-bottom:1px solid #eee}
 .inst-due{color:#B45309;margin-top:6px !important;font-size:13px}
 .inst-paid{background:#D1FAE5;border-color:#6EE7B7}
 .inst-done{color:#047857;margin-top:6px !important;font-size:14px}
+.track{background:#FFF0F5;border:1px solid #FFC5D9;border-radius:8px;padding:14px 16px;margin:14px 0 4px;text-align:center}
+.track-t{font-size:12px;font-weight:900;color:#C4155A;margin-bottom:4px;letter-spacing:.3px}
+.track a{font-size:12px;color:#EA1E63;word-break:break-all;text-decoration:none;font-weight:700}
 .terms{font-size:10.5px;color:#333;line-height:1.7;margin-top:20px;border-top:1px solid #ccc;padding-top:16px}
 .terms h4{font-size:13px;font-weight:900;margin-bottom:8px}
 .thanks{text-align:center;margin-top:30px;font-size:15px;font-weight:900;color:#EA1E63;padding:20px}
@@ -342,6 +346,10 @@ td{padding:14px 8px;font-size:12px;border-bottom:1px solid #eee}
   </table>
   <div class="total">Total: LKR ${fmtLkr(total)}.00</div>
   ${installmentBlock}
+  ${params.trackingUrl ? `<div class="track">
+    <p class="track-t">📍 Track your order anytime</p>
+    <a href="${params.trackingUrl}">${params.trackingUrl}</a>
+  </div>` : ''}
   <div class="terms">
     <h4>Terms &amp; Conditions</h4>
     <p>1. Emma Thinking (Pvt) Ltd is a legally registered Sri Lankan matchmaking service provider.</p>

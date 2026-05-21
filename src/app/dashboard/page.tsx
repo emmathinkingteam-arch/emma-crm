@@ -185,6 +185,11 @@ export default function DashboardPage() {
                 const customer = order.customer
                 const isOverdueRow = activeTab === 'in_progress' && (step.is_overdue || step.status === 'overdue')
 
+                // Human-facing order number (EM00xxx) so she can tell who paid
+                // first / who's urgent at a glance. Falls back to a short id.
+                const orderNo = (order as any).invoice_number
+                  || `#${order.id.slice(0, 6).toUpperCase()}`
+
                 return (
                   <Link
                     key={step.id}
@@ -198,13 +203,19 @@ export default function DashboardPage() {
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex-1 min-w-0">
-                        <p className={`text-xs font-bold truncate ${activeTab === 'completed' ? 'text-gray-500' : 'text-gray-800'}`}>
-                          {customer?.name || customer?.phone}
-                        </p>
-                        <p className="text-[9px] text-gray-400 font-medium mt-0.5 truncate">
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          {/* Order number badge — first thing she reads */}
+                          <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-pink-600 text-white tracking-wide flex-shrink-0">
+                            {orderNo}
+                          </span>
+                          <p className={`text-sm font-bold truncate ${activeTab === 'completed' ? 'text-gray-600' : 'text-gray-800'}`}>
+                            {customer?.name || customer?.phone}
+                          </p>
+                        </div>
+                        <p className="text-[11px] text-gray-500 font-semibold truncate">
                           {order.package?.name}
                           {activeTab === 'completed' && step.completed_at && (
-                            <span className="ml-1.5 text-gray-300">
+                            <span className="ml-1.5 text-gray-400">
                               · Done {new Date(step.completed_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
                             </span>
                           )}

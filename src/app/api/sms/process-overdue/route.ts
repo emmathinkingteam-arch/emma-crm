@@ -344,6 +344,7 @@ async function handle(req: Request) {
                 })
             } else {
                 smsFailed++
+                const reason = (smsResult as { ok: false; reason: string }).reason
 
                 // If sendSmsToUser bailed early (sms_globally_disabled,
                 // user_sms_disabled, user_not_found), no log row got written.
@@ -353,7 +354,7 @@ async function handle(req: Request) {
                     'user_sms_disabled',
                     'user_not_found',
                 ])
-                if (SILENT_REASONS.has(smsResult.reason)) {
+                if (SILENT_REASONS.has(reason)) {
                     await sb.from('sms_log').insert({
                         recipient_user_id: worker.id,
                         recipient_phone: '',
@@ -362,7 +363,7 @@ async function handle(req: Request) {
                         order_id: step.order_id,
                         order_step_id: step.id,
                         status: 'failed',
-                        error: smsResult.reason,
+                        error: reason,
                     })
                 }
 
@@ -372,7 +373,7 @@ async function handle(req: Request) {
                     user_id: worker.id,
                     deducted: true, // wallet was still deducted
                     sms_status: 'failed',
-                    reason: smsResult.reason,
+                    reason: reason,
                 })
             }
         }

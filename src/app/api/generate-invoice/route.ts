@@ -3,31 +3,17 @@ import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { generateInvoiceHtml } from '@/lib/utils'
 
 // ─────────────────────────────────────────────────────────────
-// Generate next sequential invoice number EM00xxx
-// Looks at BOTH invoice_html and invoice_html_2nd columns to keep
-// the running number unique across 1st & 2nd installment invoices.
+// Get the next invoice number from the database sequence.
+// This is ATOMIC — Postgres guarantees the sequence never returns the
+// same value twice, even if two invoices are generated at the same time.
+// No more duplicates, no more scanning HTML, no 50-row limit.
 // ─────────────────────────────────────────────────────────────
 async function getNextInvoiceNumber(supabase: any): Promise<string> {
-  const { data } = await supabase
-    .from('orders')
-    .select('invoice_html, invoice_html_2nd')
-    .or('invoice_html.not.is.null,invoice_html_2nd.not.is.null')
-    .order('created_at', { ascending: false })
-    .limit(50)
-
-  let maxNum = 782
-  for (const row of data || []) {
-    for (const html of [row.invoice_html, row.invoice_html_2nd]) {
-      if (!html) continue
-      const re = /Invoice\s+(EM\d+)/g
-      let m: RegExpExecArray | null
-      while ((m = re.exec(html)) !== null) {
-        const n = parseInt(m[1].replace('EM', ''), 10)
-        if (!isNaN(n) && n > maxNum) maxNum = n
-      }
-    }
+  const { data, error } = await supabase.rpc('next_invoice_number')
+  if (error || !data) {
+    throw new Error('Could not generate invoice number: ' + (error?.message || 'no value returned'))
   }
-  return `EM${String(maxNum + 1).padStart(5, '0')}`
+  return data as string
 }
 
 export async function POST(req: Request) {

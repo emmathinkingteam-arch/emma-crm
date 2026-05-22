@@ -54,6 +54,7 @@ export default function WhatsappBroadcastPage() {
     const [progress, setProgress] = useState<string>('')
     const [results, setResults] = useState<BroadcastResult[]>([])
     const [error, setError] = useState<string>('')
+    const [debug, setDebug] = useState<string>('')
 
     const [history, setHistory] = useState<HistoryRow[]>([])
     const [showHistory, setShowHistory] = useState(false)
@@ -127,10 +128,19 @@ export default function WhatsappBroadcastPage() {
                 }),
             })
             const data = await res.json()
+
+            // DEBUG: keep the full server response visible on screen so any
+            // failure reason (Meta error, env var, history error) is readable
+            // without opening DevTools.
+            setDebug(JSON.stringify(data, null, 2))
+
             if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
 
             setResults(data.results || [])
             setProgress('')
+            if (data.historyError) {
+                setError('Message step ran, but history did NOT save. Reason: ' + data.historyError)
+            }
             loadHistory()
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Unknown error')
@@ -289,6 +299,16 @@ export default function WhatsappBroadcastPage() {
                         {error && (
                             <div className="bg-red-50 border border-red-100 rounded-xl px-3 py-2 text-xs text-red-600 font-semibold">
                                 {error}
+                            </div>
+                        )}
+
+                        {debug && (
+                            <div className="bg-gray-900 rounded-xl px-3 py-2 overflow-auto">
+                                <div className="flex items-center justify-between mb-1">
+                                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Server response (debug)</span>
+                                    <button onClick={() => setDebug('')} className="text-[10px] text-gray-500 hover:text-gray-300">clear</button>
+                                </div>
+                                <pre className="text-[10px] text-green-300 whitespace-pre-wrap break-all max-h-64 overflow-auto">{debug}</pre>
                             </div>
                         )}
 

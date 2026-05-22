@@ -183,7 +183,7 @@ export default function WhatsappDeliveryPage() {
                         {failedRows.length} message{failedRows.length > 1 ? 's' : ''} failed — here’s why
                     </div>
                     <div className="space-y-1.5">
-                        {[...new Set(failedRows.map(r => r.error_code).filter(Boolean))].map(code => {
+                        {Array.from(new Set(failedRows.map(r => r.error_code).filter(Boolean))).map(code => {
                             const help = code ? ERROR_HELP[code] : null
                             return (
                                 <div key={code} className="text-xs text-red-800">

@@ -31,6 +31,7 @@ const TABS = [
   { href: '/admin/add-worker', icon: UserPlus, label: 'Add Worker' },
   { href: '/admin/settings', icon: Settings, label: 'Settings' },
   { href: '/admin/whatsapp', icon: MessageCircle, label: 'WhatsApp' },
+  { href: '/admin/whatsapp/delivery', icon: BarChart2, label: 'WA Delivery' },
   // Notifications now points to the index (redirects to SMS Logs by default).
   // The notifications section has its own sub-tabs: SMS Logs · Cron Status · Worker Phones.
   { href: '/admin/notifications', icon: MessageSquare, label: 'Notifications' },

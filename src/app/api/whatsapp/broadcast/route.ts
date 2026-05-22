@@ -16,6 +16,13 @@
 //
 // Returns:
 //   { results: [{ number, status, messageId?, error? }, ...] }
+//
+// ── 2026-05 CHANGE ──────────────────────────────────────────────────────────
+// Added a NON-BLOCKING baseline write into whatsapp_message_status after the
+// send. This lets the new delivery viewer (/admin/whatsapp/delivery) show every
+// message immediately ("accepted"), then the webhook upgrades each row to
+// delivered / read / failed. The send path itself is UNCHANGED — the recorder
+// is wrapped so it can never throw and never blocks or fails a broadcast.
 // ============================================================================
 
 import { NextResponse } from 'next/server'
@@ -86,26 +93,54 @@ export async function POST(req: Request) {
         const postCodeMatch = codeLine.match(/L\/\d{2}\/[A-Z0-9]+\/[A-Z]\d+\/[A-Z]/i)
         const profileCode = extractProfileCode(profileUrl)
 
-        const { error: logErr } = await sb.from('whatsapp_broadcasts').insert({
-            profile_code: profileCode,
-            profile_url: profileUrl,
-            post_code: postCodeMatch ? postCodeMatch[0] : null,
-            description,
-            image_url: imageUrl,
-            total_numbers: numbers.length,
-            sent_count: sentCount,
-            failed_count: failedCount,
-            cost_per_number: COST_PER_NUMBER,
-            total_cost: totalCost,
-            numbers,
-            results,
-            sent_by: profile?.id ?? null,
-        })
+        const { data: inserted, error: logErr } = await sb
+            .from('whatsapp_broadcasts')
+            .insert({
+                profile_code: profileCode,
+                profile_url: profileUrl,
+                post_code: postCodeMatch ? postCodeMatch[0] : null,
+                description,
+                image_url: imageUrl,
+                total_numbers: numbers.length,
+                sent_count: sentCount,
+                failed_count: failedCount,
+                cost_per_number: COST_PER_NUMBER,
+                total_cost: totalCost,
+                numbers,
+                results,
+                sent_by: profile?.id ?? null,
+            })
+            .select('id')
+            .single()
 
         if (logErr) {
             // Don't fail the whole send — the messages already went out — but
             // surface the reason so the history problem can be diagnosed.
             console.error('[WhatsApp] history insert failed:', logErr)
+        }
+
+        // ─── NON-BLOCKING: baseline rows for the delivery viewer ───────────
+        // Wrapped so any failure here is invisible to the broadcast result.
+        try {
+            const broadcastId = inserted?.id ?? null
+            const baseline = results
+                .filter(r => r.status === 'sent' && r.messageId)
+                .map(r => ({
+                    wamid: r.messageId,
+                    recipient: r.number,
+                    broadcast_id: broadcastId,
+                    status: 'accepted',
+                    status_rank: 1,
+                    updated_at: new Date().toISOString(),
+                }))
+
+            if (baseline.length) {
+                await sb
+                    .from('whatsapp_message_status')
+                    .upsert(baseline, { onConflict: 'wamid', ignoreDuplicates: true })
+            }
+        } catch (recErr) {
+            console.error('[WhatsApp] baseline status record skipped:', recErr)
         }
 
         return NextResponse.json({

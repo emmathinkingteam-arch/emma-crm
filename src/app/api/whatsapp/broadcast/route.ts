@@ -2,7 +2,7 @@
 // POST /api/whatsapp/broadcast
 // ============================================================================
 //
-// Admin-only. Sends the approved profile_share_si template to N numbers.
+// Admin-only. Sends the approved profile_share_v2_si template to N numbers.
 // Image URL must already be uploaded to the whatsapp-broadcasts Supabase
 // bucket (the page uploads from the browser before calling this).
 //
@@ -86,7 +86,7 @@ export async function POST(req: Request) {
         const postCodeMatch = codeLine.match(/L\/\d{2}\/[A-Z0-9]+\/[A-Z]\d+\/[A-Z]/i)
         const profileCode = extractProfileCode(profileUrl)
 
-        await sb.from('whatsapp_broadcasts').insert({
+        const { error: logErr } = await sb.from('whatsapp_broadcasts').insert({
             profile_code: profileCode,
             profile_url: profileUrl,
             post_code: postCodeMatch ? postCodeMatch[0] : null,
@@ -99,10 +99,20 @@ export async function POST(req: Request) {
             total_cost: totalCost,
             numbers,
             results,
-            sent_by: profile ? user.id : null,
+            sent_by: user.id,
         })
 
-        return NextResponse.json({ results, totalCost, sentCount, failedCount })
+        if (logErr) {
+            // Don't fail the whole send — the messages already went out — but
+            // surface the reason so the history problem can be diagnosed.
+            console.error('[WhatsApp] history insert failed:', logErr)
+        }
+
+        return NextResponse.json({
+            results, totalCost, sentCount, failedCount,
+            historyLogged: !logErr,
+            historyError: logErr?.message || null,
+        })
     } catch (err) {
         const msg = err instanceof Error ? err.message : 'Unknown error'
         return NextResponse.json({ error: msg }, { status: 500 })

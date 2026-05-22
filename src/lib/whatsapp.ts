@@ -85,6 +85,12 @@ async function sendOne({ imageUrl, description, profileUrl, number }: SendArgs):
         .replace(/ {2,}/g, ' ')           // collapse multi-spaces (Meta rejects 4+)
         .trim()
 
+    // The dynamic URL button only takes the SUFFIX that fills {{1}} in the
+    // template URL "https://www.emmathinking.com/profile/{{1}}".
+    // profileUrl may be the full link OR just the code — handle both:
+    // grab everything after the last "/" so we always send just the code.
+    const profileCode = (profileUrl || '').trim().replace(/\/+$/, '').split('/').pop() || ''
+
     const payload = {
         messaging_product: 'whatsapp',
         to: number,
@@ -103,6 +109,14 @@ async function sendOne({ imageUrl, description, profileUrl, number }: SendArgs):
                         { type: 'text', text: cleanDescription },
                         { type: 'text', text: profileUrl },
                     ],
+                },
+                {
+                    // Dynamic "Visit website" button — fills {{1}} in the button URL.
+                    // index '0' = the first button on the template.
+                    type: 'button',
+                    sub_type: 'url',
+                    index: '0',
+                    parameters: [{ type: 'text', text: profileCode }],
                 },
             ],
         },

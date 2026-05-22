@@ -20,7 +20,7 @@
 
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
-import { sendBroadcast, cleanupOldBroadcastImages } from '@/lib/whatsapp'
+import { sendBroadcast, cleanupOldBroadcastImages, extractProfileCode } from '@/lib/whatsapp'
 
 export async function POST(req: Request) {
     try {
@@ -49,16 +49,17 @@ export async function POST(req: Request) {
 
         // ─── Validate input ────────────────────────────────────────────────
         const body = await req.json()
-        const { imageUrl, description, profileUrl, numbers } = body as {
+        const { imageUrl, codeLine, description, profileUrl, numbers } = body as {
             imageUrl?: string
+            codeLine?: string
             description?: string
             profileUrl?: string
             numbers?: string[]
         }
 
-        if (!imageUrl || !description || !profileUrl || !Array.isArray(numbers) || numbers.length === 0) {
+        if (!imageUrl || !codeLine || !description || !profileUrl || !Array.isArray(numbers) || numbers.length === 0) {
             return NextResponse.json(
-                { error: 'Missing imageUrl, description, profileUrl, or numbers' },
+                { error: 'Missing imageUrl, codeLine, description, profileUrl, or numbers' },
                 { status: 400 }
             )
         }
@@ -69,12 +70,39 @@ export async function POST(req: Request) {
         // ─── Send sequentially ─────────────────────────────────────────────
         const results = await sendBroadcast({
             imageUrl,
+            codeLine,
             description,
             profileUrl,
             numbers,
         })
 
-        return NextResponse.json({ results })
+        // ─── Log to history (cost = sent count × per-number rate) ──────────
+        const COST_PER_NUMBER = 25.28
+        const sentCount = results.filter(r => r.status === 'sent').length
+        const failedCount = results.filter(r => r.status === 'failed').length
+        const totalCost = +(sentCount * COST_PER_NUMBER).toFixed(2)
+
+        // pull a post code like L/26/S/E22/Y out of the bold code line if present
+        const postCodeMatch = codeLine.match(/L\/\d{2}\/[A-Z0-9]+\/[A-Z]\d+\/[A-Z]/i)
+        const profileCode = extractProfileCode(profileUrl)
+
+        await sb.from('whatsapp_broadcasts').insert({
+            profile_code: profileCode,
+            profile_url: profileUrl,
+            post_code: postCodeMatch ? postCodeMatch[0] : null,
+            description,
+            image_url: imageUrl,
+            total_numbers: numbers.length,
+            sent_count: sentCount,
+            failed_count: failedCount,
+            cost_per_number: COST_PER_NUMBER,
+            total_cost: totalCost,
+            numbers,
+            results,
+            sent_by: profile ? user.id : null,
+        })
+
+        return NextResponse.json({ results, totalCost, sentCount, failedCount })
     } catch (err) {
         const msg = err instanceof Error ? err.message : 'Unknown error'
         return NextResponse.json({ error: msg }, { status: 500 })

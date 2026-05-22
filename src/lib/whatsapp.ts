@@ -22,8 +22,9 @@ export interface BroadcastSendResult {
 
 interface SendArgs {
     imageUrl: string
-    description: string
-    profileUrl: string
+    codeLine: string       // bold line, e.g. "Sweet Lecturer නෝනෙක් | L/26/S/E22/Y"
+    description: string     // the body paragraph
+    profileUrl: string      // full link, also used to extract the button code
     number: string
 }
 
@@ -64,14 +65,29 @@ export function parseBulkNumbers(input: string): { valid: string[]; invalid: str
     return { valid, invalid }
 }
 
+// Extract just the code that fills {{1}} on the button, from a full link.
+// "https://www.emmathinking.com/profile/UgSGXdoIBTay" -> "UgSGXdoIBTay"
+export function extractProfileCode(profileUrl: string): string {
+    return (profileUrl || '').trim().replace(/\/+$/, '').split('/').pop() || ''
+}
+
+// One-line cleaner for template variables (Meta rejects newlines / 4+ spaces).
+function cleanVar(s: string): string {
+    return (s || '')
+        .replace(/\t/g, ' ')
+        .replace(/\r\n|\r|\n/g, ' ')
+        .replace(/ {2,}/g, ' ')
+        .trim()
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Send one template message
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function sendOne({ imageUrl, description, profileUrl, number }: SendArgs): Promise<BroadcastSendResult> {
+async function sendOne({ imageUrl, codeLine, description, profileUrl, number }: SendArgs): Promise<BroadcastSendResult> {
     const token = process.env.WHATSAPP_ACCESS_TOKEN
     const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID
-    const templateName = process.env.WHATSAPP_TEMPLATE_NAME || 'profile_share_si'
+    const templateName = process.env.WHATSAPP_TEMPLATE_NAME || 'profile_share_v2_si'
     const lang = process.env.WHATSAPP_TEMPLATE_LANG || 'si_LK'
     const version = process.env.WHATSAPP_API_VERSION || 'v21.0'
 
@@ -79,18 +95,13 @@ async function sendOne({ imageUrl, description, profileUrl, number }: SendArgs):
         return { number, status: 'failed', error: 'WhatsApp env vars not set' }
     }
 
-    const cleanDescription = description
-        .replace(/\t/g, ' ')              // tabs → space
-        .replace(/\r\n|\r|\n/g, ' ')      // newlines → space (Meta rejects these in vars)
-        .replace(/ {2,}/g, ' ')           // collapse multi-spaces (Meta rejects 4+)
-        .trim()
+    const profileCode = extractProfileCode(profileUrl)
 
-    // The dynamic URL button only takes the SUFFIX that fills {{1}} in the
-    // template URL "https://www.emmathinking.com/profile/{{1}}".
-    // profileUrl may be the full link OR just the code — handle both:
-    // grab everything after the last "/" so we always send just the code.
-    const profileCode = (profileUrl || '').trim().replace(/\/+$/, '').split('/').pop() || ''
-
+    // Template body has THREE variables in this order:
+    //   {{1}} = bold code line   (e.g. "Sweet Lecturer නෝනෙක් | L/26/S/E22/Y")
+    //   {{2}} = description paragraph
+    //   {{3}} = full profile link (shown as text under "ඍජුව සම්බන්ධ වන්න:")
+    // The button is a separate dynamic-URL component filled with the code.
     const payload = {
         messaging_product: 'whatsapp',
         to: number,
@@ -106,13 +117,12 @@ async function sendOne({ imageUrl, description, profileUrl, number }: SendArgs):
                 {
                     type: 'body',
                     parameters: [
-                        { type: 'text', text: cleanDescription },
-                        { type: 'text', text: profileUrl },
+                        { type: 'text', text: cleanVar(codeLine) },
+                        { type: 'text', text: cleanVar(description) },
+                        { type: 'text', text: cleanVar(profileUrl) },
                     ],
                 },
                 {
-                    // Dynamic "Visit website" button — fills {{1}} in the button URL.
-                    // index '0' = the first button on the template.
                     type: 'button',
                     sub_type: 'url',
                     index: '0',
@@ -166,6 +176,7 @@ async function sendOne({ imageUrl, description, profileUrl, number }: SendArgs):
 
 export async function sendBroadcast(args: {
     imageUrl: string
+    codeLine: string
     description: string
     profileUrl: string
     numbers: string[]
@@ -175,6 +186,7 @@ export async function sendBroadcast(args: {
     for (const number of args.numbers) {
         const r = await sendOne({
             imageUrl: args.imageUrl,
+            codeLine: args.codeLine,
             description: args.description,
             profileUrl: args.profileUrl,
             number,

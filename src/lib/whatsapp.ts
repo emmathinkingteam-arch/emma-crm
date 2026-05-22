@@ -87,8 +87,17 @@ function cleanVar(s: string): string {
 async function sendOne({ imageUrl, codeLine, description, profileUrl, number }: SendArgs): Promise<BroadcastSendResult> {
     const token = process.env.WHATSAPP_ACCESS_TOKEN
     const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID
-    const templateName = process.env.WHATSAPP_TEMPLATE_NAME || 'profile_share_v2_si'
-    const lang = process.env.WHATSAPP_TEMPLATE_LANG || 'si_LK'
+    const templateName = process.env.WHATSAPP_TEMPLATE_NAME || 'profile_share_v2_en'
+    // ⚠️ LANGUAGE CODE MUST MATCH WHATSAPP MANAGER EXACTLY ⚠️
+    // This is the #1 cause of failed sends (Meta error 132001 — "template name
+    // does not exist in the translation"). The body text can be Sinhala while
+    // the template's *language* is English — that's fine; only this CODE has to
+    // match what you selected when creating the template:
+    //     "English"      -> en
+    //     "English (US)" -> en_US
+    //     "English (UK)" -> en_GB
+    // Don't guess — open  /api/whatsapp/template-check  to read the real value.
+    const lang = process.env.WHATSAPP_TEMPLATE_LANG || 'en'
     const version = process.env.WHATSAPP_API_VERSION || 'v21.0'
 
     if (!token || !phoneId) {

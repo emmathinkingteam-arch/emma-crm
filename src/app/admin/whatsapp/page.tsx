@@ -3,7 +3,7 @@
 // ============================================================================
 // /admin/whatsapp — WhatsApp Cloud API broadcast (admin only)
 // ============================================================================
-// Template: profile_share_v2_si — formatted layout with:
+// Template: profile_share_v2_en — formatted layout with:
 //   header image · {{1}} bold code line · {{2}} description · {{3}} link
 //   + dynamic URL button (auto-filled from the link)
 // Includes live budgeting (LKR 25.28/number) and broadcast history.
@@ -165,7 +165,7 @@ export default function WhatsappBroadcastPage() {
                     <div>
                         <h1 className="text-xl font-bold text-gray-800">WhatsApp Broadcast</h1>
                         <p className="text-[10px] text-gray-400 font-medium">
-                            Meta Cloud API · template <code>profile_share_v2_si</code> · LKR {COST_PER_NUMBER}/number
+                            Meta Cloud API · template <code>profile_share_v2_en</code> · LKR {COST_PER_NUMBER}/number
                         </p>
                     </div>
                 </div>

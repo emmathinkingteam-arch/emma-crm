@@ -2,7 +2,8 @@
 // POST /api/whatsapp/broadcast
 // ============================================================================
 //
-// Admin-only. Sends the approved profile_share_v2_si template to N numbers.
+// Admin-only. Sends the approved profile_share_v2_en template to N numbers.
+// (Template name + language are configurable via env — see src/lib/whatsapp.ts.)
 // Image URL must already be uploaded to the whatsapp-broadcasts Supabase
 // bucket (the page uploads from the browser before calling this).
 //

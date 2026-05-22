@@ -39,7 +39,7 @@ export async function POST(req: Request) {
 
         const { data: profile } = await sb
             .from('users')
-            .select('role')
+            .select('id, role')
             .eq('auth_user_id', user.id)
             .single()
 
@@ -99,7 +99,7 @@ export async function POST(req: Request) {
             total_cost: totalCost,
             numbers,
             results,
-            sent_by: user.id,
+            sent_by: profile?.id ?? null,
         })
 
         if (logErr) {

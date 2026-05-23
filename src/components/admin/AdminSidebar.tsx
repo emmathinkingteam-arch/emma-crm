@@ -41,7 +41,13 @@ const TABS = [
 
 export default function AdminSidebar() {
   const pathname = usePathname()
-  const { clear } = useAuthStore()
+  const { clear, role } = useAuthStore()
+
+  // Accountants only ever see the Accounts world. Admins see everything.
+  const visibleTabs =
+    role === 'accountant'
+      ? TABS.filter((t) => t.href === '/admin/accounts')
+      : TABS
 
   const handleLogout = async () => {
     // Clear the local store FIRST so no stale admin role survives the
@@ -62,15 +68,15 @@ export default function AdminSidebar() {
             <span className="text-white font-bold text-xs">E</span>
           </div>
           <div>
-            <p className="text-pink-600 font-bold text-sm tracking-tight italic">Emma Admin</p>
-            <p className="text-gray-400 text-[9px] font-medium">Management panel</p>
+            <p className="text-pink-600 font-bold text-sm tracking-tight italic">{role === 'accountant' ? 'Emma Accounts' : 'Emma Admin'}</p>
+            <p className="text-gray-400 text-[9px] font-medium">{role === 'accountant' ? 'Accounting panel' : 'Management panel'}</p>
           </div>
         </div>
       </div>
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
-        {TABS.map(({ href, icon: Icon, label, badge }) => {
+        {visibleTabs.map(({ href, icon: Icon, label, badge }) => {
           // For the Notifications top-level entry, mark it active for ANY
           // /admin/notifications/* sub-route too.
           const active =

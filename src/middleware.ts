@@ -46,19 +46,29 @@ export async function middleware(request: NextRequest) {
       .single()
     role = profile?.role ?? null
 
-    // 2. HARD GATE: only admins may touch /admin/*. Any other role (or a
-    //    user with no profile row) is sent to the worker dashboard BEFORE
-    //    the admin layout/page ever renders. This closes the worker-sees-
-    //    admin hole completely.
+    // 2. HARD GATE: only admins may touch /admin/*. The one exception is the
+    //    accountant role, which may access the Accounts world (/admin/accounts/*)
+    //    and nothing else under /admin. Any other role (or a user with no
+    //    profile row) is sent to the worker dashboard BEFORE the admin
+    //    layout/page ever renders.
     if (pathname.startsWith('/admin') && role !== 'admin') {
-      return NextResponse.redirect(new URL('/dashboard', request.url))
+      const accountantOk =
+        role === 'accountant' && pathname.startsWith('/admin/accounts')
+      if (!accountantOk) {
+        return NextResponse.redirect(new URL('/dashboard', request.url))
+      }
     }
 
     // 3. Role-aware landing when hitting the login page while already
     //    authenticated (e.g. logout lag, back button, re-visit). Workers go
-    //    to /dashboard, admins to /admin -- never the other way around.
+    //    to /dashboard, admins to /admin, accountants to /admin/accounts.
     if (pathname === '/auth/login') {
-      const dest = role === 'admin' ? '/admin' : '/dashboard'
+      const dest =
+        role === 'admin'
+          ? '/admin'
+          : role === 'accountant'
+            ? '/admin/accounts'
+            : '/dashboard'
       return NextResponse.redirect(new URL(dest, request.url))
     }
   }

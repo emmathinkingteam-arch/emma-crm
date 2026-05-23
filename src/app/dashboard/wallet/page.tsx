@@ -14,6 +14,7 @@ export default function WalletPage() {
   const [commissions, setCommissions] = useState<Commission[]>([])
   const [payments, setPayments] = useState<SalaryPayment[]>([])
   const [monthTarget, setMonthTarget] = useState(0)
+  const [liveBalance, setLiveBalance] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -23,10 +24,12 @@ export default function WalletPage() {
       supabase.from('commissions').select('*, order:orders(customer:customers(name,phone)), package:packages(name)').eq('user_id', user.id).order('earned_at', { ascending: false }),
       supabase.from('salary_payments').select('*').eq('user_id', user.id).order('paid_at', { ascending: false }),
       supabase.from('monthly_targets').select('target_amount').eq('user_id', user.id).eq('month_year', month).single(),
-    ]).then(([c, p, t]) => {
+      supabase.from('users').select('wallet_balance').eq('id', user.id).single(),
+    ]).then(([c, p, t, w]) => {
       if (c.data) setCommissions(c.data as any)
       if (p.data) setPayments(p.data)
       if (t.data) setMonthTarget(t.data.target_amount)
+      if (w.data) setLiveBalance(Number(w.data.wallet_balance ?? 0))
       setLoading(false)
     })
   }, [user])
@@ -47,7 +50,7 @@ export default function WalletPage() {
         {/* Wallet card */}
         <div className="bg-gradient-to-br from-pink-600 to-pink-400 rounded-3xl p-5 text-white">
           <p className="text-xs font-medium opacity-75 uppercase tracking-wide">Total wallet balance</p>
-          <p className="text-3xl font-bold tracking-tight mt-1">LKR {(user?.wallet_balance ?? 0).toLocaleString()}</p>
+          <p className="text-3xl font-bold tracking-tight mt-1">LKR {(liveBalance ?? user?.wallet_balance ?? 0).toLocaleString()}</p>
           <p className="text-xs opacity-75 mt-2">This month: LKR {monthEarned.toLocaleString()}</p>
         </div>
 

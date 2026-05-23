@@ -73,13 +73,14 @@ export default function ProfilePage() {
     const month = currentMonthYear()
     const firstOfMonth = `${month}-01`
 
-    const [attRes, monthAttRes, commRes, targetRes, milRes, dailyRes] = await Promise.all([
+    const [attRes, monthAttRes, commRes, targetRes, milRes, dailyRes, walletRes] = await Promise.all([
       supabase.from('attendance').select('*').eq('user_id', user.id).eq('date', today).single(),
       supabase.from('attendance').select('*').eq('user_id', user.id).gte('date', firstOfMonth).order('date'),
       supabase.from('commissions').select('amount').eq('user_id', user.id).eq('month_year', month),
       supabase.from('monthly_targets').select('target_amount').eq('user_id', user.id).eq('month_year', month).single(),
       supabase.from('reward_milestones').select('*').eq('user_id', user.id).eq('is_active', true),
       supabase.from('interactions').select('id', { count: 'exact', head: true }).eq('created_by', user.id).gte('created_at', today),
+      supabase.from('users').select('wallet_balance').eq('id', user.id).single(),
     ])
 
     if (attRes.data) {
@@ -92,6 +93,9 @@ export default function ProfilePage() {
     if (milRes.data) setMilestones(milRes.data)
     if ((dailyRes as any).count !== undefined) setDailyCount((dailyRes as any).count ?? 0)
     setLeaveBalance({ annual: user.annual_leaves_remaining, casual: user.casual_leaves_remaining })
+    if (walletRes.data && Number(walletRes.data.wallet_balance ?? 0) !== user.wallet_balance) {
+      setUser({ ...user, wallet_balance: Number(walletRes.data.wallet_balance ?? 0) })
+    }
     setLoading(false)
   }
 

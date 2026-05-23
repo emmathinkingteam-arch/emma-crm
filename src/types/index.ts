@@ -9,6 +9,7 @@ export type UserRole =
   | 'counselor'
   | 'manager'
   | 'designer'
+  | 'accountant'
 
 export type OrderStatus = 'draft' | 'active' | 'expired' | 'cancelled'
 export type StepStatus = 'pending' | 'in_progress' | 'done' | 'overdue' | 'rejected'
@@ -313,4 +314,117 @@ export interface LegacyInvoice {
   sent_number_18: string | null
   numbers_sent_count: number
   imported_at: string
+}
+
+// ═══════════════════════════════════════════════════════════
+// Accounts module types (appended)
+// ═══════════════════════════════════════════════════════════
+
+export type LedgerType = 'asset' | 'liability' | 'equity' | 'revenue' | 'expense'
+
+export interface AccLedger {
+  id: string
+  code: string
+  name: string
+  type: LedgerType
+  is_bank: boolean
+  currency: string
+  parent_id?: string | null
+  opening_balance: number
+  sort_order: number
+  is_active: boolean
+  created_at: string
+}
+
+export interface AccCategory {
+  id: string
+  name: string
+  parent_id?: string | null
+  ledger_id: string
+  is_active: boolean
+  sort_order: number
+  // joined
+  parent?: AccCategory
+  ledger?: AccLedger
+}
+
+export type AccEntryType =
+  | 'expense'
+  | 'customer_payment'
+  | 'other_income'
+  | 'transfer'
+  | 'salary'
+  | 'wallet'
+  | 'penalty'
+  | 'owner_capital'
+  | 'bank_fee'
+  | 'adjustment'
+  | 'opening'
+
+export interface AccEntry {
+  id: string
+  entry_date: string
+  description: string
+  entry_type: AccEntryType
+  category_id?: string | null
+  order_id?: string | null
+  customer_id?: string | null
+  worker_id?: string | null
+  status: 'draft' | 'pending' | 'posted' | 'void'
+  period_month?: string
+  created_by?: string | null
+  approved_by?: string | null
+  created_at: string
+  // joined
+  lines?: AccLine[]
+  attachments?: AccAttachment[]
+  category?: AccCategory
+}
+
+export interface AccLine {
+  id: string
+  entry_id: string
+  ledger_id: string
+  debit: number
+  credit: number
+  memo?: string | null
+  ledger?: AccLedger
+}
+
+export interface AccAttachment {
+  id: string
+  entry_id: string
+  drive_url: string
+  drive_file_id?: string | null
+  file_name?: string | null
+  kind: 'expense_slip' | 'income_slip' | 'bank_statement' | 'other'
+  uploaded_by?: string | null
+  uploaded_at: string
+}
+
+export type WalletTxnType =
+  | 'earning'
+  | 'penalty'
+  | 'advance'
+  | 'salary_payout'
+  | 'bonus'
+  | 'adjustment'
+  | 'month_reset'
+
+export interface AccWalletTxn {
+  id: string
+  user_id: string
+  txn_type: WalletTxnType
+  amount: number
+  balance_after?: number | null
+  month_year: string
+  ref_entry_id?: string | null
+  ref_commission_id?: string | null
+  ref_salary_id?: string | null
+  ref_order_step_id?: string | null
+  note?: string | null
+  created_by?: string | null
+  created_at: string
+  // joined
+  user?: User
 }

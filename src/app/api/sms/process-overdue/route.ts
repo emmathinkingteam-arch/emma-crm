@@ -36,6 +36,7 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { sendSmsToUser } from '@/lib/sms'
+import { recordPenalty } from '@/lib/wallet'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Config (kept in sync with src/app/dashboard/customers/[id]/page.tsx)
@@ -289,6 +290,26 @@ async function handle(req: Request) {
             }
 
             debitTotalLkr += PENALTY_LKR_PER_HOUR
+
+            // ── 2b-2. Record the penalty in wallet history + post to books ──
+            //
+            // This is what makes the hourly debit appear in the worker's
+            // wallet deduction history AND in the accounts (Dr Wallet /
+            // Cr Penalty Recoveries). It is best-effort: a failure here must
+            // never roll back the wallet deduction or stop the SMS, so we
+            // swallow errors and let the heartbeat/log surface them.
+            try {
+                await recordPenalty(sb, {
+                    userId: worker.id,
+                    penaltyLkr: PENALTY_LKR_PER_HOUR,
+                    balanceAfter: newBalance,
+                    orderStepId: step.id,
+                    orderId: step.order_id,
+                    note: `Overdue: ${step.step_name || `Step ${step.step_number}`}`,
+                })
+            } catch {
+                // never let accounting bookkeeping crash the cron
+            }
 
             // ── 2c. Get customer name (for the SMS body) ───────────────────
             const { data: order } = await sb

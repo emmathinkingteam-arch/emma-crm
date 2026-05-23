@@ -7,6 +7,7 @@ import {
   MapPin, Briefcase, UserPlus, BarChart2,
   CalendarRange, ShieldCheck, Settings, LogOut,
   Bell, DollarSign, Target, Archive, MessageSquare, MessageCircle,
+  Wallet,
 } from 'lucide-react'
 
 import { supabase } from '@/lib/supabase'
@@ -22,6 +23,7 @@ const TABS = [
   { href: '/admin/attendance', icon: CalendarRange, label: 'Attendance' },
   { href: '/admin/approvals', icon: ShieldCheck, label: 'Approvals', badge: true },
   { href: '/admin/commission-rates', icon: DollarSign, label: 'Commission Rates' },
+  { href: '/admin/accounts', icon: Wallet, label: 'Accounts' },
   { href: '/admin/targets-rewards', icon: Target, label: 'Targets & Rewards' },
   { href: '/admin/packages', icon: Briefcase, label: 'Packages' },
   { href: '/admin/tasks', icon: ClipboardList, label: 'Tasks' },
@@ -74,7 +76,9 @@ export default function AdminSidebar() {
           const active =
             href === '/admin/notifications'
               ? pathname.startsWith('/admin/notifications')
-              : pathname === href
+              : href === '/admin/accounts'
+                ? pathname.startsWith('/admin/accounts')
+                : pathname === href
           return (
             <Link
               key={href}

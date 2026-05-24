@@ -23,6 +23,7 @@ import {
     Clock,
     CircleDollarSign,
     Phone as PhoneIcon,
+    type LucideIcon,
 } from 'lucide-react'
 
 interface WorkerMini {
@@ -317,7 +318,7 @@ function Stat({
 }: {
     label: string
     value: string | number
-    icon: React.ComponentType<{ size?: number; className?: string }>
+    icon: LucideIcon
     tone: 'gray' | 'green' | 'blue' | 'amber' | 'red'
 }) {
     const tones: Record<string, string> = {

@@ -7,7 +7,7 @@ import {
   MapPin, Briefcase, UserPlus, BarChart2,
   CalendarRange, ShieldCheck, Settings, LogOut,
   Bell, DollarSign, Target, Archive, MessageSquare, MessageCircle,
-  Wallet,
+  Wallet, Megaphone,
 } from 'lucide-react'
 
 import { supabase } from '@/lib/supabase'
@@ -17,6 +17,7 @@ import { useAuthStore } from '@/store/auth'
 const TABS = [
   { href: '/admin', icon: LayoutDashboard, label: 'Dashboard' },
   { href: '/admin/crm-entries', icon: History, label: 'CRM Entries' },
+  { href: '/admin/leads', icon: Megaphone, label: 'Lead Distribution' },
   { href: '/admin/orders', icon: ClipboardList, label: 'Orders' },
   { href: '/dashboard/legacy-history', icon: Archive, label: 'Legacy History' },
   { href: '/admin/workers', icon: Users, label: 'Workers' },
@@ -82,9 +83,11 @@ export default function AdminSidebar() {
           const active =
             href === '/admin/notifications'
               ? pathname.startsWith('/admin/notifications')
-              : href === '/admin/accounts'
-                ? pathname.startsWith('/admin/accounts')
-                : pathname === href
+              : href === '/admin/leads'
+                ? pathname.startsWith('/admin/leads')
+                : href === '/admin/accounts'
+                  ? pathname.startsWith('/admin/accounts')
+                  : pathname === href
           return (
             <Link
               key={href}

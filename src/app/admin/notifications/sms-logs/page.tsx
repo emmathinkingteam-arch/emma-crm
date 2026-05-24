@@ -61,6 +61,7 @@ interface UserMini {
 const TEMPLATE_OPTIONS = [
     { value: 'all', label: 'All templates' },
     { value: 'overdue_debit', label: 'Overdue Debit' },
+    { value: 'lead_overdue', label: 'Lead Overdue' },
     { value: 'handoff_back_office', label: 'Handoff · Back Office' },
     { value: 'handoff_counselor', label: 'Handoff · Counselor' },
     { value: 'counselor_phase_2', label: 'Counselor Phase 2' },
@@ -79,6 +80,7 @@ const PAGE_SIZE = 50
 // Template badge colours
 const TEMPLATE_COLOURS: Record<string, string> = {
     overdue_debit: 'bg-red-50 text-red-700 border-red-100',
+    lead_overdue: 'bg-rose-50 text-rose-700 border-rose-100',
     handoff_back_office: 'bg-blue-50 text-blue-700 border-blue-100',
     handoff_counselor: 'bg-purple-50 text-purple-700 border-purple-100',
     counselor_phase_2: 'bg-violet-50 text-violet-700 border-violet-100',
@@ -88,6 +90,7 @@ const TEMPLATE_COLOURS: Record<string, string> = {
 
 const TEMPLATE_SHORT: Record<string, string> = {
     overdue_debit: 'Debit',
+    lead_overdue: 'Lead',
     handoff_back_office: 'Back Office',
     handoff_counselor: 'Counselor',
     counselor_phase_2: 'Phase 2',

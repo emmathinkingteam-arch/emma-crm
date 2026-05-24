@@ -7,8 +7,9 @@ import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import { Order, OrderStep } from '@/types'
-import { Loader2, Bell, ChevronRight, CheckCircle2, Sparkles, Clock } from 'lucide-react'
+import { Loader2, Bell, ChevronRight, CheckCircle2, Sparkles, Clock, Phone } from 'lucide-react'
 import Link from 'next/link'
+import { type Lead, leadCountdown, leadPenaltySoFar } from '@/lib/leads'
 
 // A step joined with its order + customer + package (what fetchMyWork returns).
 type StepWithOrder = OrderStep & {
@@ -29,6 +30,7 @@ export default function DashboardPage() {
   const [completed, setCompleted] = useState<StepWithOrder[]>([])
   const [activeTab, setActiveTab] = useState<WorkTab>('new')
   const [secondPosts, setSecondPosts] = useState<any[]>([])
+  const [leads, setLeads] = useState<Lead[]>([])
 
   useEffect(() => {
     if (!user) { router.replace('/auth/login'); return }
@@ -46,7 +48,34 @@ export default function DashboardPage() {
 
     fetchMyWork()
     fetchSecondPosts()
+    refreshLeads()
+
+    // Poll every 60s: ask the server to release any due leads (respecting
+    // punch-in + the meter), then re-read what's now active.
+    const id = setInterval(refreshLeads, 60_000)
+    return () => clearInterval(id)
   }, [user])
+
+  // Trigger a server-side release tick for this worker, then load active leads.
+  const refreshLeads = async () => {
+    if (!user) return
+    try {
+      await fetch('/api/leads/release', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id }),
+      })
+    } catch {
+      // non-fatal — still read whatever is active
+    }
+    const { data } = await supabase
+      .from('leads')
+      .select('*')
+      .eq('assigned_to', user.id)
+      .eq('status', 'active')
+      .order('due_at', { ascending: true })
+    setLeads((data as Lead[]) || [])
+  }
 
   const fetchSecondPosts = async () => {
     if (!user) return
@@ -149,6 +178,48 @@ export default function DashboardPage() {
             <p className="text-xs text-gray-400 font-medium mt-0.5">Overdue</p>
           </div>
         </div>
+
+        {/* Leads to call — assigned numbers, drip-fed, count down to overdue */}
+        {leads.length > 0 && (
+          <div className="border-2 border-pink-200 rounded-2xl overflow-hidden">
+            <div className="px-4 py-2.5 bg-pink-600 flex items-center gap-2">
+              <Phone size={14} className="text-white" />
+              <p className="text-xs font-bold text-white uppercase tracking-wide">Leads to call</p>
+              <span className="ml-auto text-[9px] font-bold bg-white/25 text-white px-2 py-0.5 rounded-full">{leads.length}</span>
+            </div>
+            <div className="p-2 space-y-2">
+              {leads.map((lead) => {
+                const cd = leadCountdown(lead.due_at)
+                const pen = leadPenaltySoFar(lead.penalty_hours_deducted)
+                return (
+                  <Link
+                    key={lead.id}
+                    href={`/dashboard/leads/${lead.id}`}
+                    className={`block rounded-xl p-3 border active:scale-[0.98] transition-all ${cd.overdue ? 'bg-red-50 border-red-100' : 'bg-pink-50 border-pink-100'}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-gray-800 truncate font-mono">
+                          {lead.phone_display || lead.phone}
+                        </p>
+                        <p className="text-[10px] font-semibold truncate">
+                          <span className={cd.overdue ? 'text-red-500' : 'text-gray-500'}>{cd.label}</span>
+                          {pen > 0 && <span className="ml-1.5 text-red-500 font-bold">· −LKR {pen}</span>}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
+                        <span className={`text-[8px] font-bold px-2 py-1 rounded-full flex items-center gap-1 ${cd.overdue ? 'bg-red-100 text-red-600' : 'bg-pink-100 text-pink-600'}`}>
+                          <Clock size={8} /> {cd.overdue ? 'overdue' : 'call now'}
+                        </span>
+                        <ChevronRight size={14} className="text-pink-300" />
+                      </div>
+                    </div>
+                  </Link>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* 2nd Post requests — distinct indigo, sits above normal work */}
         {secondPosts.length > 0 && (

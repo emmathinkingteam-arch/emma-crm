@@ -315,19 +315,55 @@ export default function CustomerDetailPage() {
   const doAccept = async () => {
     if (!activeStep) return
     setActionLoading(true)
-    await supabase.from('order_steps').update({
-      status: 'in_progress',
-      started_at: new Date().toISOString(),
-    }).eq('id', activeStep.id)
-    const labels: Record<number, string> = {
-      3: 'Back Office accepted — onboarding started',
-      4: 'Counselor accepted — session started',
-      5: 'Manager accepted — reviewing brief',
-      6: 'Designer accepted',
+    try {
+      // Mark the step in_progress. This is the write that flips the panel from
+      // "New assignment — accept to begin" to "In progress — your turn" (which
+      // reveals the brief + calendar planner). If this write silently fails,
+      // the history log below still runs — so you'd see "Designer accepted" in
+      // the timeline while the button appears to "do nothing". We therefore
+      // capture the error and surface it instead of swallowing it.
+      let { error: stepErr } = await supabase.from('order_steps').update({
+        status: 'in_progress',
+        started_at: new Date().toISOString(),
+      }).eq('id', activeStep.id)
+
+      // If the only problem is a missing `started_at` column, retry without it
+      // so the accept still goes through.
+      if (stepErr && /started_at|column/i.test(stepErr.message || '')) {
+        const retry = await supabase.from('order_steps')
+          .update({ status: 'in_progress' })
+          .eq('id', activeStep.id)
+        stepErr = retry.error
+      }
+
+      if (stepErr) {
+        alert(
+          'Could not accept the assignment:\n• ' + stepErr.message +
+          '\n\nThe step status was NOT updated, so the planner cannot open. ' +
+          'This is usually a database permission (RLS) issue on order_steps for the designer role. ' +
+          'Please tell admin.'
+        )
+        setActionLoading(false)
+        return
+      }
+
+      const labels: Record<number, string> = {
+        3: 'Back Office accepted — onboarding started',
+        4: 'Counselor accepted — session started',
+        5: 'Manager accepted — reviewing brief',
+        6: 'Designer accepted',
+      }
+      await logAction(labels[myStep!] || 'Step accepted')
+
+      // Optimistically flip local state so the planner opens immediately,
+      // then re-sync from the DB.
+      setActiveStep(prev => (prev ? { ...prev, status: 'in_progress' } as any : prev))
+      await fetchAll()
+    } catch (e: any) {
+      alert('Accept failed: ' + (e?.message || 'unknown error') + '\nThe step was not accepted.')
+    } finally {
+      setActionLoading(false)
     }
-    await logAction(labels[myStep!] || 'Step accepted')
-    await fetchAll()
-    setActionLoading(false)
   }
 
   const doComplete = async (

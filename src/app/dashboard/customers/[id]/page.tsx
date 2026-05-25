@@ -504,40 +504,81 @@ export default function CustomerDetailPage() {
 
     setActionLoading(true)
 
-    // 1. Insert calendar slot with post id, planned date, AND expiry.
-    await supabase.from('calendar_slots').insert({
-      order_id: activeOrder.id,
-      order_step_id: activeStep.id,
-      slot_date: date,
-      slot_time: slot,
-      post_id_code: code,
-      assigned_to: user?.id,
-      planned_at: new Date().toISOString(),
-      validity_expires_at: new Date(expiryDate).toISOString(),
-    })
+    try {
+      // 1. Insert calendar slot with post id, planned date, AND expiry.
+      const { error: slotErr } = await supabase.from('calendar_slots').insert({
+        order_id: activeOrder.id,
+        order_step_id: activeStep.id,
+        slot_date: date,
+        slot_time: slot,
+        post_id_code: code,
+        assigned_to: user?.id,
+        planned_at: new Date().toISOString(),
+        validity_expires_at: new Date(expiryDate).toISOString(),
+      })
 
-    // 2. Update the order with both planned date and validity expiry.
-    await supabase.from('orders').update({
-      planned_post_date: new Date(date).toISOString(),
-      validity_expires_at: new Date(expiryDate).toISOString(),
-    }).eq('id', activeOrder.id)
+      // 2. Update the order with both planned date and validity expiry.
+      const { error: orderErr } = await supabase.from('orders').update({
+        planned_post_date: new Date(date).toISOString(),
+        validity_expires_at: new Date(expiryDate).toISOString(),
+      }).eq('id', activeOrder.id)
 
-    // 3. Mark designer's step as DONE so the work panel hides.
-    //    fetchAll filters active steps by status, so once status='done',
-    //    activeStep becomes null and the entire panel disappears.
-    await supabase.from('order_steps').update({
-      status: 'done',
-      completed_at: new Date().toISOString(),
-      planned_post_date: new Date(date).toISOString(),
-    }).eq('id', activeStep.id)
+      // If either core write failed, STOP — do not mark the step done.
+      // Surfacing the error prevents a silent "nothing happened" where the
+      // designer thinks they planned but the slot/order never saved.
+      if (slotErr || orderErr) {
+        alert(
+          'Could not save the plan:\n' +
+          (slotErr ? `• calendar slot: ${slotErr.message}\n` : '') +
+          (orderErr ? `• order update: ${orderErr.message}\n` : '') +
+          '\nThe step was NOT completed. Please try again or tell admin.'
+        )
+        setActionLoading(false)
+        return
+      }
 
-    await logAction(
-      `Plan locked — ${date} at ${SLOT_LABELS[slot]} | Post ID: ${code} | Expires: ${expiryDate} | WhatsApp sent`
-    )
+      // 3. Mark designer's step as DONE so the work panel hides.
+      //    fetchAll filters active steps by status, so once status='done',
+      //    activeStep becomes null and the entire panel disappears.
+      const { error: stepErr } = await supabase.from('order_steps').update({
+        status: 'done',
+        completed_at: new Date().toISOString(),
+        planned_post_date: new Date(date).toISOString(),
+      }).eq('id', activeStep.id)
 
-    setSelectedCell(null); setShowCalendar(false); setExpiryDate('')
-    await fetchCalendarSlots(); await fetchAll()
-    setActionLoading(false)
+      if (stepErr) {
+        alert('Plan saved, but could not close the step: ' + stepErr.message + '\nPlease refresh; if it still shows, tell admin.')
+      }
+
+      await logAction(
+        `Plan locked — ${date} at ${SLOT_LABELS[slot]} | Post ID: ${code} | Expires: ${expiryDate} | WhatsApp sent`
+      )
+
+      setSelectedCell(null); setShowCalendar(false); setExpiryDate('')
+      await fetchCalendarSlots(); await fetchAll()
+    } catch (e: any) {
+      alert('Planning failed: ' + (e?.message || 'unknown error') + '\nThe step was NOT completed.')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // Designer picks a calendar cell. Auto-suggest the plan-expiry date from the
+  // package's post_validity_days (Bronze/Silver = 1mo, Gold = 3mo, VIP = 6mo)
+  // so the "Plan + lock + send WhatsApp" button is immediately usable. The
+  // designer can still edit the date afterwards. Without this, the expiry field
+  // stays blank, the button is disabled, and the planner appears "stuck".
+  const selectPlanCell = (key: string, taken: boolean) => {
+    if (taken) return
+    const next = selectedCell === key ? null : key
+    setSelectedCell(next)
+    if (!next) return
+    const parsed = parseSelectedCell(next)
+    if (!parsed) return
+    const days = (activeOrder as any)?.package?.post_validity_days || 30
+    const exp = new Date(parsed.date)
+    exp.setDate(exp.getDate() + days)
+    setExpiryDate(exp.toISOString().split('T')[0])
   }
 
   const handleSetExpiry = async () => {
@@ -1627,7 +1668,7 @@ export default function CustomerDetailPage() {
                                       const taken = takenSlots[key]
                                       const selected = selectedCell === key
                                       return (
-                                        <td key={key} onClick={() => !taken && setSelectedCell(selected ? null : key)}
+                                        <td key={key} onClick={() => selectPlanCell(key, !!taken)}
                                           className={`text-center py-2 border border-gray-50 transition-all ${taken ? 'bg-gray-100 cursor-not-allowed' : selected ? 'bg-pink-600 cursor-pointer' : 'bg-white cursor-pointer hover:bg-pink-50'}`}>
                                           <span className={`text-[10px] font-bold ${taken ? 'text-gray-300' : selected ? 'text-white' : 'text-gray-200'}`}>
                                             {taken ? '●' : selected ? '✓' : '○'}

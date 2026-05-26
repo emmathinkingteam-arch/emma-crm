@@ -157,6 +157,7 @@ export default function CustomerDetailPage() {
 
   // Partner link
   const [partnerLink, setPartnerLink] = useState('')
+  const [publicProfileLink, setPublicProfileLink] = useState('')
   const [showPartnerLink, setShowPartnerLink] = useState(false)
 
   const [now, setNow] = useState(Date.now())
@@ -1254,6 +1255,40 @@ export default function CustomerDetailPage() {
                   </button>
                   {stepAccepted && (
                     <>
+                      {/* ── PUBLIC PROFILE LINK — required before assigning counselor ── */}
+                      <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[9px] font-bold text-blue-700 uppercase tracking-wide">
+                            Customer public link <span className="text-red-500">*</span>
+                          </p>
+                          <a
+                            href={`https://www.emmathinking.com/admin/users?q=${customer?.phone?.replace(/\D/g, '').slice(-9)}&field=phoneNumber`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[9px] font-bold text-blue-600 underline flex items-center gap-1"
+                          >
+                            <ExternalLink size={9} /> Open CRM
+                          </a>
+                        </div>
+                        <p className="text-[9px] text-blue-600 font-medium leading-relaxed">
+                          Open the CRM link above → find the customer → copy their profile link → paste below.
+                        </p>
+                        {publicProfileLink ? (
+                          <div className="flex items-center gap-2 bg-white border border-blue-100 rounded-lg px-3 py-2">
+                            <CheckCircle size={12} className="text-green-500 flex-shrink-0" />
+                            <p className="text-[10px] font-semibold text-gray-700 flex-1 truncate">{publicProfileLink}</p>
+                            <button onClick={() => setPublicProfileLink('')} className="text-[9px] text-red-400 font-bold flex-shrink-0">Remove</button>
+                          </div>
+                        ) : (
+                          <input
+                            type="url"
+                            value={publicProfileLink}
+                            onChange={e => setPublicProfileLink(e.target.value)}
+                            placeholder="Paste customer profile link here..."
+                            className="w-full bg-white border border-blue-200 rounded-lg px-3 py-2 text-xs font-medium outline-none focus:border-blue-400"
+                          />
+                        )}
+                      </div>
                       <div>
                         <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign counselor</label>
                         <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
@@ -1264,11 +1299,16 @@ export default function CustomerDetailPage() {
                       </div>
                       <button onClick={() => {
                         const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'counselor'
-                        doComplete(4, {}, selectedAssignee, `Assigned to counselor: ${name} — 48hr deadline set`)
-                      }} disabled={!selectedAssignee || actionLoading}
+                        doComplete(4, {}, selectedAssignee, `Assigned to counselor: ${name} — 48hr deadline set | Profile link: ${publicProfileLink}`)
+                      }} disabled={!selectedAssignee || !publicProfileLink || actionLoading}
                         className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
                         {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Assign to counselor'}
                       </button>
+                      {!publicProfileLink && selectedAssignee && (
+                        <p className="text-[9px] text-red-500 font-semibold text-center">
+                          Paste the customer public link above to enable this button
+                        </p>
+                      )}
                     </>
                   )}
                 </div>
@@ -1646,10 +1686,7 @@ export default function CustomerDetailPage() {
                   )}
                   {stepAccepted && (
                     <>
-                      <div className="bg-gray-50 border border-gray-100 rounded-xl p-3">
-                        <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1">Creative brief</p>
-                        <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap">{activeStep.description}</p>
-                      </div>
+                      <DesignerBriefPanel description={activeStep.description || ''} postCode={selectedCell ? generatePostCode(selectedCell.split('-').slice(0, 3).join('-'), selectedCell.split('-')[3]) : (plannedSlot?.post_id_code || null)} />
                       {isInstallmentPending ? (
                         <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4 flex items-start gap-3">
                           <Lock size={18} className="text-amber-600 mt-0.5 flex-shrink-0" />
@@ -2274,6 +2311,144 @@ export default function CustomerDetailPage() {
         </div>
       </div>
       <BottomNav />
+    </div>
+  )
+}
+
+// ── DesignerBriefPanel ─────────────────────────────────────────────────────
+// Shown to the designer when they accept Step 6. Displays the creative brief
+// (the counselor/manager's description) with:
+//   1. A language-converter button (Sinhala ↔ English via Claude API)
+//   2. A "PROFILE FIELDS COPY" section so the designer can copy individual
+//      fields directly into the CRM platform — now includes the Post ID code.
+function DesignerBriefPanel({ description, postCode }: { description: string; postCode: string | null }) {
+  const [translating, setTranslating] = useState(false)
+  const [translated, setTranslated] = useState<string | null>(null)
+  const [showTranslated, setShowTranslated] = useState(false)
+  const [copyFeedback, setCopyFeedback] = useState<string | null>(null)
+
+  const handleTranslate = async () => {
+    if (translated) { setShowTranslated(t => !t); return }
+    setTranslating(true)
+    try {
+      const res = await fetch('/api/translate-brief', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: description }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setTranslated(data.translated || '')
+        setShowTranslated(true)
+      } else {
+        alert('Translation failed. Please try again.')
+      }
+    } catch {
+      alert('Translation error. Check your connection.')
+    }
+    setTranslating(false)
+  }
+
+  const copyField = (value: string, label: string) => {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopyFeedback(label)
+      setTimeout(() => setCopyFeedback(null), 1500)
+    })
+  }
+
+  // Parse brief lines that look like "Label: Value" into copy-able fields
+  const parseFields = (text: string): Array<{ label: string; value: string }> => {
+    const lines = text.split('\n').filter(l => l.trim())
+    const fields: Array<{ label: string; value: string }> = []
+    for (const line of lines) {
+      const colonIdx = line.indexOf(':')
+      if (colonIdx > 0 && colonIdx < 40) {
+        const label = line.slice(0, colonIdx).trim()
+        const value = line.slice(colonIdx + 1).trim()
+        if (label && value) fields.push({ label, value })
+      }
+    }
+    return fields
+  }
+
+  const parsedFields = parseFields(description)
+  const displayText = showTranslated && translated ? translated : description
+
+  return (
+    <div className="space-y-2">
+      {/* ── Brief + language toggle ── */}
+      <div className="bg-gray-50 border border-gray-100 rounded-xl overflow-hidden">
+        <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
+          <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">
+            PASTE WORKER&apos;S DESCRIPTION
+          </p>
+          <button
+            onClick={handleTranslate}
+            disabled={translating}
+            className="flex items-center gap-1 text-[9px] font-bold text-purple-600 bg-purple-50 border border-purple-200 px-2 py-1 rounded-lg hover:bg-purple-100 transition-all disabled:opacity-40"
+          >
+            {translating ? (
+              <><Loader2 size={9} className="animate-spin" /> Translating…</>
+            ) : showTranslated ? (
+              '🔤 Show original'
+            ) : (
+              '🌐 Translate'
+            )}
+          </button>
+        </div>
+        {showTranslated && translated && (
+          <div className="px-3 py-1.5 bg-purple-50 border-b border-purple-100">
+            <p className="text-[8px] font-bold text-purple-500 uppercase tracking-wide">
+              Translated version (auto)
+            </p>
+          </div>
+        )}
+        <div className="p-3">
+          <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap">{displayText}</p>
+        </div>
+      </div>
+
+      {/* ── PROFILE FIELDS COPY ── */}
+      {(parsedFields.length > 0 || postCode) && (
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div className="bg-gray-50 px-3 py-2 border-b border-gray-100">
+            <p className="text-[9px] font-bold text-gray-500 uppercase tracking-wide">Profile fields copy</p>
+            <p className="text-[8px] text-gray-400 font-medium">Tap a field to copy it instantly</p>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {parsedFields.map((f, i) => (
+              <button
+                key={i}
+                onClick={() => copyField(f.value, f.label)}
+                className="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-gray-50 transition-all active:scale-[0.99]"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-[8px] font-bold text-gray-400 uppercase tracking-wide">{f.label}</p>
+                  <p className="text-xs font-semibold text-gray-700 truncate">{f.value}</p>
+                </div>
+                <span className={`text-[9px] font-bold ml-2 flex-shrink-0 transition-all ${copyFeedback === f.label ? 'text-green-600' : 'text-gray-300'}`}>
+                  {copyFeedback === f.label ? '✓ Copied' : 'Copy'}
+                </span>
+              </button>
+            ))}
+            {/* Post ID code — always shown if available */}
+            {postCode && (
+              <button
+                onClick={() => copyField(postCode, 'Post ID')}
+                className="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-pink-50 transition-all active:scale-[0.99] bg-pink-50 border-t-2 border-pink-100"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-[8px] font-bold text-pink-500 uppercase tracking-wide">Post ID Code</p>
+                  <p className="text-xs font-bold text-pink-700 font-mono">{postCode}</p>
+                </div>
+                <span className={`text-[9px] font-bold ml-2 flex-shrink-0 transition-all ${copyFeedback === 'Post ID' ? 'text-green-600' : 'text-pink-300'}`}>
+                  {copyFeedback === 'Post ID' ? '✓ Copied' : 'Copy'}
+                </span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

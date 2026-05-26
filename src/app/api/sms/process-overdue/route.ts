@@ -5,7 +5,7 @@
 // This endpoint is the hourly cron worker. It:
 //   1. Finds every order_step that is overdue and still incomplete
 //      (steps 3 / 4 / 5 only — step 6 = designer = owner, never debited)
-//   2. For each step, if it has NOT been debited in the last hour:
+//   2. For each step, if it has NOT been debited in the last 6 hours:
 //        - deducts LKR 30 from the assigned user's wallet_balance
 //        - increments order_steps.penalty_hours_deducted
 //        - stamps order_steps.last_penalty_at = now()
@@ -152,7 +152,7 @@ async function handle(req: Request) {
 
     try {
         const now = new Date()
-        const oneHourAgo = new Date(now.getTime() - 3600000)
+        const oneHourAgo = new Date(now.getTime() - 6 * 3600000)
 
         // ─── 1. Find candidate overdue steps ───────────────────────────────
         //
@@ -181,7 +181,7 @@ async function handle(req: Request) {
 
         // Filter in JS:
         //   - effective deadline (extended_deadline ?? deadline) must be in the past
-        //   - last_penalty_at must be null OR > 1 hour ago
+        //   - last_penalty_at must be null OR > 6 hours ago
         const candidateSteps = ((rawSteps || []) as StepRow[]).filter((s) => {
             const effectiveDeadline = s.extended_deadline || s.deadline
             if (!effectiveDeadline) return false

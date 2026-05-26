@@ -6,7 +6,7 @@ import {
   LayoutDashboard, Users, ClipboardList, History,
   MapPin, Briefcase, UserPlus, BarChart2,
   CalendarRange, ShieldCheck, Settings, LogOut,
-  Bell, DollarSign, Target, Archive, MessageSquare, MessageCircle,
+  Bell, DollarSign, Target, Archive, MessageSquare, MessageCircle, AlertOctagon,
   Wallet, Megaphone,
 } from 'lucide-react'
 
@@ -23,6 +23,7 @@ const TABS = [
   { href: '/admin/workers', icon: Users, label: 'Workers' },
   { href: '/admin/attendance', icon: CalendarRange, label: 'Attendance' },
   { href: '/admin/approvals', icon: ShieldCheck, label: 'Approvals', badge: true },
+  { href: '/admin/complaints', icon: AlertOctagon, label: 'Complaints', badge: true },
   { href: '/admin/commission-rates', icon: DollarSign, label: 'Commission Rates' },
   { href: '/admin/accounts', icon: Wallet, label: 'Accounts' },
   { href: '/admin/targets-rewards', icon: Target, label: 'Targets & Rewards' },

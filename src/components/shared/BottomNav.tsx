@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Users, CalendarRange,
-  PlusCircle, Wallet, Award, ClipboardList, Search
+  PlusCircle, Wallet, Award, ClipboardList, Search, MessageSquareWarning
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 
@@ -14,35 +14,35 @@ const NAV_CONFIG = {
     { href: '/entry', icon: PlusCircle, label: 'Entry' },
     { href: '/dashboard/customers', icon: Users, label: 'Clients' },
     { href: '/dashboard/wallet', icon: Wallet, label: 'Wallet' },
-    { href: '/dashboard/profile', icon: Award, label: 'Profile' },
+    { href: '/dashboard/complaints', icon: MessageSquareWarning, label: 'Complaints' },
   ],
   back_office: [
     { href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
     { href: '/dashboard/customers', icon: Users, label: 'Clients' },
     { href: '/dashboard/legacy-history', icon: Search, label: 'Search' },
     { href: '/dashboard/calendar', icon: CalendarRange, label: 'Plan' },
-    { href: '/dashboard/profile', icon: Award, label: 'Profile' },
+    { href: '/dashboard/complaints', icon: MessageSquareWarning, label: 'Complaints' },
   ],
   counselor: [
     { href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
     { href: '/dashboard/customers', icon: Users, label: 'Clients' },
     { href: '/dashboard/calendar', icon: CalendarRange, label: 'Plan' },
     { href: '/dashboard/wallet', icon: Wallet, label: 'Wallet' },
-    { href: '/dashboard/profile', icon: Award, label: 'Profile' },
+    { href: '/dashboard/complaints', icon: MessageSquareWarning, label: 'Complaints' },
   ],
   manager: [
     { href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
     { href: '/dashboard/customers', icon: Users, label: 'Clients' },
     { href: '/dashboard/tasks', icon: ClipboardList, label: 'Tasks' },
     { href: '/dashboard/calendar', icon: CalendarRange, label: 'Plan' },
-    { href: '/dashboard/profile', icon: Award, label: 'Profile' },
+    { href: '/dashboard/complaints', icon: MessageSquareWarning, label: 'Complaints' },
   ],
   designer: [
     { href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
     { href: '/dashboard/customers', icon: Users, label: 'Clients' },
     { href: '/dashboard/calendar', icon: CalendarRange, label: 'Plan' },
     { href: '/dashboard/wallet', icon: Wallet, label: 'Wallet' },
-    { href: '/dashboard/profile', icon: Award, label: 'Profile' },
+    { href: '/dashboard/complaints', icon: MessageSquareWarning, label: 'Complaints' },
   ],
 }
 

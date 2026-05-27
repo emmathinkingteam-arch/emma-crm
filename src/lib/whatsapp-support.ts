@@ -12,16 +12,16 @@
 
 import { supabaseAdmin } from './supabase-admin'
 
-const PHONE_ID  = process.env.WHATSAPP_PHONE_NUMBER_ID!
-const TOKEN     = process.env.WHATSAPP_ACCESS_TOKEN!
-const VERSION   = process.env.WHATSAPP_API_VERSION || 'v21.0'
+const PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID!
+const TOKEN = process.env.WHATSAPP_ACCESS_TOKEN!
+const VERSION = process.env.WHATSAPP_API_VERSION || 'v21.0'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type ConvState = 'bot' | 'queued' | 'live' | 'closed'
-export type Sender    = 'customer' | 'bot' | 'agent'
+export type Sender = 'customer' | 'bot' | 'agent'
 
 export interface SupportConversation {
   id: string
@@ -62,7 +62,7 @@ export async function sendSupportText(to: string, text: string): Promise<string 
         },
         body: JSON.stringify({
           messaging_product: 'whatsapp',
-          to,
+          to: to.startsWith('+') ? to : '+' + to,
           type: 'text',
           text: { body: text, preview_url: false },
         }),
@@ -112,9 +112,9 @@ export async function handleIncomingMessage(
       .from('support_conversations')
       .insert({
         customer_phone: phoneNumber,
-        customer_name:  customerName ?? null,
-        state:          'bot',
-        bot_step:       0,
+        customer_name: customerName ?? null,
+        state: 'bot',
+        bot_step: 0,
       })
       .select()
       .single()
@@ -126,13 +126,13 @@ export async function handleIncomingMessage(
   // 2. Save inbound message
   await sb.from('support_messages').insert({
     conversation_id: conv.id,
-    sender:          'customer',
-    message:         messageText,
+    sender: 'customer',
+    message: messageText,
   })
   await sb
     .from('support_conversations')
     .update({
-      last_message:    messageText.slice(0, 200),
+      last_message: messageText.slice(0, 200),
       last_message_at: new Date().toISOString(),
       ...(customerName && !conv.customer_name ? { customer_name: customerName } : {}),
     })
@@ -232,14 +232,14 @@ async function botReply(
   await sendSupportText(conv.customer_phone, text)
   await sb.from('support_messages').insert({
     conversation_id: conv.id,
-    sender:          'bot',
-    message:         text,
+    sender: 'bot',
+    message: text,
   })
   await sb
     .from('support_conversations')
     .update({
-      bot_step:        nextStep,
-      last_message:    text.slice(0, 200),
+      bot_step: nextStep,
+      last_message: text.slice(0, 200),
       last_message_at: new Date().toISOString(),
     })
     .eq('id', conv.id)
@@ -273,13 +273,13 @@ async function escalate(
   await sendSupportText(conv.customer_phone, msg)
   await sb.from('support_messages').insert({
     conversation_id: conv.id,
-    sender:          'bot',
-    message:         msg,
+    sender: 'bot',
+    message: msg,
   })
   await sb
     .from('support_conversations')
     .update({
-      last_message:    msg.slice(0, 200),
+      last_message: msg.slice(0, 200),
       last_message_at: new Date().toISOString(),
     })
     .eq('id', conv.id)
@@ -311,8 +311,8 @@ export async function agentTake(convId: string, agentId: string): Promise<{ ok: 
     await sendSupportText(conv.customer_phone, notif)
     await sb.from('support_messages').insert({
       conversation_id: convId,
-      sender:          'bot',
-      message:         notif,
+      sender: 'bot',
+      message: notif,
     })
   }
 
@@ -336,22 +336,22 @@ export async function agentSend(
     .eq('id', convId)
     .single()
 
-  if (!conv)             return { ok: false, error: 'Conversation not found' }
+  if (!conv) return { ok: false, error: 'Conversation not found' }
   if (conv.state !== 'live') return { ok: false, error: 'Conversation is not live' }
 
   await sendSupportText(conv.customer_phone, message)
 
   await sb.from('support_messages').insert({
     conversation_id: convId,
-    sender:          'agent',
-    agent_id:        agentId,
+    sender: 'agent',
+    agent_id: agentId,
     message,
   })
 
   await sb
     .from('support_conversations')
     .update({
-      last_message:    message.slice(0, 200),
+      last_message: message.slice(0, 200),
       last_message_at: new Date().toISOString(),
     })
     .eq('id', convId)
@@ -377,8 +377,8 @@ export async function agentClose(convId: string): Promise<{ ok: boolean; error?:
     await sendSupportText(conv.customer_phone, bye)
     await sb.from('support_messages').insert({
       conversation_id: convId,
-      sender:          'bot',
-      message:         bye,
+      sender: 'bot',
+      message: bye,
     })
   }
 

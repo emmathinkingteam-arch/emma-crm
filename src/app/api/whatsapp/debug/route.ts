@@ -53,7 +53,7 @@ export async function POST(req: Request) {
 
             const payload = {
                 messaging_product: 'whatsapp',
-                to: phone,
+                to: phone.startsWith('+') ? phone : '+' + phone,
                 type: 'text',
                 text: { body: '🧪 Test from Emma CRM debug', preview_url: false },
             }

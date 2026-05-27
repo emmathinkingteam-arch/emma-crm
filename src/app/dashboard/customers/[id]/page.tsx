@@ -699,7 +699,7 @@ export default function CustomerDetailPage() {
       setCustomer(c => c ? { ...c, name: trimmedCustomerName } : c)
     }
 
-    const { data: order } = await supabase.from('orders').insert({
+    const { data: order, error: orderErr } = await supabase.from('orders').insert({
       customer_id: customer.id,
       package_id: selectedPkg,
       current_step: 3,
@@ -716,7 +716,12 @@ export default function CustomerDetailPage() {
       installment_2_amount: installment ? inst2Num : null,
     }).select().single()
 
-    if (!order) { setActionLoading(false); return }
+    if (orderErr || !order) {
+      console.error('ORDER INSERT ERROR:', JSON.stringify(orderErr))
+      alert('Order failed: ' + (orderErr?.message || 'unknown error'))
+      setActionLoading(false)
+      return
+    }
 
     const stepDeadline = makeDeadline(3)
     await supabase.from('order_steps').insert({

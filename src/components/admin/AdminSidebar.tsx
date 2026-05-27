@@ -7,7 +7,7 @@ import {
   MapPin, Briefcase, UserPlus, BarChart2,
   CalendarRange, ShieldCheck, Settings, LogOut,
   Bell, DollarSign, Target, Archive, MessageSquare, MessageCircle, AlertOctagon,
-  Wallet, Megaphone, Eye,
+  Wallet, Megaphone, Eye, Headphones,
 } from 'lucide-react'
 
 import { supabase } from '@/lib/supabase'
@@ -37,6 +37,7 @@ const TABS = [
   { href: '/admin/settings', icon: Settings, label: 'Settings' },
   { href: '/admin/whatsapp', icon: MessageCircle, label: 'WhatsApp' },
   { href: '/admin/whatsapp/delivery', icon: BarChart2, label: 'WA Delivery' },
+  { href: '/admin/whatsapp/support', icon: Headphones, label: 'WA Support' },  // ← add this
   // Notifications now points to the index (redirects to SMS Logs by default).
   // The notifications section has its own sub-tabs: SMS Logs · Cron Status · Worker Phones.
   { href: '/admin/notifications', icon: MessageSquare, label: 'Notifications' },

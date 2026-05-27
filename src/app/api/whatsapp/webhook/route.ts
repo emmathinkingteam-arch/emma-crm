@@ -30,6 +30,7 @@
 import { NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { handleIncomingMessage } from '@/lib/whatsapp-support'
 
 // Don't let Next cache or statically optimise a webhook.
 export const dynamic = 'force-dynamic'
@@ -101,7 +102,10 @@ export async function POST(req: Request) {
     try {
         const statuses = extractStatuses(body)
         if (statuses.length === 0) {
-            // Could be an inbound message or other event — not our concern here.
+            // Handle inbound customer messages for live support
+            for (const msg of extractInboundMessages(body)) {
+                await handleIncomingMessage(msg.from, msg.text, msg.name)
+            }
             return NextResponse.json({ ok: true, processed: 0 })
         }
 
@@ -203,6 +207,30 @@ function extractStatuses(body: unknown): WaStatus[] {
         for (const change of entry.changes ?? []) {
             for (const st of change.value?.statuses ?? []) {
                 out.push(st)
+            }
+        }
+    }
+    return out
+}
+function extractInboundMessages(body: unknown) {
+    const out: { from: string; text: string; name?: string }[] = []
+    const b = body as {
+        entry?: Array<{
+            changes?: Array<{
+                value?: {
+                    messages?: Array<{ from?: string; text?: { body?: string }; type?: string }>
+                    contacts?: Array<{ profile?: { name?: string }; wa_id?: string }>
+                }
+            }>
+        }>
+    }
+    for (const entry of b?.entry ?? []) {
+        for (const change of entry.changes ?? []) {
+            const val = change.value
+            for (const msg of val?.messages ?? []) {
+                if (msg.type !== 'text' || !msg.from || !msg.text?.body) continue
+                const contact = val?.contacts?.find(c => c.wa_id === msg.from)
+                out.push({ from: msg.from, text: msg.text.body, name: contact?.profile?.name })
             }
         }
     }

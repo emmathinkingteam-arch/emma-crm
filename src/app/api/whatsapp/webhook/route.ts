@@ -1,43 +1,15 @@
 // ============================================================================
 // GET / POST  /api/whatsapp/webhook
 // ============================================================================
-//
-// THIS is the piece that was missing. The Cloud API never told your CRM what
-// happened to a message after it was "accepted" — because nothing was
-// listening. This route is that listener.
-//
-//   GET  → Meta's one-time verification handshake (when you save the webhook
-//          in the Meta dashboard). Echoes hub.challenge if the verify token
-//          matches WHATSAPP_WEBHOOK_VERIFY_TOKEN.
-//
-//   POST → Meta calls this every time a message changes state:
-//          accepted → sent → delivered → read   (happy path)
-//          or        → failed (with an error code like 131049 / 131026)
-//          We upsert each status into whatsapp_message_status keyed by wamid.
-//
-// Security:
-//   • If WHATSAPP_APP_SECRET is set, we verify Meta's X-Hub-Signature-256 HMAC
-//     and reject forged calls. If it's not set, we still accept (so you can get
-//     running fast) but you SHOULD set it.
-//
-// Required env vars:
-//   WHATSAPP_WEBHOOK_VERIFY_TOKEN = <any random string you choose>
-//   WHATSAPP_APP_SECRET           = <Meta App → Settings → Basic → App secret>  (recommended)
-//   SUPABASE_SERVICE_ROLE_KEY     = (already set)
-//   NEXT_PUBLIC_SUPABASE_URL      = (already set)
-// ============================================================================
 
 import { NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { handleIncomingMessage } from '@/lib/whatsapp-support'
 
-// Don't let Next cache or statically optimise a webhook.
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-// Higher rank = more advanced lifecycle stage. Guards against out-of-order
-// callbacks downgrading a 'read' back to 'delivered', etc. 'failed' wins.
 const STATUS_RANK: Record<string, number> = {
     accepted: 1,
     sent: 2,
@@ -58,7 +30,6 @@ export async function GET(req: Request) {
     const expected = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN
 
     if (mode === 'subscribe' && token && expected && token === expected) {
-        // Meta requires the raw challenge echoed back as text/plain.
         return new NextResponse(challenge ?? '', {
             status: 200,
             headers: { 'Content-Type': 'text/plain' },
@@ -69,13 +40,73 @@ export async function GET(req: Request) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST — status callbacks
+// Parsing helpers  (defined BEFORE POST so they are in scope)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface WaError {
+    code?: number
+    title?: string
+    message?: string
+    error_data?: { details?: string }
+}
+interface WaStatus {
+    id?: string
+    status: string
+    timestamp?: string
+    recipient_id?: string
+    conversation?: { id?: string }
+    pricing?: { category?: string }
+    errors?: WaError[]
+}
+
+function extractStatuses(body: unknown): WaStatus[] {
+    const out: WaStatus[] = []
+    const b = body as {
+        entry?: Array<{ changes?: Array<{ value?: { statuses?: WaStatus[] } }> }>
+    }
+    if (!b?.entry) return out
+    for (const entry of b.entry) {
+        for (const change of entry.changes ?? []) {
+            for (const st of change.value?.statuses ?? []) {
+                out.push(st)
+            }
+        }
+    }
+    return out
+}
+
+function extractInboundMessages(body: unknown): { from: string; text: string; name?: string }[] {
+    const out: { from: string; text: string; name?: string }[] = []
+    const b = body as {
+        entry?: Array<{
+            changes?: Array<{
+                value?: {
+                    messages?: Array<{ from?: string; text?: { body?: string }; type?: string }>
+                    contacts?: Array<{ profile?: { name?: string }; wa_id?: string }>
+                }
+            }>
+        }>
+    }
+    for (const entry of b?.entry ?? []) {
+        for (const change of entry.changes ?? []) {
+            const val = change.value
+            for (const msg of val?.messages ?? []) {
+                if (msg.type !== 'text' || !msg.from || !msg.text?.body) continue
+                const contact = val?.contacts?.find(c => c.wa_id === msg.from)
+                out.push({ from: msg.from, text: msg.text.body, name: contact?.profile?.name })
+            }
+        }
+    }
+    return out
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST — inbound messages + status callbacks
 // ─────────────────────────────────────────────────────────────────────────────
 export async function POST(req: Request) {
-    // Read the RAW body first (needed for signature verification).
     const raw = await req.text()
 
-    // ─── Optional signature check ──────────────────────────────────────────
+    // Optional signature check
     const appSecret = process.env.WHATSAPP_APP_SECRET
     if (appSecret) {
         const sigHeader = req.headers.get('x-hub-signature-256') || ''
@@ -87,7 +118,6 @@ export async function POST(req: Request) {
             crypto.timingSafeEqual(Buffer.from(sigHeader), Buffer.from(expected))
         if (!ok) {
             console.error('[WA webhook] bad signature — rejecting')
-            // Still 200 so Meta doesn't hammer retries, but we do nothing.
             return NextResponse.json({ ok: false, reason: 'bad_signature' })
         }
     }
@@ -101,14 +131,18 @@ export async function POST(req: Request) {
 
     try {
         const statuses = extractStatuses(body)
+
         if (statuses.length === 0) {
-            // Handle inbound customer messages for live support
-            for (const msg of extractInboundMessages(body)) {
+            // Inbound customer message — handle with support bot
+            const inbound = extractInboundMessages(body)
+            console.log('[WA webhook] inbound messages:', inbound.length)
+            for (const msg of inbound) {
                 await handleIncomingMessage(msg.from, msg.text, msg.name)
             }
             return NextResponse.json({ ok: true, processed: 0 })
         }
 
+        // Status updates for broadcast messages
         const sb = supabaseAdmin()
         let processed = 0
 
@@ -119,7 +153,6 @@ export async function POST(req: Request) {
             const err = Array.isArray(s.errors) && s.errors.length ? s.errors[0] : null
             const rank = STATUS_RANK[s.status] ?? 0
 
-            // Read existing rank so a late/stale callback can't downgrade status.
             const { data: existing } = await sb
                 .from('whatsapp_message_status')
                 .select('status_rank')
@@ -127,7 +160,6 @@ export async function POST(req: Request) {
                 .maybeSingle()
 
             const existingRank = existing?.status_rank ?? 0
-            // 'failed' always records its reason even if it arrives after 'sent'.
             const keepHigher = rank >= existingRank || s.status === 'failed'
 
             const row: Record<string, unknown> = {
@@ -172,67 +204,6 @@ export async function POST(req: Request) {
     } catch (e) {
         const msg = e instanceof Error ? e.message : 'unknown'
         console.error('[WA webhook] handler error:', msg)
-        // Always 200 — a 500 makes Meta retry aggressively and can disable the hook.
         return NextResponse.json({ ok: false, reason: msg })
     }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Parsing helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface WaError {
-    code?: number
-    title?: string
-    message?: string
-    error_data?: { details?: string }
-}
-interface WaStatus {
-    id?: string
-    status: string
-    timestamp?: string
-    recipient_id?: string
-    conversation?: { id?: string }
-    pricing?: { category?: string }
-    errors?: WaError[]
-}
-
-function extractStatuses(body: unknown): WaStatus[] {
-    const out: WaStatus[] = []
-    const b = body as {
-        entry?: Array<{ changes?: Array<{ value?: { statuses?: WaStatus[] } }> }>
-    }
-    if (!b?.entry) return out
-    for (const entry of b.entry) {
-        for (const change of entry.changes ?? []) {
-            for (const st of change.value?.statuses ?? []) {
-                out.push(st)
-            }
-        }
-    }
-    return out
-}
-function extractInboundMessages(body: unknown) {
-    const out: { from: string; text: string; name?: string }[] = []
-    const b = body as {
-        entry?: Array<{
-            changes?: Array<{
-                value?: {
-                    messages?: Array<{ from?: string; text?: { body?: string }; type?: string }>
-                    contacts?: Array<{ profile?: { name?: string }; wa_id?: string }>
-                }
-            }>
-        }>
-    }
-    for (const entry of b?.entry ?? []) {
-        for (const change of entry.changes ?? []) {
-            const val = change.value
-            for (const msg of val?.messages ?? []) {
-                if (msg.type !== 'text' || !msg.from || !msg.text?.body) continue
-                const contact = val?.contacts?.find(c => c.wa_id === msg.from)
-                out.push({ from: msg.from, text: msg.text.body, name: contact?.profile?.name })
-            }
-        }
-    }
-    return out
 }

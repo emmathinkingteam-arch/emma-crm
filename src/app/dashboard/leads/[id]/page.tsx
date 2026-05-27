@@ -13,6 +13,7 @@ import { useEffect, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
+// NOTE: supabase is still used below for the initial lead fetch (read-only).
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import { formatPhoneDisplay } from '@/lib/country-codes'
@@ -66,57 +67,34 @@ export default function LeadResponsePage() {
         if (!user || !lead) return
         setSaving(true)
 
-        // 1. find or create the customer for this number
-        let customerId = lead.customer_id
-        if (!customerId) {
-            const { data: existing } = await supabase
-                .from('customers')
-                .select('id')
-                .eq('phone', lead.phone)
-                .maybeSingle()
-            if (existing) {
-                customerId = existing.id
-            } else {
-                const { data: created } = await supabase
-                    .from('customers')
-                    .insert({
-                        phone: lead.phone,
-                        name: customerName || null,
-                        created_by: user.id,
-                    })
-                    .select('id')
-                    .single()
-                customerId = created?.id ?? null
+        try {
+            // All DB writes go through the API (supabaseAdmin) to bypass RLS.
+            const res = await fetch('/api/leads/submit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    leadId: lead.id,
+                    userId: user.id,
+                    iType,
+                    notes,
+                    customerName,
+                }),
+            })
+            const json = await res.json()
+
+            if (!json.ok) {
+                alert('Failed to save: ' + (json.error || 'unknown error'))
+                setSaving(false)
+                return
             }
-        }
-        if (customerId && customerName) {
-            await supabase.from('customers').update({ name: customerName }).eq('id', customerId)
-        }
 
-        // 2. log the interaction (so it appears in the normal entry system)
-        if (customerId && notes.trim()) {
-            await supabase.from('interactions').insert({
-                customer_id: customerId,
-                type: iType,
-                description: notes.trim(),
-                created_by: user.id,
-            })
+            // Navigate to the customer page, or back to dashboard if no customer.
+            if (json.customerId) router.push(`/dashboard/customers/${json.customerId}`)
+            else router.push('/dashboard')
+        } catch {
+            alert('Network error — please try again.')
+            setSaving(false)
         }
-
-        // 3. fly the lead away — mark responded, stop penalties
-        await supabase
-            .from('leads')
-            .update({
-                status: 'responded',
-                responded_at: new Date().toISOString(),
-                response_type: iType,
-                customer_id: customerId,
-            })
-            .eq('id', lead.id)
-
-        // 4. continue in the full customer page
-        if (customerId) router.push(`/dashboard/customers/${customerId}`)
-        else router.push('/dashboard')
     }
 
     async function handleSkip() {

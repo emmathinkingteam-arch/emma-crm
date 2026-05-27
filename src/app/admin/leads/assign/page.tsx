@@ -106,9 +106,9 @@ export default function AssignLeadsPage() {
                     .from('leads')
                     .select('status')
                     .eq('batch_id', b.id)
-                ;((rows as { status: string }[]) || []).forEach((r) => {
-                    counts[r.status] = (counts[r.status] || 0) + 1
-                })
+                    ; ((rows as { status: string }[]) || []).forEach((r) => {
+                        counts[r.status] = (counts[r.status] || 0) + 1
+                    })
                 return {
                     ...b,
                     worker_name: worker?.full_name || '—',
@@ -141,44 +141,31 @@ export default function AssignLeadsPage() {
         setAssigning(true)
         setDone(null)
 
-        // 1. create the batch
-        const { data: batch, error: bErr } = await supabase
-            .from('lead_batches')
-            .insert({
-                assigned_to: workerId,
+        // 1 + 2. Create batch + insert leads via API (bypasses RLS).
+        const assignRes = await fetch('/api/leads/assign-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                workerId,
                 note: note.trim() || null,
-                release_mode: releaseMode,
-                drip_count: dripCount,
-                drip_interval_minutes: dripInterval,
-                lead_ttl_minutes: ttl,
-                penalty_lkr: penalty,
-                total_count: validRows.length,
-                status: 'active',
-            })
-            .select('id')
-            .single()
+                releaseMode,
+                dripCount,
+                dripInterval,
+                ttl,
+                penalty,
+                leads: validRows.map((r, i) => ({
+                    phone: r.phone,
+                    display: r.display,
+                    raw: r.raw,
+                    position: i,
+                })),
+            }),
+        })
+        const assignJson = await assignRes.json()
 
-        if (bErr || !batch) {
+        if (!assignJson.ok) {
             setAssigning(false)
-            alert('Failed to create batch: ' + (bErr?.message || 'unknown'))
-            return
-        }
-
-        // 2. insert the leads
-        const leadRows = validRows.map((r, i) => ({
-            batch_id: batch.id,
-            assigned_to: workerId,
-            phone: r.phone,
-            phone_display: r.display,
-            raw_input: r.raw,
-            position: i,
-            status: 'queued',
-        }))
-
-        const { error: lErr } = await supabase.from('leads').insert(leadRows)
-        if (lErr) {
-            setAssigning(false)
-            alert('Failed to insert leads: ' + lErr.message)
+            alert('Failed to assign leads: ' + (assignJson.error || 'unknown'))
             return
         }
 

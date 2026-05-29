@@ -1,12 +1,5 @@
 'use client'
 
-// ============================================================================
-// /admin/accounts/transactions — the full journal
-// ============================================================================
-// Every posted entry, newest first. Filter by month, entry type, and search
-// text. Each row shows its lines (Dr/Cr ledgers), amount, and slip link.
-// ============================================================================
-
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { lkr, monthYear, loadLedgers, type LedgerRow } from '@/lib/accounting'
@@ -17,6 +10,10 @@ import {
     ArrowDownToLine,
     ArrowUpFromLine,
     ArrowLeftRight,
+    Trash2,
+    Pencil,
+    Check,
+    X,
 } from 'lucide-react'
 
 interface Row {
@@ -25,7 +22,7 @@ interface Row {
     description: string
     entry_type: string
     period_month: string
-    lines: { debit: number; credit: number; ledger_id: string }[]
+    lines: { id: string; debit: number; credit: number; ledger_id: string }[]
     category?: { name: string } | null
     attachments?: { drive_url: string }[]
 }
@@ -52,6 +49,14 @@ export default function TransactionsPage() {
     const [typeFilter, setTypeFilter] = useState('')
     const [q, setQ] = useState('')
 
+    // edit state
+    const [editingId, setEditingId] = useState<string | null>(null)
+    const [editAmount, setEditAmount] = useState('')
+    const [editSaving, setEditSaving] = useState(false)
+
+    // delete state
+    const [deletingId, setDeletingId] = useState<string | null>(null)
+
     useEffect(() => {
         ; (async () => {
             const { byId } = await loadLedgers(supabase)
@@ -59,25 +64,25 @@ export default function TransactionsPage() {
         })()
     }, [])
 
-    useEffect(() => {
+    async function fetchRows() {
         setLoading(true)
-            ; (async () => {
-                let query = supabase
-                    .from('acc_entries')
-                    .select(
-                        'id, entry_date, description, entry_type, period_month, lines:acc_lines(debit, credit, ledger_id), category:acc_categories(name), attachments:acc_attachments(drive_url)'
-                    )
-                    .eq('status', 'posted')
-                    .order('entry_date', { ascending: false })
-                    .order('created_at', { ascending: false })
-                    .limit(500)
-                if (month) query = query.eq('period_month', month)
-                if (typeFilter) query = query.eq('entry_type', typeFilter)
-                const { data } = await query
-                setRows((data || []) as any[])
-                setLoading(false)
-            })()
-    }, [month, typeFilter])
+        let query = supabase
+            .from('acc_entries')
+            .select(
+                'id, entry_date, description, entry_type, period_month, lines:acc_lines(id, debit, credit, ledger_id), category:acc_categories(name), attachments:acc_attachments(drive_url)'
+            )
+            .eq('status', 'posted')
+            .order('entry_date', { ascending: false })
+            .order('created_at', { ascending: false })
+            .limit(500)
+        if (month) query = query.eq('period_month', month)
+        if (typeFilter) query = query.eq('entry_type', typeFilter)
+        const { data } = await query
+        setRows((data || []) as any[])
+        setLoading(false)
+    }
+
+    useEffect(() => { fetchRows() }, [month, typeFilter])
 
     const filtered = useMemo(() => {
         if (!q.trim()) return rows
@@ -89,7 +94,6 @@ export default function TransactionsPage() {
         )
     }, [rows, q])
 
-    // amount of an entry = sum of debits (== sum of credits)
     const entryAmount = (r: Row) =>
         r.lines.reduce((s, l) => s + Number(l.debit || 0), 0)
 
@@ -102,6 +106,33 @@ export default function TransactionsPage() {
         return opts
     }, [])
 
+    async function handleDelete(id: string) {
+        if (!confirm('Delete this transaction? This cannot be undone.')) return
+        setDeletingId(id)
+        await supabase.from('acc_attachments').delete().eq('entry_id', id)
+        await supabase.from('acc_lines').delete().eq('entry_id', id)
+        await supabase.from('acc_entries').delete().eq('id', id)
+        setDeletingId(null)
+        setRows((prev) => prev.filter((r) => r.id !== id))
+    }
+
+    async function handleEditSave(r: Row) {
+        const amt = Number(editAmount)
+        if (!(amt > 0)) return
+        setEditSaving(true)
+
+        // update debit line
+        const debitLine = r.lines.find((l) => Number(l.debit) > 0)
+        const creditLine = r.lines.find((l) => Number(l.credit) > 0)
+
+        if (debitLine) await supabase.from('acc_lines').update({ debit: amt }).eq('id', debitLine.id)
+        if (creditLine) await supabase.from('acc_lines').update({ credit: amt }).eq('id', creditLine.id)
+
+        setEditSaving(false)
+        setEditingId(null)
+        fetchRows()
+    }
+
     return (
         <div className="space-y-4">
             {/* Filter bar */}
@@ -113,9 +144,7 @@ export default function TransactionsPage() {
                 >
                     <option value="">All months</option>
                     {monthOptions.map((m) => (
-                        <option key={m} value={m}>
-                            {m}
-                        </option>
+                        <option key={m} value={m}>{m}</option>
                     ))}
                 </select>
                 <select
@@ -125,9 +154,7 @@ export default function TransactionsPage() {
                 >
                     <option value="">All types</option>
                     {Object.entries(TYPE_LABELS).map(([k, v]) => (
-                        <option key={k} value={k}>
-                            {v}
-                        </option>
+                        <option key={k} value={k}>{v}</option>
                     ))}
                 </select>
                 <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 flex-1 min-w-[180px]">
@@ -155,24 +182,13 @@ export default function TransactionsPage() {
                     <table className="w-full text-xs">
                         <thead className="bg-gray-50 border-b border-gray-100">
                             <tr>
-                                <th className="px-4 py-3 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wide">
-                                    Date
-                                </th>
-                                <th className="px-4 py-3 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wide">
-                                    Description
-                                </th>
-                                <th className="px-4 py-3 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wide">
-                                    Type
-                                </th>
-                                <th className="px-4 py-3 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wide">
-                                    Posting
-                                </th>
-                                <th className="px-4 py-3 text-right text-[10px] font-bold text-gray-400 uppercase tracking-wide">
-                                    Amount
-                                </th>
-                                <th className="px-4 py-3 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wide">
-                                    Slip
-                                </th>
+                                <th className="px-4 py-3 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wide">Date</th>
+                                <th className="px-4 py-3 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wide">Description</th>
+                                <th className="px-4 py-3 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wide">Type</th>
+                                <th className="px-4 py-3 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wide">Posting</th>
+                                <th className="px-4 py-3 text-right text-[10px] font-bold text-gray-400 uppercase tracking-wide">Amount</th>
+                                <th className="px-4 py-3 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wide">Slip</th>
+                                <th className="px-4 py-3 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wide">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50">
@@ -181,20 +197,18 @@ export default function TransactionsPage() {
                                 const cr = r.lines.find((l) => Number(l.credit) > 0)
                                 const drName = dr ? byId[dr.ledger_id]?.name : '—'
                                 const crName = cr ? byId[cr.ledger_id]?.name : '—'
+                                const isEditing = editingId === r.id
+                                const isDeleting = deletingId === r.id
+
                                 return (
                                     <tr key={r.id} className="hover:bg-pink-50/20">
                                         <td className="px-4 py-3 whitespace-nowrap text-gray-500 font-medium">
-                                            {new Date(r.entry_date).toLocaleDateString('en-GB', {
-                                                day: '2-digit',
-                                                month: 'short',
-                                            })}
+                                            {new Date(r.entry_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
                                         </td>
                                         <td className="px-4 py-3 font-semibold text-gray-800 max-w-[220px]">
                                             <span className="line-clamp-2">{r.description}</span>
                                             {r.category?.name && (
-                                                <span className="block text-[10px] text-gray-400 font-medium">
-                                                    {r.category.name}
-                                                </span>
+                                                <span className="block text-[10px] text-gray-400 font-medium">{r.category.name}</span>
                                             )}
                                         </td>
                                         <td className="px-4 py-3">
@@ -206,22 +220,62 @@ export default function TransactionsPage() {
                                             <span className="text-amber-700 font-semibold">{crName}</span>
                                         </td>
                                         <td className="px-4 py-3 text-right font-bold text-gray-800 tabular-nums whitespace-nowrap">
-                                            {lkr(entryAmount(r))}
+                                            {isEditing ? (
+                                                <input
+                                                    type="number"
+                                                    value={editAmount}
+                                                    onChange={(e) => setEditAmount(e.target.value)}
+                                                    className="w-24 text-right bg-white border border-pink-300 rounded-lg px-2 py-1 outline-none text-xs font-bold"
+                                                    autoFocus
+                                                />
+                                            ) : (
+                                                lkr(entryAmount(r))
+                                            )}
                                         </td>
                                         <td className="px-4 py-3 text-center">
                                             {r.attachments && r.attachments.length > 0 ? (
-                                                <a
-                                                    href={r.attachments[0].drive_url}
-                                                    target="_blank"
-                                                    rel="noreferrer"
-                                                    className="inline-flex text-pink-600 hover:text-pink-700"
-                                                    title="View slip"
-                                                >
+                                                <a href={r.attachments[0].drive_url} target="_blank" rel="noreferrer" className="inline-flex text-pink-600 hover:text-pink-700">
                                                     <Paperclip size={14} />
                                                 </a>
                                             ) : (
                                                 <span className="text-gray-200">—</span>
                                             )}
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            <div className="flex items-center justify-center gap-2">
+                                                {isEditing ? (
+                                                    <>
+                                                        <button
+                                                            onClick={() => handleEditSave(r)}
+                                                            disabled={editSaving}
+                                                            className="text-emerald-600 hover:text-emerald-700"
+                                                        >
+                                                            {editSaving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                                                        </button>
+                                                        <button onClick={() => setEditingId(null)} className="text-gray-400 hover:text-gray-600">
+                                                            <X size={13} />
+                                                        </button>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <button
+                                                            onClick={() => { setEditingId(r.id); setEditAmount(String(entryAmount(r))) }}
+                                                            className="text-gray-400 hover:text-pink-600"
+                                                            title="Edit amount"
+                                                        >
+                                                            <Pencil size={13} />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleDelete(r.id)}
+                                                            disabled={isDeleting}
+                                                            className="text-gray-400 hover:text-rose-600"
+                                                            title="Delete"
+                                                        >
+                                                            {isDeleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                                                        </button>
+                                                    </>
+                                                )}
+                                            </div>
                                         </td>
                                     </tr>
                                 )
@@ -244,9 +298,7 @@ function TypeBadge({ type }: { type: string }) {
             ? 'bg-sky-50 text-sky-700'
             : 'bg-rose-50 text-rose-600'
     return (
-        <span
-            className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold ${cls}`}
-        >
+        <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold ${cls}`}>
             <Icon size={10} />
             {TYPE_LABELS[type] || type}
         </span>

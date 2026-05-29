@@ -1,36 +1,22 @@
 'use client'
 
-// ============================================================================
-// /admin/accounts/add-expense — the accountant's core daily screen
-// ============================================================================
-// Pick a category (grouped dropdown → maps to a ledger), enter the amount,
-// choose which bank/cash it was paid from, the date, paste the Google Drive
-// slip link, an optional note, and optionally attach it to a customer order.
-//
-// On save it posts ONE balanced journal entry:
-//     Dr  <category's expense ledger>
-//     Cr  <chosen bank ledger>
-// plus an acc_attachments row holding the Drive link.
-// ============================================================================
-
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import {
     loadLedgers,
     postEntry,
     driveFileId,
-    DRIVE_FOLDER_URL,
     lkr,
     type LedgerRow,
 } from '@/lib/accounting'
 import {
     Loader2,
     CheckCircle2,
-    ExternalLink,
-    FolderOpen,
     Search,
     X,
+    Paperclip,
+    UploadCloud,
 } from 'lucide-react'
 
 interface CategoryRow {
@@ -46,6 +32,11 @@ interface CustomerHit {
     label: string
 }
 
+// Generate a simple expense code: SP + 6-digit timestamp slice
+function makeExpenseCode() {
+    return 'SP' + Date.now().toString().slice(-6)
+}
+
 export default function AddExpensePage() {
     const { user } = useAuthStore()
 
@@ -59,8 +50,15 @@ export default function AddExpensePage() {
     const [amount, setAmount] = useState('')
     const [bankId, setBankId] = useState('')
     const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
-    const [driveUrl, setDriveUrl] = useState('')
     const [description, setDescription] = useState('')
+
+    // slip upload state
+    const [slipFile, setSlipFile] = useState<File | null>(null)
+    const [uploading, setUploading] = useState(false)
+    const [uploadedUrl, setUploadedUrl] = useState<string | null>(null)
+    const [uploadedFileId, setUploadedFileId] = useState<string | null>(null)
+    const [uploadError, setUploadError] = useState<string | null>(null)
+    const fileInputRef = useRef<HTMLInputElement>(null)
 
     // optional customer attach
     const [custQuery, setCustQuery] = useState('')
@@ -91,7 +89,6 @@ export default function AddExpensePage() {
         })()
     }, [])
 
-    // Build grouped options: parents (with children indented under them)
     const grouped = useMemo(() => {
         const parents = cats.filter((c) => !c.parent_id)
         return parents.map((p) => ({
@@ -102,12 +99,8 @@ export default function AddExpensePage() {
         }))
     }, [cats])
 
-    // Customer search (by name or phone, only customers with orders)
     useEffect(() => {
-        if (custQuery.trim().length < 3) {
-            setCustHits([])
-            return
-        }
+        if (custQuery.trim().length < 3) { setCustHits([]); return }
         let cancelled = false
         setCustSearching(true)
         const t = setTimeout(async () => {
@@ -130,19 +123,40 @@ export default function AddExpensePage() {
                     customer_id: o.customer.id,
                     label: `${o.customer.name || o.customer.phone} · ${o.package?.name || ''}`,
                 }))
-            if (!cancelled) {
-                setCustHits(hits)
-                setCustSearching(false)
-            }
+            if (!cancelled) { setCustHits(hits); setCustSearching(false) }
         }, 300)
-        return () => {
-            cancelled = true
-            clearTimeout(t)
-        }
+        return () => { cancelled = true; clearTimeout(t) }
     }, [custQuery])
 
-    const canSave =
-        categoryId && Number(amount) > 0 && bankId && date && !saving
+    async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+        const file = e.target.files?.[0]
+        if (!file) return
+        setSlipFile(file)
+        setUploadedUrl(null)
+        setUploadedFileId(null)
+        setUploadError(null)
+        setUploading(true)
+
+        const code = makeExpenseCode()
+        const fd = new FormData()
+        fd.append('file', file)
+        fd.append('code', code)
+
+        try {
+            const res = await fetch('/api/upload-slip', { method: 'POST', body: fd })
+            const json = await res.json()
+            if (!res.ok || !json.ok) throw new Error(json.error || 'Upload failed')
+            setUploadedUrl(json.driveUrl)
+            setUploadedFileId(json.fileId)
+        } catch (err: any) {
+            setUploadError(err.message)
+            setSlipFile(null)
+        } finally {
+            setUploading(false)
+        }
+    }
+
+    const canSave = categoryId && Number(amount) > 0 && bankId && date && !saving && !uploading
 
     async function handleSave() {
         setError(null)
@@ -152,10 +166,8 @@ export default function AddExpensePage() {
             return
         }
         const cat = cats.find((c) => c.id === categoryId)
-        if (!cat) {
-            setError('Category not found.')
-            return
-        }
+        if (!cat) { setError('Category not found.'); return }
+
         setSaving(true)
         const res = await postEntry(supabase, {
             date,
@@ -171,12 +183,11 @@ export default function AddExpensePage() {
                 { ledgerId: cat.ledger_id, debit: amt, memo: cat.name },
                 { ledgerId: bankId, credit: amt },
             ],
-            driveUrl: driveUrl.trim() || null,
-            driveFileId: driveUrl.trim() ? driveFileId(driveUrl.trim()) : null,
+            driveUrl: uploadedUrl ?? null,
+            driveFileId: uploadedFileId ?? null,
             attachmentKind: 'expense_slip',
         })
 
-        // If attached to a customer, also record it as a direct cost for costing.
         if (res.ok && custPicked) {
             await supabase.from('acc_customer_costs').insert({
                 order_id: custPicked.order_id,
@@ -190,18 +201,18 @@ export default function AddExpensePage() {
         }
 
         setSaving(false)
-        if (!res.ok) {
-            setError(res.error || 'Could not save the expense.')
-            return
-        }
+        if (!res.ok) { setError(res.error || 'Could not save the expense.'); return }
+
         setDone(`Saved ${lkr(amt)} to ${cat.name}.`)
-        // reset the money fields, keep bank+date for fast repeat entry
         setAmount('')
         setDescription('')
-        setDriveUrl('')
+        setSlipFile(null)
+        setUploadedUrl(null)
+        setUploadedFileId(null)
         setCategoryId('')
         setCustPicked(null)
         setCustQuery('')
+        if (fileInputRef.current) fileInputRef.current.value = ''
         setTimeout(() => setDone(null), 4000)
     }
 
@@ -215,21 +226,11 @@ export default function AddExpensePage() {
     return (
         <div className="max-w-2xl">
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-                <div className="flex items-center justify-between mb-5">
-                    <div>
-                        <h2 className="text-base font-bold text-gray-800">Add an expense</h2>
-                        <p className="text-[11px] text-gray-400 font-medium mt-0.5">
-                            Pick a category — it files itself to the right ledger automatically.
-                        </p>
-                    </div>
-                    <a
-                        href={DRIVE_FOLDER_URL}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center gap-1.5 text-[11px] font-bold text-pink-600 hover:text-pink-700 bg-pink-50 px-3 py-2 rounded-xl"
-                    >
-                        <FolderOpen size={13} /> Open Drive folder <ExternalLink size={11} />
-                    </a>
+                <div className="mb-5">
+                    <h2 className="text-base font-bold text-gray-800">Add an expense</h2>
+                    <p className="text-[11px] text-gray-400 font-medium mt-0.5">
+                        Pick a category — it files itself to the right ledger automatically.
+                    </p>
                 </div>
 
                 {/* Category */}
@@ -243,9 +244,7 @@ export default function AddExpensePage() {
                         {grouped.map((g) => (
                             <optgroup key={g.parent.id} label={g.parent.name}>
                                 {g.children.map((c) => (
-                                    <option key={c.id} value={c.id}>
-                                        {c.name}
-                                    </option>
+                                    <option key={c.id} value={c.id}>{c.name}</option>
                                 ))}
                             </optgroup>
                         ))}
@@ -256,9 +255,7 @@ export default function AddExpensePage() {
                 <div className="grid grid-cols-2 gap-3">
                     <Field label="Amount (LKR)">
                         <input
-                            type="number"
-                            min={0}
-                            value={amount}
+                            type="number" min={0} value={amount}
                             onChange={(e) => setAmount(e.target.value)}
                             placeholder="0.00"
                             className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:border-pink-300"
@@ -271,9 +268,7 @@ export default function AddExpensePage() {
                             className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-pink-300"
                         >
                             {banks.map((b) => (
-                                <option key={b.id} value={b.id}>
-                                    {b.name}
-                                </option>
+                                <option key={b.id} value={b.id}>{b.name}</option>
                             ))}
                         </select>
                     </Field>
@@ -282,32 +277,71 @@ export default function AddExpensePage() {
                 {/* Date */}
                 <Field label="Date">
                     <input
-                        type="date"
-                        value={date}
+                        type="date" value={date}
                         onChange={(e) => setDate(e.target.value)}
                         className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-pink-300"
                     />
                 </Field>
 
-                {/* Drive slip link */}
-                <Field label="Slip — Google Drive link">
+                {/* Slip upload */}
+                <Field label="Slip (photo or PDF)">
                     <input
-                        type="url"
-                        value={driveUrl}
-                        onChange={(e) => setDriveUrl(e.target.value)}
-                        placeholder="https://drive.google.com/file/d/..."
-                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-pink-300"
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*,application/pdf"
+                        className="hidden"
+                        onChange={handleFileChange}
                     />
-                    <p className="text-[10px] text-gray-400 mt-1">
-                        Upload the slip to the Drive folder, then paste its share link here.
-                    </p>
+
+                    {!slipFile && !uploadedUrl && (
+                        <button
+                            type="button"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="w-full flex items-center gap-2 bg-gray-50 border border-dashed border-gray-300 rounded-xl px-3 py-3 text-sm text-gray-400 hover:border-pink-300 hover:text-pink-500 transition-colors"
+                        >
+                            <UploadCloud size={16} />
+                            Click to upload slip
+                        </button>
+                    )}
+
+                    {uploading && (
+                        <div className="flex items-center gap-2 text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5">
+                            <Loader2 size={14} className="animate-spin text-pink-500" />
+                            Uploading to Drive…
+                        </div>
+                    )}
+
+                    {uploadedUrl && slipFile && (
+                        <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2.5">
+                            <div className="flex items-center gap-2 text-sm text-emerald-700 font-medium">
+                                <CheckCircle2 size={14} />
+                                <a href={uploadedUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">
+                                    {slipFile.name}
+                                </a>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    setSlipFile(null)
+                                    setUploadedUrl(null)
+                                    setUploadedFileId(null)
+                                    if (fileInputRef.current) fileInputRef.current.value = ''
+                                }}
+                                className="text-emerald-400 hover:text-emerald-600"
+                            >
+                                <X size={14} />
+                            </button>
+                        </div>
+                    )}
+
+                    {uploadError && (
+                        <p className="text-xs text-rose-500 mt-1">{uploadError} — <button className="underline" onClick={() => fileInputRef.current?.click()}>try again</button></p>
+                    )}
                 </Field>
 
                 {/* Description */}
                 <Field label="Note (optional)">
                     <input
-                        type="text"
-                        value={description}
+                        type="text" value={description}
                         onChange={(e) => setDescription(e.target.value)}
                         placeholder="e.g. October Meta campaign top-up"
                         className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-pink-300"
@@ -318,16 +352,8 @@ export default function AddExpensePage() {
                 <Field label="Attach to a customer? (optional — flows into their costing)">
                     {custPicked ? (
                         <div className="flex items-center justify-between bg-pink-50 border border-pink-200 rounded-xl px-3 py-2.5">
-                            <span className="text-sm font-semibold text-pink-700">
-                                {custPicked.label}
-                            </span>
-                            <button
-                                onClick={() => {
-                                    setCustPicked(null)
-                                    setCustQuery('')
-                                }}
-                                className="text-pink-400 hover:text-pink-600"
-                            >
+                            <span className="text-sm font-semibold text-pink-700">{custPicked.label}</span>
+                            <button onClick={() => { setCustPicked(null); setCustQuery('') }} className="text-pink-400 hover:text-pink-600">
                                 <X size={15} />
                             </button>
                         </div>
@@ -341,19 +367,14 @@ export default function AddExpensePage() {
                                     placeholder="Search customer name or phone…"
                                     className="flex-1 bg-transparent text-sm outline-none"
                                 />
-                                {custSearching && (
-                                    <Loader2 size={13} className="animate-spin text-gray-400" />
-                                )}
+                                {custSearching && <Loader2 size={13} className="animate-spin text-gray-400" />}
                             </div>
                             {custHits.length > 0 && (
                                 <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
                                     {custHits.map((h) => (
                                         <button
                                             key={h.order_id}
-                                            onClick={() => {
-                                                setCustPicked(h)
-                                                setCustHits([])
-                                            }}
+                                            onClick={() => { setCustPicked(h); setCustHits([]) }}
                                             className="w-full text-left px-3 py-2 text-sm hover:bg-pink-50 border-b border-gray-50 last:border-0"
                                         >
                                             {h.label}
@@ -389,13 +410,7 @@ export default function AddExpensePage() {
     )
 }
 
-function Field({
-    label,
-    children,
-}: {
-    label: string
-    children: React.ReactNode
-}) {
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
     return (
         <div className="mb-4">
             <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1.5">

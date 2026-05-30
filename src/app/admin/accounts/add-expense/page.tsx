@@ -100,7 +100,7 @@ export default function AddExpensePage() {
                 const { data: w } = await supabase
                     .from('users')
                     .select('id, full_name, role, wallet_balance')
-                    .in('role', ['worker', 'senior_worker', 'manager'])
+                    .neq('role', 'admin')
                     .order('full_name')
                 setWorkers((w || []) as WorkerHit[])
             } finally {

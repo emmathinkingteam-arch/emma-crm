@@ -244,10 +244,10 @@ export default function AddExpensePage() {
                 supabase.from('salary_payments').insert({
                     user_id: workerPicked.id,
                     amount_paid: amt,
-                    month_year: date.slice(0, 7), // e.g. "2025-05"
+                    month_year: date.slice(0, 7),
                     paid_at: new Date().toISOString(),
                     note: cat.name + (description.trim() ? ` — ${description.trim()}` : ''),
-                    entry_id: res.entryId ?? null,
+                    paid_by: user?.id ?? null,
                 }),
             ])
 

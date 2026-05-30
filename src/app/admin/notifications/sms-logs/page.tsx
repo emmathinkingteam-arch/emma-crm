@@ -141,7 +141,8 @@ export default function SmsLogsPage() {
         setLoading(false)
 
         // fetch customer info for penalty rows that have order_id
-        const orderIds = [...new Set(rows.filter(r => r.template_key === 'overdue_debit' && r.order_id).map(r => r.order_id!))]
+        const orderIdsSet = new Set(rows.filter(r => r.template_key === 'overdue_debit' && r.order_id).map(r => r.order_id!))
+        const orderIds = Array.from(orderIdsSet)
         if (orderIds.length > 0) {
             const { data: orders } = await supabase
                 .from('orders')

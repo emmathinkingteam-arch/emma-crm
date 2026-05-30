@@ -78,6 +78,13 @@ export default function AddExpensePage() {
     const [workerPicked, setWorkerPicked] = useState<WorkerHit | null>(null)
     const [workerQuery, setWorkerQuery] = useState('')
 
+    // which month this salary/advance is FOR (default = previous month)
+    const [payForMonth, setPayForMonth] = useState(() => {
+        const d = new Date()
+        d.setMonth(d.getMonth() - 1)
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    })
+
     const [saving, setSaving] = useState(false)
     const [done, setDone] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
@@ -244,7 +251,7 @@ export default function AddExpensePage() {
                 supabase.from('salary_payments').insert({
                     user_id: workerPicked.id,
                     amount_paid: amt,
-                    month_year: date.slice(0, 7),
+                    month_year: payForMonth,
                     paid_at: new Date().toISOString(),
                     note: cat.name + (description.trim() ? ` — ${description.trim()}` : ''),
                     paid_by: user?.id ?? null,
@@ -287,6 +294,7 @@ export default function AddExpensePage() {
         setCustQuery('')
         setWorkerPicked(null)
         setWorkerQuery('')
+        const rd = new Date(); rd.setMonth(rd.getMonth() - 1); setPayForMonth(`${rd.getFullYear()}-${String(rd.getMonth() + 1).padStart(2, '0')}`)
         if (fileInputRef.current) fileInputRef.current.value = ''
         setTimeout(() => setDone(null), 4000)
     }
@@ -312,7 +320,13 @@ export default function AddExpensePage() {
                 <Field label="Category">
                     <select
                         value={categoryId}
-                        onChange={(e) => { setCategoryId(e.target.value); setWorkerPicked(null) }}
+                        onChange={(e) => {
+                            const newCat = cats.find(c => c.id === e.target.value)
+                            const isAdv = newCat ? WORKER_CATEGORY_KEYWORDS.some(k => newCat.name.toLowerCase().includes(k) && newCat.name.toLowerCase().includes('advance')) : false
+                            if (isAdv) { const d = new Date(); setPayForMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`) }
+                            else { const d = new Date(); d.setMonth(d.getMonth() - 1); setPayForMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`) }
+                            setCategoryId(e.target.value); setWorkerPicked(null)
+                        }}
                         className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-pink-300"
                     >
                         <option value="">— Select a category —</option>
@@ -344,6 +358,19 @@ export default function AddExpensePage() {
                                 </option>
                             ))}
                         </select>
+                    </Field>
+                )}
+
+                {/* Month picker for salary/advance */}
+                {isWorkerCategory && (
+                    <Field label="Paying for which month? *">
+                        <input
+                            type="month"
+                            value={payForMonth}
+                            onChange={(e) => setPayForMonth(e.target.value)}
+                            className="w-full bg-purple-50 border border-purple-200 rounded-xl px-3 py-2.5 text-sm font-bold text-purple-700 outline-none focus:border-purple-400"
+                        />
+                        <p className="text-[10px] text-purple-400 mt-1">e.g. paying May salary in June → pick May</p>
                     </Field>
                 )}
 

@@ -329,45 +329,21 @@ export default function AddExpensePage() {
                 {/* Worker picker — only shows for salary/advance categories */}
                 {isWorkerCategory && (
                     <Field label="Worker *">
-                        {workerPicked ? (
-                            <div className="flex items-center justify-between bg-purple-50 border border-purple-200 rounded-xl px-3 py-2.5">
-                                <div>
-                                    <span className="text-sm font-semibold text-purple-700">{workerPicked.full_name}</span>
-                                    <span className="ml-2 text-[10px] text-purple-400">
-                                        Wallet: {lkr(workerPicked.wallet_balance)}
-                                    </span>
-                                </div>
-                                <button onClick={() => setWorkerPicked(null)} className="text-purple-400 hover:text-purple-600">
-                                    <X size={15} />
-                                </button>
-                            </div>
-                        ) : (
-                            <div className="space-y-1">
-                                <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5">
-                                    <User size={14} className="text-gray-400" />
-                                    <input
-                                        value={workerQuery}
-                                        onChange={(e) => setWorkerQuery(e.target.value)}
-                                        placeholder="Search worker name…"
-                                        className="flex-1 bg-transparent text-sm outline-none"
-                                    />
-                                </div>
-                                {filteredWorkers.length > 0 && (
-                                    <div className="border border-gray-200 rounded-xl bg-white shadow-sm overflow-hidden max-h-44 overflow-y-auto">
-                                        {filteredWorkers.map((w) => (
-                                            <button
-                                                key={w.id}
-                                                onClick={() => { setWorkerPicked(w); setWorkerQuery('') }}
-                                                className="w-full text-left px-3 py-2.5 text-sm hover:bg-purple-50 border-b border-gray-50 last:border-0 flex items-center justify-between"
-                                            >
-                                                <span className="font-semibold text-gray-800">{w.full_name}</span>
-                                                <span className="text-[10px] text-gray-400">Wallet: {lkr(w.wallet_balance)}</span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        )}
+                        <select
+                            value={workerPicked?.id || ''}
+                            onChange={(e) => {
+                                const w = workers.find((w) => w.id === e.target.value) || null
+                                setWorkerPicked(w)
+                            }}
+                            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-purple-300"
+                        >
+                            <option value="">— Select a worker —</option>
+                            {workers.map((w) => (
+                                <option key={w.id} value={w.id}>
+                                    {w.full_name} — Wallet: {lkr(w.wallet_balance)}
+                                </option>
+                            ))}
+                        </select>
                     </Field>
                 )}
 

@@ -68,7 +68,7 @@ export default function WalletPage() {
         {/* Wallet card */}
         <div className="bg-gradient-to-br from-pink-600 to-pink-400 rounded-3xl p-5 text-white">
           <p className="text-xs font-medium opacity-75 uppercase tracking-wide">Total wallet balance</p>
-          <p className="text-3xl font-bold tracking-tight mt-1">LKR {(liveBalance ?? user?.wallet_balance ?? 0).toLocaleString()}</p>
+          <p className="text-3xl font-bold tracking-tight mt-1">LKR {thisMonthEarned.toLocaleString()}</p>
           <p className="text-xs opacity-75 mt-2">This month earned: LKR {thisMonthEarned.toLocaleString()}</p>
         </div>
 

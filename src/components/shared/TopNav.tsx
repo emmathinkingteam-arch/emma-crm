@@ -101,7 +101,7 @@ export default function TopNav() {
           >
             <Wallet size={11} className="text-pink-600" />
             <span className="text-xs font-semibold text-gray-700">
-              LKR {(user?.wallet_balance ?? 0).toLocaleString()}
+              LKR {totalEarned.toLocaleString()}
             </span>
             <ChevronDown size={10} className="text-gray-400" />
           </button>
@@ -142,7 +142,7 @@ export default function TopNav() {
               <div>
                 <h2 className="text-sm font-bold text-gray-800">My Wallet</h2>
                 <p className="text-[9px] text-gray-400 font-semibold uppercase tracking-wider mt-0.5">
-                  Balance: LKR {(user?.wallet_balance ?? 0).toLocaleString()}
+                  {selectedMonth} balance: LKR {balance.toLocaleString()}
                 </p>
               </div>
               <button onClick={() => setWalletOpen(false)} className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center text-gray-400">

@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Task } from '@/types'
 import { getDaysLeft, getProgressPercent, fmtDate } from '@/lib/utils'
+import DarkModeToggle from '@/components/shared/DarkModeToggle'
 
 interface Payment {
   id: string
@@ -104,6 +105,9 @@ export default function TopNav() {
             </span>
             <ChevronDown size={10} className="text-gray-400" />
           </button>
+
+          {/* Dark mode toggle */}
+          <DarkModeToggle />
 
           {/* Bell */}
           <button onClick={() => setNotifOpen(true)} className="relative">

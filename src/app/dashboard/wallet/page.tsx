@@ -36,6 +36,7 @@ export default function WalletPage() {
 
   const month = currentMonthYear()
   const monthEarned = commissions.filter(c => c.month_year === month).reduce((s, c) => s + c.amount, 0)
+  const totalPaid = payments.reduce((s, p) => s + p.amount_paid, 0)
   const progressPct = monthTarget > 0 ? Math.min(100, Math.round((monthEarned / monthTarget) * 100)) : 0
 
   if (loading) return (
@@ -51,7 +52,19 @@ export default function WalletPage() {
         <div className="bg-gradient-to-br from-pink-600 to-pink-400 rounded-3xl p-5 text-white">
           <p className="text-xs font-medium opacity-75 uppercase tracking-wide">Total wallet balance</p>
           <p className="text-3xl font-bold tracking-tight mt-1">LKR {(liveBalance ?? user?.wallet_balance ?? 0).toLocaleString()}</p>
-          <p className="text-xs opacity-75 mt-2">This month: LKR {monthEarned.toLocaleString()}</p>
+          <p className="text-xs opacity-75 mt-2">This month earned: LKR {monthEarned.toLocaleString()}</p>
+        </div>
+
+        {/* Summary row */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-3 text-center">
+            <p className="text-[10px] text-emerald-500 font-bold uppercase tracking-wide mb-1">Total Earned</p>
+            <p className="text-base font-bold text-emerald-700">LKR {commissions.reduce((s, c) => s + c.amount, 0).toLocaleString()}</p>
+          </div>
+          <div className="bg-rose-50 border border-rose-100 rounded-2xl p-3 text-center">
+            <p className="text-[10px] text-rose-500 font-bold uppercase tracking-wide mb-1">Total Paid Out</p>
+            <p className="text-base font-bold text-rose-600">LKR {totalPaid.toLocaleString()}</p>
+          </div>
         </div>
 
         {/* Monthly target */}
@@ -77,24 +90,29 @@ export default function WalletPage() {
                   <p className="text-xs font-bold text-gray-800">{(c as any).order?.customer?.name || (c as any).order?.customer?.phone || 'Customer'}</p>
                   <p className="text-[9px] text-gray-400 font-medium">{(c as any).package?.name} · Step {c.step_number} · {fmtDate(c.earned_at)}</p>
                 </div>
-                <p className="text-sm font-bold text-pink-600">+LKR {c.amount.toLocaleString()}</p>
+                <p className="text-sm font-bold text-emerald-600">+LKR {c.amount.toLocaleString()}</p>
               </div>
             ))}
+            {commissions.length === 0 && <p className="text-xs text-gray-300 text-center py-4">No commissions yet</p>}
           </div>
         </div>
 
-        {/* Salary payments */}
+        {/* Payments received (salary + advance) */}
         {payments.length > 0 && (
           <div>
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">Salary payments received</p>
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">Payments received</p>
             <div className="space-y-2">
               {payments.map(p => (
                 <div key={p.id} className="flex items-center justify-between bg-white border border-gray-100 rounded-2xl px-4 py-3 shadow-sm">
                   <div>
-                    <p className="text-xs font-bold text-gray-800">{p.month_year}</p>
-                    <p className="text-[9px] text-gray-400 font-medium">{fmtDate(p.paid_at)}{p.note ? ` · ${p.note}` : ''}</p>
+                    <p className="text-xs font-bold text-gray-800">
+                      {p.note || p.month_year}
+                    </p>
+                    <p className="text-[9px] text-gray-400 font-medium">
+                      {fmtDate(p.paid_at)} · {p.month_year}
+                    </p>
                   </div>
-                  <p className="text-sm font-bold text-red-400">–LKR {p.amount_paid.toLocaleString()}</p>
+                  <p className="text-sm font-bold text-rose-400">–LKR {p.amount_paid.toLocaleString()}</p>
                 </div>
               ))}
             </div>

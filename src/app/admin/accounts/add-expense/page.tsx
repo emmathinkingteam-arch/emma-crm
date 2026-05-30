@@ -202,8 +202,8 @@ export default function AddExpensePage() {
                     { ledgerId: transferToBank, debit: amt, memo: 'Transfer in' },
                     { ledgerId: bankId, credit: amt, memo: 'Transfer out' },
                 ],
-                driveUrl: null,
-                driveFileId: null,
+                driveUrl: uploadedUrl ?? null,
+                driveFileId: uploadedFileId ?? null,
                 attachmentKind: 'other',
             })
             setSaving(false)
@@ -336,6 +336,33 @@ export default function AddExpensePage() {
                         <Field label="Date">
                             <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
                                 className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-sky-300" />
+                        </Field>
+                        <Field label="Slip (photo or PDF)">
+                            <input ref={fileInputRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={handleFileChange} />
+                            {!slipFile && !uploadedUrl && (
+                                <button type="button" onClick={() => fileInputRef.current?.click()}
+                                    className="w-full flex items-center gap-2 bg-gray-50 border border-dashed border-gray-300 rounded-xl px-3 py-3 text-sm text-gray-400 hover:border-sky-300 hover:text-sky-500 transition-colors">
+                                    <UploadCloud size={16} /> Click to upload slip
+                                </button>
+                            )}
+                            {uploading && (
+                                <div className="flex items-center gap-2 text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5">
+                                    <Loader2 size={14} className="animate-spin text-sky-500" /> Uploading…
+                                </div>
+                            )}
+                            {uploadedUrl && slipFile && (
+                                <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2.5">
+                                    <div className="flex items-center gap-2 text-sm text-emerald-700 font-medium">
+                                        <CheckCircle2 size={14} />
+                                        <a href={uploadedUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">{slipFile.name}</a>
+                                    </div>
+                                    <button onClick={() => { setSlipFile(null); setUploadedUrl(null); setUploadedFileId(null); if (fileInputRef.current) fileInputRef.current.value = '' }}
+                                        className="text-emerald-400 hover:text-emerald-600"><X size={14} /></button>
+                                </div>
+                            )}
+                            {uploadError && (
+                                <p className="text-xs text-rose-500 mt-1">{uploadError} — <button className="underline" onClick={() => fileInputRef.current?.click()}>try again</button></p>
+                            )}
                         </Field>
                         <Field label="Note (optional)">
                             <input type="text" value={description} onChange={(e) => setDescription(e.target.value)}

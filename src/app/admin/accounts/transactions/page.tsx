@@ -234,7 +234,7 @@ export default function TransactionsPage() {
                                         </td>
                                         <td className="px-4 py-3 text-center">
                                             {r.attachments && r.attachments.length > 0 ? (
-                                                <a href={r.attachments[0].drive_url} target="_blank" rel="noreferrer" className="inline-flex text-pink-600 hover:text-pink-700">
+                                                <a href={r.attachments[0].drive_url.replace('/upload/', '/upload/fl_attachment/')} target="_blank" rel="noreferrer" className="inline-flex text-pink-600 hover:text-pink-700">
                                                     <Paperclip size={14} />
                                                 </a>
                                             ) : (

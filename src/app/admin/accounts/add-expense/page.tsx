@@ -124,7 +124,7 @@ export default function AddExpensePage() {
     const isWorkerCategory = selectedCat
         ? WORKER_CATEGORY_KEYWORDS.some((kw) => selectedCat.name.toLowerCase().includes(kw))
         : false
-    const isOtherCategory = selectedCat?.name === 'Other'
+    const isOtherCategory = selectedCat?.name === 'Other (specify)'
 
     useEffect(() => {
         if (custQuery.trim().length < 3) { setCustHits([]); return }

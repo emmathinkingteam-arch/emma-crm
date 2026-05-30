@@ -54,6 +54,17 @@ export default function TopNav() {
   useEffect(() => { setImgTs(Date.now()) }, [user?.profile_photo_url])
 
   useEffect(() => {
+    if (!user) return
+    Promise.all([
+      supabase.from('salary_payments').select('id, amount_paid, month_year, paid_at, note').eq('user_id', user.id).order('paid_at', { ascending: false }),
+      supabase.from('commissions').select('id, amount, month_year, earned_at').eq('user_id', user.id).order('earned_at', { ascending: false }),
+    ]).then(([p, c]) => {
+      if (p.data) setPayments(p.data as Payment[])
+      if (c.data) setCommissions(c.data as Commission[])
+    })
+  }, [user])
+
+  useEffect(() => {
     if (!walletOpen || !user) return
     setWalletLoading(true)
     Promise.all([
@@ -101,7 +112,7 @@ export default function TopNav() {
           >
             <Wallet size={11} className="text-pink-600" />
             <span className="text-xs font-semibold text-gray-700">
-              LKR {totalEarned.toLocaleString()}
+              LKR {balance.toLocaleString()}
             </span>
             <ChevronDown size={10} className="text-gray-400" />
           </button>

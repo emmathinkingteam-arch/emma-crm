@@ -74,6 +74,10 @@ export default function AddExpensePage() {
     const [custSearching, setCustSearching] = useState(false)
 
     // worker attach
+    // mode: expense or transfer
+    const [mode, setMode] = useState<'expense' | 'transfer'>('expense')
+    const [transferToBank, setTransferToBank] = useState('')
+
     const [workers, setWorkers] = useState<WorkerHit[]>([])
     const [workerPicked, setWorkerPicked] = useState<WorkerHit | null>(null)
     const [workerQuery, setWorkerQuery] = useState('')
@@ -195,10 +199,47 @@ export default function AddExpensePage() {
         }
     }
 
-    const canSave = categoryId && Number(amount) > 0 && bankId && date && !saving && !uploading
+    const canSave = mode === 'transfer'
+        ? Number(amount) > 0 && bankId && transferToBank && bankId !== transferToBank && date && !saving
+        : categoryId && Number(amount) > 0 && bankId && date && !saving && !uploading
 
     async function handleSave() {
         setError(null)
+        // Handle bank transfer
+        if (mode === 'transfer') {
+            const amt = Number(amount)
+            if (!(amt > 0) || !bankId || !transferToBank || bankId === transferToBank) {
+                setError('Pick two different banks and a positive amount.')
+                return
+            }
+            setSaving(true)
+            const fromBank = banks.find(b => b.id === bankId)
+            const toBank = banks.find(b => b.id === transferToBank)
+            const res = await postEntry(supabase, {
+                date,
+                description: description.trim() || `Transfer: ${fromBank?.name} → ${toBank?.name}`,
+                entryType: 'transfer',
+                categoryId: null,
+                orderId: null,
+                customerId: null,
+                workerId: null,
+                createdBy: user?.id ?? null,
+                lines: [
+                    { ledgerId: transferToBank, debit: amt, memo: 'Transfer in' },
+                    { ledgerId: bankId, credit: amt, memo: 'Transfer out' },
+                ],
+                driveUrl: null,
+                driveFileId: null,
+                attachmentKind: null,
+            })
+            setSaving(false)
+            if (!res.ok) { setError(res.error || 'Transfer failed.'); return }
+            setDone(`Transferred ${lkr(amt)} from ${fromBank?.name} to ${toBank?.name}.`)
+            setAmount(''); setDescription(''); setTransferToBank('')
+            setTimeout(() => setDone(null), 4000)
+            return
+        }
+
         const amt = Number(amount)
         if (!categoryId || !(amt > 0) || !bankId) {
             setError('Pick a category, a positive amount, and the bank.')
@@ -315,188 +356,235 @@ export default function AddExpensePage() {
                         Pick a category — it files itself to the right ledger automatically.
                     </p>
                 </div>
+                {/* Mode toggle */}
+                <div className="flex gap-2 mb-5">
+                    <button type="button" onClick={() => setMode('expense')}
+                        className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${mode === 'expense' ? 'bg-pink-600 text-white' : 'bg-gray-50 border border-gray-200 text-gray-500'
+                            }`}>💸 Expense</button>
+                    <button type="button" onClick={() => setMode('transfer')}
+                        className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${mode === 'transfer' ? 'bg-sky-600 text-white' : 'bg-gray-50 border border-gray-200 text-gray-500'
+                            }`}>🏦 Bank Transfer</button>
+                </div>
 
-                {/* Category */}
-                <Field label="Category">
+                {/* Transfer form */}
+                {mode === 'transfer' && (
+                    <>
+                        <Field label="From bank (money goes OUT)">
+                            <select value={bankId} onChange={(e) => setBankId(e.target.value)}
+                                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-sky-300">
+                                <option value="">— Select bank —</option>
+                                {banks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                            </select>
+                        </Field>
+                        <Field label="To bank (money goes IN)">
+                            <select value={transferToBank} onChange={(e) => setTransferToBank(e.target.value)}
+                                className="w-full bg-sky-50 border border-sky-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-sky-400 text-sky-700 font-semibold">
+                                <option value="">— Select bank —</option>
+                                {banks.filter(b => b.id !== bankId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                            </select>
+                        </Field>
+                        <Field label="Amount (LKR)">
+                            <input type="number" min={0} value={amount} onChange={(e) => setAmount(e.target.value)}
+                                placeholder="0.00"
+                                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:border-sky-300" />
+                        </Field>
+                        <Field label="Date">
+                            <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+                                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-sky-300" />
+                        </Field>
+                        <Field label="Note (optional)">
+                            <input type="text" value={description} onChange={(e) => setDescription(e.target.value)}
+                                placeholder="e.g. Top up BOC from Commercial"
+                                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-sky-300" />
+                        </Field>
+                    </>
+                )}
+
+                {/* Expense form */}
+                {mode === 'expense' && (
+
+                    {/* Category */ }
+                    < Field label="Category">
+                <select
+                    value={categoryId}
+                    onChange={(e) => {
+                        const newCat = cats.find(c => c.id === e.target.value)
+                        const isAdv = newCat ? WORKER_CATEGORY_KEYWORDS.some(k => newCat.name.toLowerCase().includes(k) && newCat.name.toLowerCase().includes('advance')) : false
+                        if (isAdv) { const d = new Date(); setPayForMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`) }
+                        else { const d = new Date(); d.setMonth(d.getMonth() - 1); setPayForMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`) }
+                        setCategoryId(e.target.value); setWorkerPicked(null)
+                    }}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-pink-300"
+                >
+                    <option value="">— Select a category —</option>
+                    {grouped.map((g) => (
+                        <optgroup key={g.parent.id} label={g.parent.name}>
+                            {g.children.map((c) => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                        </optgroup>
+                    ))}
+                </select>
+            </Field>
+
+            {/* Worker picker — only shows for salary/advance categories */}
+            {isWorkerCategory && (
+                <Field label="Worker *">
                     <select
-                        value={categoryId}
+                        value={workerPicked?.id || ''}
                         onChange={(e) => {
-                            const newCat = cats.find(c => c.id === e.target.value)
-                            const isAdv = newCat ? WORKER_CATEGORY_KEYWORDS.some(k => newCat.name.toLowerCase().includes(k) && newCat.name.toLowerCase().includes('advance')) : false
-                            if (isAdv) { const d = new Date(); setPayForMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`) }
-                            else { const d = new Date(); d.setMonth(d.getMonth() - 1); setPayForMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`) }
-                            setCategoryId(e.target.value); setWorkerPicked(null)
+                            const w = workers.find((w) => w.id === e.target.value) || null
+                            setWorkerPicked(w)
                         }}
-                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-pink-300"
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-purple-300"
                     >
-                        <option value="">— Select a category —</option>
-                        {grouped.map((g) => (
-                            <optgroup key={g.parent.id} label={g.parent.name}>
-                                {g.children.map((c) => (
-                                    <option key={c.id} value={c.id}>{c.name}</option>
-                                ))}
-                            </optgroup>
+                        <option value="">— Select a worker —</option>
+                        {workers.map((w) => (
+                            <option key={w.id} value={w.id}>
+                                {w.full_name} — Wallet: {lkr(w.wallet_balance)}
+                            </option>
                         ))}
                     </select>
                 </Field>
+            )}
 
-                {/* Worker picker — only shows for salary/advance categories */}
-                {isWorkerCategory && (
-                    <Field label="Worker *">
-                        <select
-                            value={workerPicked?.id || ''}
-                            onChange={(e) => {
-                                const w = workers.find((w) => w.id === e.target.value) || null
-                                setWorkerPicked(w)
-                            }}
-                            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-purple-300"
-                        >
-                            <option value="">— Select a worker —</option>
-                            {workers.map((w) => (
-                                <option key={w.id} value={w.id}>
-                                    {w.full_name} — Wallet: {lkr(w.wallet_balance)}
-                                </option>
-                            ))}
-                        </select>
-                    </Field>
-                )}
-
-                {/* Month picker for salary/advance */}
-                {isWorkerCategory && (
-                    <Field label="Paying for which month? *">
-                        <input
-                            type="month"
-                            value={payForMonth}
-                            onChange={(e) => setPayForMonth(e.target.value)}
-                            className="w-full bg-purple-50 border border-purple-200 rounded-xl px-3 py-2.5 text-sm font-bold text-purple-700 outline-none focus:border-purple-400"
-                        />
-                        <p className="text-[10px] text-purple-400 mt-1">e.g. paying May salary in June → pick May</p>
-                    </Field>
-                )}
-
-                {/* Amount + Bank */}
-                <div className="grid grid-cols-2 gap-3">
-                    <Field label="Amount (LKR)">
-                        <input
-                            type="number" min={0} value={amount}
-                            onChange={(e) => setAmount(e.target.value)}
-                            placeholder="0.00"
-                            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:border-pink-300"
-                        />
-                    </Field>
-                    <Field label="Paid from">
-                        <select
-                            value={bankId}
-                            onChange={(e) => setBankId(e.target.value)}
-                            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-pink-300"
-                        >
-                            {banks.map((b) => (
-                                <option key={b.id} value={b.id}>{b.name}</option>
-                            ))}
-                        </select>
-                    </Field>
-                </div>
-
-                {/* Wallet impact warning */}
-                {isWorkerCategory && workerPicked && Number(amount) > 0 && (
-                    <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-xs text-amber-700 font-medium">
-                        Wallet: {lkr(workerPicked.wallet_balance)} → <span className="font-bold">{lkr(Math.max(0, workerPicked.wallet_balance - Number(amount)))}</span>
-                        {Number(amount) > workerPicked.wallet_balance && (
-                            <span className="ml-2 text-rose-500 font-bold">(exceeds balance)</span>
-                        )}
-                    </div>
-                )}
-
-                {/* Date */}
-                <Field label="Date">
+            {/* Month picker for salary/advance */}
+            {isWorkerCategory && (
+                <Field label="Paying for which month? *">
                     <input
-                        type="date" value={date}
-                        onChange={(e) => setDate(e.target.value)}
-                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-pink-300"
+                        type="month"
+                        value={payForMonth}
+                        onChange={(e) => setPayForMonth(e.target.value)}
+                        className="w-full bg-purple-50 border border-purple-200 rounded-xl px-3 py-2.5 text-sm font-bold text-purple-700 outline-none focus:border-purple-400"
+                    />
+                    <p className="text-[10px] text-purple-400 mt-1">e.g. paying May salary in June → pick May</p>
+                </Field>
+            )}
+
+            {/* Amount + Bank */}
+            <div className="grid grid-cols-2 gap-3">
+                <Field label="Amount (LKR)">
+                    <input
+                        type="number" min={0} value={amount}
+                        onChange={(e) => setAmount(e.target.value)}
+                        placeholder="0.00"
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:border-pink-300"
                     />
                 </Field>
-
-                {/* Slip upload */}
-                <Field label="Slip (photo or PDF)">
-                    <input ref={fileInputRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={handleFileChange} />
-                    {!slipFile && !uploadedUrl && (
-                        <button type="button" onClick={() => fileInputRef.current?.click()}
-                            className="w-full flex items-center gap-2 bg-gray-50 border border-dashed border-gray-300 rounded-xl px-3 py-3 text-sm text-gray-400 hover:border-pink-300 hover:text-pink-500 transition-colors">
-                            <UploadCloud size={16} /> Click to upload slip
-                        </button>
-                    )}
-                    {uploading && (
-                        <div className="flex items-center gap-2 text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5">
-                            <Loader2 size={14} className="animate-spin text-pink-500" /> Uploading…
-                        </div>
-                    )}
-                    {uploadedUrl && slipFile && (
-                        <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2.5">
-                            <div className="flex items-center gap-2 text-sm text-emerald-700 font-medium">
-                                <CheckCircle2 size={14} />
-                                <a href={uploadedUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">{slipFile.name}</a>
-                            </div>
-                            <button onClick={() => { setSlipFile(null); setUploadedUrl(null); setUploadedFileId(null); if (fileInputRef.current) fileInputRef.current.value = '' }}
-                                className="text-emerald-400 hover:text-emerald-600"><X size={14} /></button>
-                        </div>
-                    )}
-                    {uploadError && (
-                        <p className="text-xs text-rose-500 mt-1">{uploadError} — <button className="underline" onClick={() => fileInputRef.current?.click()}>try again</button></p>
-                    )}
+                <Field label="Paid from">
+                    <select
+                        value={bankId}
+                        onChange={(e) => setBankId(e.target.value)}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-pink-300"
+                    >
+                        {banks.map((b) => (
+                            <option key={b.id} value={b.id}>{b.name}</option>
+                        ))}
+                    </select>
                 </Field>
+            </div>
 
-                {/* Description */}
-                <Field label="Note (optional)">
-                    <input type="text" value={description} onChange={(e) => setDescription(e.target.value)}
-                        placeholder="e.g. October Meta campaign top-up"
-                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-pink-300" />
-                </Field>
+            {/* Wallet impact warning */}
+            {isWorkerCategory && workerPicked && Number(amount) > 0 && (
+                <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-xs text-amber-700 font-medium">
+                    Wallet: {lkr(workerPicked.wallet_balance)} → <span className="font-bold">{lkr(Math.max(0, workerPicked.wallet_balance - Number(amount)))}</span>
+                    {Number(amount) > workerPicked.wallet_balance && (
+                        <span className="ml-2 text-rose-500 font-bold">(exceeds balance)</span>
+                    )}
+                </div>
+            )}
 
-                {/* Attach to customer (hidden for worker categories) */}
-                {!isWorkerCategory && (
-                    <Field label="Attach to a customer? (optional)">
-                        {custPicked ? (
-                            <div className="flex items-center justify-between bg-pink-50 border border-pink-200 rounded-xl px-3 py-2.5">
-                                <span className="text-sm font-semibold text-pink-700">{custPicked.label}</span>
-                                <button onClick={() => { setCustPicked(null); setCustQuery('') }} className="text-pink-400 hover:text-pink-600"><X size={15} /></button>
-                            </div>
-                        ) : (
-                            <div className="relative">
-                                <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5">
-                                    <Search size={14} className="text-gray-400" />
-                                    <input value={custQuery} onChange={(e) => setCustQuery(e.target.value)}
-                                        placeholder="Search customer name or phone…" className="flex-1 bg-transparent text-sm outline-none" />
-                                    {custSearching && <Loader2 size={13} className="animate-spin text-gray-400" />}
-                                </div>
-                                {custHits.length > 0 && (
-                                    <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
-                                        {custHits.map((h) => (
-                                            <button key={h.order_id} onClick={() => { setCustPicked(h); setCustHits([]) }}
-                                                className="w-full text-left px-3 py-2 text-sm hover:bg-pink-50 border-b border-gray-50 last:border-0">{h.label}</button>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </Field>
+            {/* Date */}
+            <Field label="Date">
+                <input
+                    type="date" value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-pink-300"
+                />
+            </Field>
+
+            {/* Slip upload */}
+            <Field label="Slip (photo or PDF)">
+                <input ref={fileInputRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={handleFileChange} />
+                {!slipFile && !uploadedUrl && (
+                    <button type="button" onClick={() => fileInputRef.current?.click()}
+                        className="w-full flex items-center gap-2 bg-gray-50 border border-dashed border-gray-300 rounded-xl px-3 py-3 text-sm text-gray-400 hover:border-pink-300 hover:text-pink-500 transition-colors">
+                        <UploadCloud size={16} /> Click to upload slip
+                    </button>
                 )}
-
-                {error && (
-                    <div className="mb-3 text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2.5">{error}</div>
-                )}
-                {done && (
-                    <div className="mb-3 flex items-center gap-2 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2.5">
-                        <CheckCircle2 size={14} /> {done}
+                {uploading && (
+                    <div className="flex items-center gap-2 text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5">
+                        <Loader2 size={14} className="animate-spin text-pink-500" /> Uploading…
                     </div>
                 )}
+                {uploadedUrl && slipFile && (
+                    <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2.5">
+                        <div className="flex items-center gap-2 text-sm text-emerald-700 font-medium">
+                            <CheckCircle2 size={14} />
+                            <a href={uploadedUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">{slipFile.name}</a>
+                        </div>
+                        <button onClick={() => { setSlipFile(null); setUploadedUrl(null); setUploadedFileId(null); if (fileInputRef.current) fileInputRef.current.value = '' }}
+                            className="text-emerald-400 hover:text-emerald-600"><X size={14} /></button>
+                    </div>
+                )}
+                {uploadError && (
+                    <p className="text-xs text-rose-500 mt-1">{uploadError} — <button className="underline" onClick={() => fileInputRef.current?.click()}>try again</button></p>
+                )}
+            </Field>
 
-                <button onClick={handleSave} disabled={!canSave}
-                    className="w-full bg-pink-600 text-white rounded-xl px-5 py-3 text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-pink-700 transition-colors">
-                    {saving ? <Loader2 size={14} className="animate-spin" /> : null}
-                    Save expense
-                </button>
-            </div>
+            {/* Description */}
+            <Field label="Note (optional)">
+                <input type="text" value={description} onChange={(e) => setDescription(e.target.value)}
+                    placeholder="e.g. October Meta campaign top-up"
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-pink-300" />
+            </Field>
+
+            {/* Attach to customer (hidden for worker categories) */}
+            {!isWorkerCategory && (
+                <Field label="Attach to a customer? (optional)">
+                    {custPicked ? (
+                        <div className="flex items-center justify-between bg-pink-50 border border-pink-200 rounded-xl px-3 py-2.5">
+                            <span className="text-sm font-semibold text-pink-700">{custPicked.label}</span>
+                            <button onClick={() => { setCustPicked(null); setCustQuery('') }} className="text-pink-400 hover:text-pink-600"><X size={15} /></button>
+                        </div>
+                    ) : (
+                        <div className="relative">
+                            <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5">
+                                <Search size={14} className="text-gray-400" />
+                                <input value={custQuery} onChange={(e) => setCustQuery(e.target.value)}
+                                    placeholder="Search customer name or phone…" className="flex-1 bg-transparent text-sm outline-none" />
+                                {custSearching && <Loader2 size={13} className="animate-spin text-gray-400" />}
+                            </div>
+                            {custHits.length > 0 && (
+                                <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+                                    {custHits.map((h) => (
+                                        <button key={h.order_id} onClick={() => { setCustPicked(h); setCustHits([]) }}
+                                            className="w-full text-left px-3 py-2 text-sm hover:bg-pink-50 border-b border-gray-50 last:border-0">{h.label}</button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </Field>
+            )}
+                )}
+
+            {error && (
+                <div className="mb-3 text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2.5">{error}</div>
+            )}
+            {done && (
+                <div className="mb-3 flex items-center gap-2 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2.5">
+                    <CheckCircle2 size={14} /> {done}
+                </div>
+            )}
+
+            <button onClick={handleSave} disabled={!canSave}
+                className={`w-full text-white rounded-xl px-5 py-3 text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50 transition-colors ${mode === 'transfer' ? 'bg-sky-600 hover:bg-sky-700' : 'bg-pink-600 hover:bg-pink-700'}`}>
+                {saving ? <Loader2 size={14} className="animate-spin" /> : null}
+                {mode === 'transfer' ? 'Save transfer' : 'Save expense'}
+            </button>
         </div>
+        </div >
     )
 }
 

@@ -124,6 +124,7 @@ export default function AddExpensePage() {
     const isWorkerCategory = selectedCat
         ? WORKER_CATEGORY_KEYWORDS.some((kw) => selectedCat.name.toLowerCase().includes(kw))
         : false
+    const isOtherCategory = selectedCat?.name === 'Other'
 
     useEffect(() => {
         if (custQuery.trim().length < 3) { setCustHits([]); return }
@@ -223,6 +224,10 @@ export default function AddExpensePage() {
         if (!cat) { setError('Category not found.'); return }
         if (isWorkerCategory && !workerPicked) {
             setError('Please select the worker for this payment.')
+            return
+        }
+        if (isOtherCategory && !description.trim()) {
+            setError('Please describe the expense when using "Other" category.')
             return
         }
 
@@ -394,6 +399,20 @@ export default function AddExpensePage() {
                                 ))}
                             </select>
                         </Field>
+
+                        {/* Other category — free text */}
+                        {isOtherCategory && (
+                            <Field label="Describe the expense *">
+                                <input
+                                    type="text"
+                                    value={description}
+                                    onChange={(e) => setDescription(e.target.value)}
+                                    placeholder="e.g. Office cleaning, birthday cake..."
+                                    className="w-full bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:border-amber-400 text-amber-800"
+                                    autoFocus
+                                />
+                            </Field>
+                        )}
 
                         {/* Worker picker */}
                         {isWorkerCategory && (

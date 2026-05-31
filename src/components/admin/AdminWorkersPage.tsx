@@ -5,7 +5,7 @@ import {
   Users, Search, Eye, EyeOff, ChevronDown, ChevronUp,
   User, Briefcase, CreditCard, Phone, GraduationCap, FileText,
   CheckCircle2, XCircle, Loader2, ExternalLink, AlertCircle,
-  UserMinus, UserCheck, Filter, Download
+  UserMinus, UserCheck, Filter,
 } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -154,12 +154,12 @@ function WorkerDetailDrawer({
   const [togglingHide, setTogglingHide] = useState(false)
 
   const tabs = [
-    { id: 'personal',    label: 'Personal',    icon: User },
-    { id: 'employment',  label: 'Employment',  icon: Briefcase },
-    { id: 'bank',        label: 'Bank',        icon: CreditCard },
-    { id: 'emergency',   label: 'Emergency',   icon: Phone },
-    { id: 'background',  label: 'Background',  icon: GraduationCap },
-    { id: 'documents',   label: 'Documents',   icon: FileText },
+    { id: 'personal',   label: 'Personal',   icon: User },
+    { id: 'employment', label: 'Employment', icon: Briefcase },
+    { id: 'bank',       label: 'Bank',       icon: CreditCard },
+    { id: 'emergency',  label: 'Emergency',  icon: Phone },
+    { id: 'background', label: 'Background', icon: GraduationCap },
+    { id: 'documents',  label: 'Documents',  icon: FileText },
   ] as const
 
   const handleEmpNoSave = async () => {
@@ -208,8 +208,8 @@ function WorkerDetailDrawer({
               {togglingHide
                 ? <Loader2 size={12} className="animate-spin" />
                 : p.is_hidden
-                  ? <><UserCheck size={12} />Unhide</>
-                  : <><UserMinus size={12} />Hide</>
+                  ? <><UserCheck size={12} />&nbsp;Unhide</>
+                  : <><UserMinus size={12} />&nbsp;Hide</>
               }
             </button>
             <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100 text-gray-400 transition">✕</button>
@@ -276,7 +276,6 @@ function WorkerDetailDrawer({
             </div>
           ) : (
             <>
-              {/* PERSONAL */}
               {tab === 'personal' && (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   <InfoRow label="Full Name" value={p.full_name} />
@@ -290,8 +289,6 @@ function WorkerDetailDrawer({
                   </div>
                 </div>
               )}
-
-              {/* EMPLOYMENT */}
               {tab === 'employment' && (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   <InfoRow label="Job Title" value={p.job_title} />
@@ -305,8 +302,6 @@ function WorkerDetailDrawer({
                   <InfoRow label="ETF Number" value={p.etf_number} />
                 </div>
               )}
-
-              {/* BANK */}
               {tab === 'bank' && (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   <InfoRow label="Bank Name" value={p.bank_name} />
@@ -314,8 +309,6 @@ function WorkerDetailDrawer({
                   <InfoRow label="Account Number" value={p.account_number} />
                 </div>
               )}
-
-              {/* EMERGENCY */}
               {tab === 'emergency' && (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   <InfoRow label="Contact Name" value={p.emergency_contact_name} />
@@ -323,8 +316,6 @@ function WorkerDetailDrawer({
                   <InfoRow label="Contact Number" value={p.emergency_contact_number} />
                 </div>
               )}
-
-              {/* BACKGROUND */}
               {tab === 'background' && (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   <InfoRow label="Highest Education" value={p.highest_education} />
@@ -335,8 +326,6 @@ function WorkerDetailDrawer({
                   </div>
                 </div>
               )}
-
-              {/* DOCUMENTS */}
               {tab === 'documents' && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <DocLink url={p.nic_front_url} label="NIC Front" />
@@ -390,11 +379,7 @@ export default function AdminWorkersPage() {
       body: JSON.stringify({ userId: workerId, is_hidden: hide }),
     })
     setWorkers(prev =>
-      prev.map(w =>
-        w.id === workerId
-          ? { ...w, profile: { ...(w.profile ?? {}), is_hidden: hide } }
-          : w
-      )
+      prev.map(w => w.id === workerId ? { ...w, profile: { ...(w.profile ?? {}), is_hidden: hide } } : w)
     )
     if (selected?.id === workerId) {
       setSelected(prev => prev ? { ...prev, profile: { ...(prev.profile ?? {}), is_hidden: hide } } : null)
@@ -408,11 +393,7 @@ export default function AdminWorkersPage() {
       body: JSON.stringify({ userId: workerId, emp_no: empNo }),
     })
     setWorkers(prev =>
-      prev.map(w =>
-        w.id === workerId
-          ? { ...w, profile: { ...(w.profile ?? {}), emp_no: empNo } }
-          : w
-      )
+      prev.map(w => w.id === workerId ? { ...w, profile: { ...(w.profile ?? {}), emp_no: empNo } } : w)
     )
     if (selected?.id === workerId) {
       setSelected(prev => prev ? { ...prev, profile: { ...(prev.profile ?? {}), emp_no: empNo } } : null)
@@ -441,7 +422,6 @@ export default function AdminWorkersPage() {
   })
 
   const roles = ['all', ...Array.from(new Set(workers.map(w => w.role)))]
-
   const profileCount = workers.filter(w => !!w.profile).length
   const hiddenCount = workers.filter(w => w.profile?.is_hidden).length
 
@@ -456,28 +436,24 @@ export default function AdminWorkersPage() {
             {workers.length} total · {profileCount} profiles submitted · {hiddenCount} hidden
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowHidden(v => !v)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition ${
-              showHidden
-                ? 'bg-gray-800 text-white border-gray-800'
-                : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
-            }`}
-          >
-            {showHidden ? <Eye size={12} /> : <EyeOff size={12} />}
-            {showHidden ? 'Showing Hidden' : 'Show Hidden'}
-          </button>
-        </div>
+        <button
+          onClick={() => setShowHidden(v => !v)}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition ${
+            showHidden ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+          }`}
+        >
+          {showHidden ? <Eye size={12} /> : <EyeOff size={12} />}
+          {showHidden ? 'Showing Hidden' : 'Show Hidden'}
+        </button>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: 'Total Workers', value: workers.length, color: 'bg-blue-50 text-blue-700' },
-          { label: 'Profiles Submitted', value: profileCount, color: 'bg-green-50 text-green-700' },
-          { label: 'Pending Profiles', value: workers.length - profileCount, color: 'bg-amber-50 text-amber-700' },
-          { label: 'Hidden / Inactive', value: hiddenCount, color: 'bg-red-50 text-red-600' },
+          { label: 'Total Workers',     value: workers.length,                color: 'bg-blue-50 text-blue-700' },
+          { label: 'Profiles Submitted',value: profileCount,                  color: 'bg-green-50 text-green-700' },
+          { label: 'Pending Profiles',  value: workers.length - profileCount, color: 'bg-amber-50 text-amber-700' },
+          { label: 'Hidden / Inactive', value: hiddenCount,                   color: 'bg-red-50 text-red-600' },
         ].map(s => (
           <div key={s.label} className={`rounded-xl p-4 ${s.color}`}>
             <p className="text-2xl font-bold">{s.value}</p>
@@ -528,11 +504,10 @@ export default function AdminWorkersPage() {
             return (
               <div
                 key={worker.id}
-                className={`bg-white border rounded-2xl overflow-hidden transition-all ${
+                className={`bg-white border rounded-2xl overflow-hidden transition-all shadow-sm ${
                   isHidden ? 'border-red-100 opacity-60' : 'border-gray-100 hover:border-pink-200'
-                } shadow-sm`}
+                }`}
               >
-                {/* Row */}
                 <div className="flex items-center gap-3 p-4">
                   <div className="relative">
                     <Avatar worker={worker} />
@@ -546,10 +521,7 @@ export default function AdminWorkersPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-semibold text-gray-900 text-sm">{worker.full_name}</span>
-                      <Badge
-                        label={ROLE_LABELS[worker.role] ?? worker.role}
-                        color={ROLE_COLORS[worker.role] ?? 'bg-gray-100 text-gray-700'}
-                      />
+                      <Badge label={ROLE_LABELS[worker.role] ?? worker.role} color={ROLE_COLORS[worker.role] ?? 'bg-gray-100 text-gray-700'} />
                       {isHidden && <Badge label="Hidden" color="bg-red-100 text-red-600" />}
                       {!p && <Badge label="No Profile" color="bg-amber-100 text-amber-700" />}
                     </div>
@@ -578,7 +550,6 @@ export default function AdminWorkersPage() {
                   </div>
                 </div>
 
-                {/* Expanded quick info */}
                 {isExpanded && p && (
                   <div className="px-4 pb-4 border-t border-gray-50 pt-3">
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -594,7 +565,6 @@ export default function AdminWorkersPage() {
                   </div>
                 )}
 
-                {/* Expanded — no profile */}
                 {isExpanded && !p && (
                   <div className="px-4 pb-4 border-t border-gray-50 pt-3">
                     <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2 flex items-center gap-2">
@@ -609,7 +579,6 @@ export default function AdminWorkersPage() {
         </div>
       )}
 
-      {/* Detail drawer */}
       {selected && (
         <WorkerDetailDrawer
           worker={selected}

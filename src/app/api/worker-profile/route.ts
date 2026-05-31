@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 
-// GET /api/worker-profile?userId=xxx  (admin)  or without param (own)
 export async function GET(req: NextRequest) {
   const supabase = createSupabaseServerClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -13,8 +12,6 @@ export async function GET(req: NextRequest) {
   if (!me) return NextResponse.json({ error: 'No profile' }, { status: 404 })
 
   const targetUserId = req.nextUrl.searchParams.get('userId') ?? me.id
-
-  // Only admin can fetch other users' profiles
   if (targetUserId !== me.id && me.role !== 'admin') {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -29,7 +26,6 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ profile: data })
 }
 
-// POST /api/worker-profile  — upsert own profile (worker)
 export async function POST(req: NextRequest) {
   const supabase = createSupabaseServerClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -40,7 +36,6 @@ export async function POST(req: NextRequest) {
   if (!me) return NextResponse.json({ error: 'No profile' }, { status: 404 })
 
   const body = await req.json()
-  // Remove fields workers cannot set themselves
   delete body.is_hidden
   delete body.emp_no
   body.user_id = me.id
@@ -55,7 +50,6 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ profile: data })
 }
 
-// PATCH /api/worker-profile  — admin updates (hide/show, emp_no)
 export async function PATCH(req: NextRequest) {
   const supabase = createSupabaseServerClient()
   const { data: { user } } = await supabase.auth.getUser()

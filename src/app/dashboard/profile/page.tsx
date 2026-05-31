@@ -6,25 +6,17 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
-import { Loader2, Camera, LogOut, MapPin, FileText, Download, Wallet } from 'lucide-react'
+import { Loader2, Camera, LogOut, MapPin, FileText, Download, ClipboardList, ChevronDown, ChevronUp } from 'lucide-react'
 import { canPunchOut, currentMonthYear, fmtDate } from '@/lib/utils'
-import { Attendance, LeaveRequest, RewardMilestone } from '@/types'
+import { Attendance, RewardMilestone } from '@/types'
+import WorkerPersonalDetailsTab from '@/components/worker/WorkerPersonalDetailsTab'
 
-// ── Document storage layout ─────────────────────────────────
-// All worker-facing documents live in the `attendance-records`
-// bucket. We split by doc_type with a path prefix so a single
-// bucket can hold both salary sheets and attendance sheets:
-//   salary/{user_id}/<filename>.pdf
-//   attendance/{user_id}/<filename>.pdf
-// Files are listed with .list() and shown to the worker as a
-// clickable list. URLs are SIGNED (1 hour) so we don't depend on
-// the bucket being public — it works either way.
 const DOC_BUCKET = 'attendance-records'
-const SIGNED_URL_TTL = 60 * 60 // 1 hour
+const SIGNED_URL_TTL = 60 * 60
 
 interface WorkerDoc {
-  name: string         // filename only — used for display & download
-  path: string         // full path within the bucket
+  name: string
+  path: string
   signedUrl: string
   uploadedAt?: string
   size?: number
@@ -51,12 +43,14 @@ export default function ProfilePage() {
   const [leaveType, setLeaveType] = useState<'annual' | 'casual' | 'sick'>('annual')
   const [leaveDate, setLeaveDate] = useState('')
   const [leaveReason, setLeaveReason] = useState('')
-
-  // Documents state (Task 3)
   const [salaryDocs, setSalaryDocs] = useState<WorkerDoc[]>([])
   const [attendanceDocs, setAttendanceDocs] = useState<WorkerDoc[]>([])
   const [docsLoading, setDocsLoading] = useState(false)
   const [docTab, setDocTab] = useState<'salary' | 'attendance'>('salary')
+
+  // ── Personal details section ──────────────────────────────────
+  const [showPersonalDetails, setShowPersonalDetails] = useState(false)
+  const [profileSubmitted, setProfileSubmitted] = useState(false)
 
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -64,6 +58,10 @@ export default function ProfilePage() {
     if (!user) { router.replace('/auth/login'); return }
     fetchAll()
     fetchDocuments()
+    // Check if worker has already filled personal details
+    fetch('/api/worker-profile')
+      .then(r => r.json())
+      .then(j => { if (j.profile?.full_name) setProfileSubmitted(true) })
   }, [user])
 
   const fetchAll = async () => {
@@ -99,11 +97,6 @@ export default function ProfilePage() {
     setLoading(false)
   }
 
-  // ── Fetch worker documents (Task 3) ─────────────────────────
-  // Lists files under salary/{user_id}/ and attendance/{user_id}/
-  // and generates 1-hour signed URLs for each. Signed URLs work
-  // even when the bucket is private, so this is safe regardless of
-  // the bucket's public/private setting.
   const fetchDocuments = async () => {
     if (!user) return
     setDocsLoading(true)
@@ -113,41 +106,24 @@ export default function ProfilePage() {
         supabase.storage.from(DOC_BUCKET).list(`attendance/${user.id}`, { limit: 100, sortBy: { column: 'created_at', order: 'desc' } }),
       ])
 
-      const buildDocs = async (
-        items: any[] | null,
-        type: 'salary' | 'attendance',
-      ): Promise<WorkerDoc[]> => {
+      const buildDocs = async (items: any[] | null, type: 'salary' | 'attendance'): Promise<WorkerDoc[]> => {
         if (!items || items.length === 0) return []
-        // .list() returns folder placeholders too — filter to real files
         const files = items.filter(i => i.name && i.id !== null)
         const docs: WorkerDoc[] = []
         for (const f of files) {
           const path = `${type}/${user.id}/${f.name}`
-          const { data: signed } = await supabase.storage
-            .from(DOC_BUCKET)
-            .createSignedUrl(path, SIGNED_URL_TTL)
+          const { data: signed } = await supabase.storage.from(DOC_BUCKET).createSignedUrl(path, SIGNED_URL_TTL)
           if (signed?.signedUrl) {
-            docs.push({
-              name: f.name,
-              path,
-              signedUrl: signed.signedUrl,
-              uploadedAt: f.created_at,
-              size: f.metadata?.size,
-              type,
-            })
+            docs.push({ name: f.name, path, signedUrl: signed.signedUrl, uploadedAt: f.created_at, size: f.metadata?.size, type })
           }
         }
         return docs
       }
 
-      const [s, a] = await Promise.all([
-        buildDocs(salaryList.data, 'salary'),
-        buildDocs(attendanceList.data, 'attendance'),
-      ])
+      const [s, a] = await Promise.all([buildDocs(salaryList.data, 'salary'), buildDocs(attendanceList.data, 'attendance')])
       setSalaryDocs(s)
       setAttendanceDocs(a)
     } catch (err) {
-      // Worker doesn't see fetch errors — empty lists just show "No documents"
       console.error('Failed to fetch worker documents:', err)
     }
     setDocsLoading(false)
@@ -204,58 +180,29 @@ export default function ProfilePage() {
     setPunchLoading(false)
   }
 
-  // ── Photo upload (Task 4 — fixed) ───────────────────────────
-  // Bug-fixes vs the previous version:
-  //   1. Path was `avatars/<id>-<ts>.<ext>` INSIDE the `avatars` bucket
-  //      → object stored at avatars/avatars/<id>-... which is ugly and,
-  //      depending on RLS policies, can fail. New path: `<id>/photo-<ts>.<ext>`
-  //   2. All errors were swallowed silently (no `error` check), so the
-  //      user saw the spinner stop and nothing happen. Now we surface the
-  //      error message and clear it on next attempt.
-  //   3. We no longer rely on `setUser` updating the persisted Zustand
-  //      store before the next render — we cache-bust with photoTs which
-  //      already worked, and refresh `user` only after Supabase confirms.
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file || !user) return
-    // Reset the input so the same file can be re-selected after an error
     e.target.value = ''
     setUploading(true)
     setUploadError('')
-
     try {
-      // Basic client-side validation
-      if (!file.type.startsWith('image/')) {
-        throw new Error('Please choose an image file (JPG, PNG, etc.)')
-      }
-      if (file.size > 5 * 1024 * 1024) {
-        throw new Error('Image is larger than 5 MB — please pick a smaller one')
-      }
-
+      if (!file.type.startsWith('image/')) throw new Error('Please choose an image file (JPG, PNG, etc.)')
+      if (file.size > 5 * 1024 * 1024) throw new Error('Image is larger than 5 MB — please pick a smaller one')
       const ext = (file.name.split('.').pop() || 'jpg').toLowerCase()
       const path = `${user.id}/photo-${Date.now()}.${ext}`
-
-      const { error: upErr } = await supabase.storage
-        .from('avatars')
-        .upload(path, file, { upsert: true, contentType: file.type })
+      const { error: upErr } = await supabase.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type })
       if (upErr) throw upErr
-
       const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(path)
       const publicUrl = urlData?.publicUrl
       if (!publicUrl) throw new Error('Could not get public URL for the photo')
-
-      const { error: dbErr } = await supabase
-        .from('users')
-        .update({ profile_photo_url: publicUrl })
-        .eq('id', user.id)
+      const { error: dbErr } = await supabase.from('users').update({ profile_photo_url: publicUrl }).eq('id', user.id)
       if (dbErr) throw dbErr
-
       setUser({ ...user, profile_photo_url: publicUrl })
       setPhotoTs(Date.now())
     } catch (err: any) {
       const msg = err?.message || 'Upload failed — please try again'
       setUploadError(msg)
-      // Auto-clear after 5 seconds
       setTimeout(() => setUploadError(''), 5000)
     } finally {
       setUploading(false)
@@ -274,16 +221,11 @@ export default function ProfilePage() {
   }
 
   const handleLogout = async () => {
-    // Clear local store first so no stale role survives, then sign out and
-    // hard-navigate. A full location replace avoids any client-state lag.
     clear()
     await supabase.auth.signOut()
     window.location.replace('/auth/login')
   }
 
-  // ── Document download helper (Task 3) ───────────────────────
-  // Opens the signed URL in a new tab. Modern browsers will preview
-  // the PDF inline; the user gets a download icon in the PDF viewer.
   const openDoc = (doc: WorkerDoc) => {
     if (typeof window === 'undefined') return
     const a = document.createElement('a')
@@ -305,7 +247,6 @@ export default function ProfilePage() {
   const hasPunchedOut = !!attendance?.punch_out
   const progressPct = monthTarget > 0 ? Math.min(100, Math.round((monthCommission / monthTarget) * 100)) : 0
 
-  // Calendar dot colours
   const dotColor = (a: Attendance) => {
     if (a.status === 'present') return '#22C55E'
     if (a.status === 'late') return '#F59E0B'
@@ -342,7 +283,6 @@ export default function ProfilePage() {
           <span className="inline-block text-[9px] font-bold text-pink-600 bg-pink-50 px-3 py-1 rounded-full mt-1 uppercase tracking-wide">
             {user.role.replace('_', ' ')}
           </span>
-          {/* Photo upload error toast (Task 4) */}
           {uploadError && (
             <div className="mt-3 mx-auto max-w-xs bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-[11px] font-semibold text-red-600">
               {uploadError}
@@ -434,9 +374,7 @@ export default function ProfilePage() {
           )}
         </div>
 
-        {/* ── My documents (Task 3) ───────────────────────────── */}
-        {/* Salary sheets and attendance sheets that admin uploaded.
-            Workers can preview / download as PDF. */}
+        {/* My documents */}
         <div className="bg-gray-50 border border-gray-100 rounded-3xl p-4">
           <div className="flex items-center justify-between mb-3">
             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
@@ -487,8 +425,6 @@ export default function ProfilePage() {
         {/* Progress bars */}
         <div className="bg-gray-50 border border-gray-100 rounded-3xl p-4 space-y-4">
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Progress</p>
-
-          {/* Commission target */}
           <div>
             <div className="flex justify-between text-[9px] font-medium text-gray-500 mb-1.5">
               <span>Commission target</span>
@@ -498,8 +434,6 @@ export default function ProfilePage() {
               <div className="h-full bg-pink-600 rounded-full transition-all" style={{ width: `${progressPct}%` }} />
             </div>
           </div>
-
-          {/* Daily entries (CRM only) */}
           {user.role === 'crm_agent' && (
             <div>
               <div className="flex justify-between text-[9px] font-medium text-gray-500 mb-1.5">
@@ -511,16 +445,13 @@ export default function ProfilePage() {
               </div>
             </div>
           )}
-
-          {/* Admin-set milestones */}
           {milestones.map(m => {
             const val = m.milestone_type === 'wallet_balance' ? user.wallet_balance : 0
             const pct = Math.min(100, Math.round((val / m.target_value) * 100))
             return (
               <div key={m.id}>
                 <div className="flex justify-between text-[9px] font-medium text-gray-500 mb-1.5">
-                  <span>{m.title}</span>
-                  <span>{pct}%</span>
+                  <span>{m.title}</span><span>{pct}%</span>
                 </div>
                 <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
                   <div className="h-full bg-amber-400 rounded-full transition-all" style={{ width: `${pct}%` }} />
@@ -567,6 +498,45 @@ export default function ProfilePage() {
                 <button onClick={submitLeave}
                   className="flex-1 bg-pink-600 text-white rounded-xl py-2.5 text-xs font-bold">Submit</button>
               </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── My Personal Details ──────────────────────────────────────
+            Collapsible section. Shows amber "ACTION NEEDED" badge
+            if the worker hasn't filled details yet.                  */}
+        <div className="bg-gray-50 border border-gray-100 rounded-3xl overflow-hidden">
+          <button
+            onClick={() => setShowPersonalDetails(v => !v)}
+            className="w-full flex items-center justify-between px-4 py-4 text-left"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-pink-600 flex items-center justify-center flex-shrink-0">
+                <ClipboardList size={15} className="text-white" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-gray-700">My Personal Details</p>
+                <p className="text-[9px] text-gray-400 font-medium mt-0.5">
+                  {profileSubmitted ? 'Details submitted ✓' : 'HR requires your personal information'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {!profileSubmitted && (
+                <span className="text-[8px] font-bold bg-amber-100 text-amber-600 px-2 py-0.5 rounded-full whitespace-nowrap">
+                  ACTION NEEDED
+                </span>
+              )}
+              {showPersonalDetails
+                ? <ChevronUp size={16} className="text-gray-400" />
+                : <ChevronDown size={16} className="text-gray-400" />
+              }
+            </div>
+          </button>
+
+          {showPersonalDetails && (
+            <div className="border-t border-gray-100 px-4 pb-5 pt-4">
+              <WorkerPersonalDetailsTab />
             </div>
           )}
         </div>

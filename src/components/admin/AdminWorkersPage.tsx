@@ -67,18 +67,19 @@ interface Worker {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const ROLE_COLORS: Record<string, string> = {
-  admin:       'bg-purple-100 text-purple-700',
-  crm_agent:   'bg-blue-100 text-blue-700',
+  admin: 'bg-purple-100 text-purple-700',
+  crm_agent: 'bg-blue-100 text-blue-700',
   back_office: 'bg-teal-100 text-teal-700',
-  counselor:   'bg-orange-100 text-orange-700',
-  manager:     'bg-indigo-100 text-indigo-700',
-  designer:    'bg-pink-100 text-pink-700',
-  accountant:  'bg-green-100 text-green-700',
+  counselor: 'bg-orange-100 text-orange-700',
+  manager: 'bg-indigo-100 text-indigo-700',
+  designer: 'bg-pink-100 text-pink-700',
+  accountant: 'bg-green-100 text-green-700',
+  ceo: 'bg-pink-100 text-pink-700',
 }
 
 const ROLE_LABELS: Record<string, string> = {
   admin: 'Admin', crm_agent: 'CRM Agent', back_office: 'Back Office',
-  counselor: 'Counselor', manager: 'Manager', designer: 'Designer', accountant: 'Accountant',
+  counselor: 'Counselor', manager: 'Manager', designer: 'Designer', accountant: 'Accountant', ceo: 'CEO',
 }
 
 function Avatar({ worker }: { worker: Worker }) {
@@ -154,12 +155,12 @@ function WorkerDetailDrawer({
   const [togglingHide, setTogglingHide] = useState(false)
 
   const tabs = [
-    { id: 'personal',   label: 'Personal',   icon: User },
+    { id: 'personal', label: 'Personal', icon: User },
     { id: 'employment', label: 'Employment', icon: Briefcase },
-    { id: 'bank',       label: 'Bank',       icon: CreditCard },
-    { id: 'emergency',  label: 'Emergency',  icon: Phone },
+    { id: 'bank', label: 'Bank', icon: CreditCard },
+    { id: 'emergency', label: 'Emergency', icon: Phone },
     { id: 'background', label: 'Background', icon: GraduationCap },
-    { id: 'documents',  label: 'Documents',  icon: FileText },
+    { id: 'documents', label: 'Documents', icon: FileText },
   ] as const
 
   const handleEmpNoSave = async () => {
@@ -199,11 +200,10 @@ function WorkerDetailDrawer({
               onClick={handleHideToggle}
               disabled={togglingHide}
               title={p.is_hidden ? 'Unhide worker' : 'Hide worker (no longer with us)'}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition ${
-                p.is_hidden
-                  ? 'bg-green-50 text-green-700 hover:bg-green-100'
-                  : 'bg-red-50 text-red-600 hover:bg-red-100'
-              }`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition ${p.is_hidden
+                ? 'bg-green-50 text-green-700 hover:bg-green-100'
+                : 'bg-red-50 text-red-600 hover:bg-red-100'
+                }`}
             >
               {togglingHide
                 ? <Loader2 size={12} className="animate-spin" />
@@ -254,9 +254,8 @@ function WorkerDetailDrawer({
             <button
               key={t.id}
               onClick={() => setTab(t.id as typeof tab)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition flex-shrink-0 ${
-                tab === t.id ? 'bg-pink-600 text-white' : 'text-gray-500 hover:bg-gray-100'
-              }`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition flex-shrink-0 ${tab === t.id ? 'bg-pink-600 text-white' : 'text-gray-500 hover:bg-gray-100'
+                }`}
             >
               <t.icon size={12} />
               {t.label}
@@ -438,9 +437,8 @@ export default function AdminWorkersPage() {
         </div>
         <button
           onClick={() => setShowHidden(v => !v)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition ${
-            showHidden ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
-          }`}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition ${showHidden ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+            }`}
         >
           {showHidden ? <Eye size={12} /> : <EyeOff size={12} />}
           {showHidden ? 'Showing Hidden' : 'Show Hidden'}
@@ -450,10 +448,10 @@ export default function AdminWorkersPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: 'Total Workers',     value: workers.length,                color: 'bg-blue-50 text-blue-700' },
-          { label: 'Profiles Submitted',value: profileCount,                  color: 'bg-green-50 text-green-700' },
-          { label: 'Pending Profiles',  value: workers.length - profileCount, color: 'bg-amber-50 text-amber-700' },
-          { label: 'Hidden / Inactive', value: hiddenCount,                   color: 'bg-red-50 text-red-600' },
+          { label: 'Total Workers', value: workers.length, color: 'bg-blue-50 text-blue-700' },
+          { label: 'Profiles Submitted', value: profileCount, color: 'bg-green-50 text-green-700' },
+          { label: 'Pending Profiles', value: workers.length - profileCount, color: 'bg-amber-50 text-amber-700' },
+          { label: 'Hidden / Inactive', value: hiddenCount, color: 'bg-red-50 text-red-600' },
         ].map(s => (
           <div key={s.label} className={`rounded-xl p-4 ${s.color}`}>
             <p className="text-2xl font-bold">{s.value}</p>
@@ -504,9 +502,8 @@ export default function AdminWorkersPage() {
             return (
               <div
                 key={worker.id}
-                className={`bg-white border rounded-2xl overflow-hidden transition-all shadow-sm ${
-                  isHidden ? 'border-red-100 opacity-60' : 'border-gray-100 hover:border-pink-200'
-                }`}
+                className={`bg-white border rounded-2xl overflow-hidden transition-all shadow-sm ${isHidden ? 'border-red-100 opacity-60' : 'border-gray-100 hover:border-pink-200'
+                  }`}
               >
                 <div className="flex items-center gap-3 p-4">
                   <div className="relative">

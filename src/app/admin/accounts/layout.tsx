@@ -2,6 +2,8 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useAuthStore } from '@/store/auth'
+import BottomNav from '@/components/shared/BottomNav'
 import {
     Wallet,
     LayoutDashboard,
@@ -26,6 +28,8 @@ const SUB_TABS = [
 
 export default function AccountsLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname()
+    const { role } = useAuthStore()
+    const isCeo = role === 'ceo'
 
     return (
         <div className="flex flex-col h-full">
@@ -67,10 +71,11 @@ export default function AccountsLayout({ children }: { children: React.ReactNode
                 </div>
             </div>
 
-            {/* Page content — extra bottom padding on mobile for BottomNav */}
-            <div className="flex-1 overflow-y-auto p-4 md:p-6 pt-5 pb-24 md:pb-6">
+            {/* Page content — extra bottom padding for CEO BottomNav */}
+            <div className={`flex-1 overflow-y-auto p-4 md:p-6 pt-5 ${isCeo ? 'pb-24' : 'pb-6'}`}>
                 {children}
             </div>
+            {isCeo && <BottomNav />}
         </div>
     )
 }

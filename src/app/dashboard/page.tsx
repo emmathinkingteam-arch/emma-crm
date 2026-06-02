@@ -35,6 +35,9 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!user) { router.replace('/auth/login'); return }
 
+    // CEO goes straight to accounts
+    if (role === 'ceo') { router.replace('/admin/accounts'); return }
+
     // Capture GPS on load
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(async (pos) => {

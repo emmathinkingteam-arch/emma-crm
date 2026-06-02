@@ -4,7 +4,8 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Users, CalendarRange,
-  PlusCircle, Wallet, Award, ClipboardList, Search, MessageSquareWarning
+  PlusCircle, Wallet, Award, ClipboardList, Search, MessageSquareWarning,
+  ArrowDownToLine, ListOrdered, Landmark, Receipt, DollarSign
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 
@@ -72,7 +73,7 @@ export default function BottomNav() {
   // CEO gets accounts tab strip as bottom nav
   if (role === 'ceo') {
     return (
-      <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-pink-100 z-40 shadow-lg md:hidden">
+      <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-pink-100 z-40 shadow-lg">
         <div className="flex overflow-x-auto scrollbar-none px-2 py-2 gap-1.5">
           {CEO_ACCOUNT_TABS.map(({ href, label }) => {
             const active = href === '/admin/accounts'

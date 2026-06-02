@@ -10,6 +10,7 @@ export type UserRole =
   | 'manager'
   | 'designer'
   | 'accountant'
+  | 'ceo'
 
 export type OrderStatus = 'draft' | 'active' | 'expired' | 'cancelled'
 export type StepStatus = 'pending' | 'in_progress' | 'done' | 'overdue' | 'rejected'

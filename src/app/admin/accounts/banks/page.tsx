@@ -59,7 +59,7 @@ interface LedgerLine {
 
 export default function BanksPage() {
     const { user, role } = useAuthStore()
-    const isAdmin = role === 'admin'
+    const isAdmin = role === 'admin' || role === 'ceo'
 
     const [loading, setLoading] = useState(true)
     const [cards, setCards] = useState<BankCard[]>([])

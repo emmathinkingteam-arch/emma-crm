@@ -8,6 +8,18 @@ import {
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 
+// CEO accounts sub-tabs shown in a horizontal strip above the main nav
+const CEO_ACCOUNT_TABS = [
+  { href: '/admin/accounts', label: 'Overview' },
+  { href: '/admin/accounts/add-expense', label: 'Add Expense' },
+  { href: '/admin/accounts/income', label: 'Income' },
+  { href: '/admin/accounts/transactions', label: 'Transactions' },
+  { href: '/admin/accounts/banks', label: 'Bank & Cash' },
+  { href: '/admin/accounts/wallets', label: 'Wallets' },
+  { href: '/admin/accounts/costing', label: 'Costing' },
+  { href: '/admin/accounts/reports', label: 'Reports' },
+]
+
 const NAV_CONFIG = {
   crm_agent: [
     { href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
@@ -56,6 +68,33 @@ export default function BottomNav() {
   const { role } = useAuthStore()
 
   if (!role || role === 'admin') return null
+
+  // CEO gets accounts tab strip as bottom nav
+  if (role === 'ceo') {
+    return (
+      <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-pink-100 z-40 shadow-lg md:hidden">
+        <div className="flex overflow-x-auto scrollbar-none px-2 py-2 gap-1.5">
+          {CEO_ACCOUNT_TABS.map(({ href, label }) => {
+            const active = href === '/admin/accounts'
+              ? pathname === '/admin/accounts'
+              : pathname.startsWith(href)
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={`flex-shrink-0 px-3 py-1.5 rounded-full text-[10px] font-bold whitespace-nowrap transition-all ${active
+                  ? 'bg-pink-600 text-white shadow-sm'
+                  : 'text-gray-400 bg-gray-100'
+                  }`}
+              >
+                {label}
+              </Link>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
 
   const items = NAV_CONFIG[role as keyof typeof NAV_CONFIG] ?? []
 

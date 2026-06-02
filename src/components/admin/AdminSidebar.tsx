@@ -46,8 +46,8 @@ export default function AdminSidebar() {
   const { clear, role } = useAuthStore()
 
   const visibleTabs =
-    role === 'accountant'
-      ? TABS.filter((t) => t.href === '/admin/accounts')
+    role === 'accountant' || role === 'ceo'
+      ? TABS.filter((t) => t.href.startsWith('/admin/accounts'))
       : TABS
 
   const handleLogout = async () => {
@@ -65,8 +65,8 @@ export default function AdminSidebar() {
             <span className="text-white font-bold text-xs">E</span>
           </div>
           <div>
-            <p className="text-pink-600 font-bold text-sm tracking-tight italic">{role === 'accountant' ? 'Emma Accounts' : 'Emma Admin'}</p>
-            <p className="text-gray-400 text-[9px] font-medium">{role === 'accountant' ? 'Accounting panel' : 'Management panel'}</p>
+            <p className="text-pink-600 font-bold text-sm tracking-tight italic">{role === 'accountant' ? 'Emma Accounts' : role === 'ceo' ? 'Emma CEO' : 'Emma Admin'}</p>
+            <p className="text-gray-400 text-[9px] font-medium">{role === 'accountant' ? 'Accounting panel' : role === 'ceo' ? 'CEO panel' : 'Management panel'}</p>
           </div>
         </div>
       </div>

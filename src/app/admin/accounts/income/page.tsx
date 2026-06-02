@@ -27,7 +27,7 @@ function getVia(o: OrderRow) { return (o.payment_bank || o.payment_type || '').t
 
 export default function IncomePage() {
     const { user, role } = useAuthStore()
-    const isAdmin = role === 'admin'
+    const isAdmin = role === 'admin' || role === 'ceo'
 
     const [orders, setOrders] = useState<OrderRow[]>([])
     const [banks, setBanks] = useState<LedgerRow[]>([])

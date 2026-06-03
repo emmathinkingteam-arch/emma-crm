@@ -159,6 +159,7 @@ export default function CustomerDetailPage() {
   const [partnerLink, setPartnerLink] = useState('')
   const [publicProfileLink, setPublicProfileLink] = useState('')
   const [showPartnerLink, setShowPartnerLink] = useState(false)
+  const [showPostBuilder, setShowPostBuilder] = useState(false)
 
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
@@ -1848,6 +1849,16 @@ export default function CustomerDetailPage() {
           )}
 
 
+          {/* ── POST BUILDER ─────────────────────────────── */}
+          {(role === 'designer' || role === 'back_office' || role === 'counselor' || role === 'admin') && activeOrder && (
+            <button
+              onClick={() => setShowPostBuilder(true)}
+              className="w-full border-2 border-pink-200 text-pink-700 rounded-2xl py-3 text-xs font-bold flex items-center justify-center gap-2 bg-pink-50 active:scale-95 transition-all"
+            >
+              <span>🗂️</span> Post Builder
+            </button>
+          )}
+
           {/* PARTNER LINK */}
           {(role === 'back_office' || role === 'admin') && activeOrder && (
             <div>
@@ -2315,6 +2326,14 @@ export default function CustomerDetailPage() {
           </div>
         </div>
       </div>
+      {showPostBuilder && (
+        <PostBuilderModal
+          postCode={plannedSlot?.post_id_code || ''}
+          onClose={() => setShowPostBuilder(false)}
+          role={role || ''}
+        />
+      )}
+
       <BottomNav />
     </div>
   )
@@ -2530,6 +2549,277 @@ function LogInteractionForm({ customerId, userId, onSaved }: { customerId: strin
         className="w-full bg-pink-600 text-white rounded-xl py-2 text-[10px] font-bold disabled:opacity-40">
         {saving ? 'Saving...' : 'Log interaction'}
       </button>
+    </div>
+  )
+}
+
+// ── PostBuilderModal ───────────────────────────────────────────────────────
+// Shown when any of: designer, back_office, counselor, admin clicks
+// "Post Builder" on a customer with an active order.
+//
+// Roles:
+//   back_office  → fills "Profile URL" field
+//   counselor    → pastes description text
+//   designer     → profile code auto-filled from planned slot; views all parts
+//   admin        → full access to all fields
+//
+// The FM (font map) conversion keeps Sinhala text readable in old-school
+// FM Malithi font environments (FB/WA desktop copy-paste).
+
+const FM_MAP: { u: string; f: string }[] = [{ "u": "/", "f": "$" }, { "u": "(", "f": "^" }, { "u": ")", "f": "&" }, { "u": "+", "f": "¬" }, { "u": "%", "f": "]" }, { "u": "'", "f": "z" }, { "u": "!", "f": "æ" }, { "u": "\"", "f": "˜" }, { "u": ",", "f": "\"" }, { "u": ":", "f": "(" }, { "u": ".", "f": "'" }, { "u": "\u201c", "f": "˜" }, { "u": "\u2018", "f": "Z" }, { "u": "\u0dc1\u0dca\u200d\u0dbb\u0dd2", "f": "Y%s" }, { "u": "\u0dc1\u0dca\u200d\u0dbb\u0dd3", "f": "\u203a" }, { "u": "\u0d85", "f": "w" }, { "u": "\u0d86", "f": "wd" }, { "u": "\u0d87", "f": "we" }, { "u": "\u0d88", "f": "wE" }, { "u": "\u0d89", "f": "b" }, { "u": "\u0d8a", "f": "B" }, { "u": "\u0d8b", "f": "W" }, { "u": "\u0d8c", "f": "W!" }, { "u": "\u0d8d", "f": "R" }, { "u": "\u0d8e", "f": "RD" }, { "u": "\u0d8f", "f": "\u00cc" }, { "u": "\u0d90", "f": "\u00cf" }, { "u": "\u0d91", "f": "t" }, { "u": "\u0d92", "f": "tA" }, { "u": "\u0d93", "f": "ft" }, { "u": "\u0d94", "f": "T" }, { "u": "\u0d95", "f": "\u00b4" }, { "u": "\u0d96", "f": "T!" }, { "u": "\u0d85\u0d82", "f": "wx" }, { "u": "\u0d85\u0d83", "f": "w#" }, { "u": "\u0d9a\u0dca\u200d\u0dba", "f": "lH" }, { "u": "\u0d9a\u0dca\u200d\u0dbb", "f": "l%" }, { "u": "\u0d9a\u0dca", "f": "la" }, { "u": "\u0d9a\u0dcf", "f": "ld" }, { "u": "\u0d9a\u0dd1", "f": "lE" }, { "u": "\u0d9a\u0dd2", "f": "ls" }, { "u": "\u0d9a\u0dd3", "f": "lS" }, { "u": "\u0d9a\u0dd4", "f": "l=" }, { "u": "\u0d9a\u0dd6", "f": "l+" }, { "u": "\u0d9a\u0dd8", "f": "lD" }, { "u": "\u0d9a\u0dde", "f": "lDD" }, { "u": "\u0d9a\u0ddf", "f": "l!" }, { "u": "\u0d9a\u0df3", "f": "l!" }, { "u": "\u0d9a\u0dd9", "f": "fl" }, { "u": "\u0d9a\u0dda", "f": "fla" }, { "u": "\u0d9a\u0ddb", "f": "ffl" }, { "u": "\u0d9a\u0ddc", "f": "fld" }, { "u": "\u0d9a\u0ddd", "f": "flda" }, { "u": "\u0d9a\u0dde", "f": "fl!" }, { "u": "\u0d9a\u0d82", "f": "lx" }, { "u": "\u0d9a\u0d83", "f": "l#" }, { "u": "\u0d9a", "f": "l" }, { "u": "\u0dbb\u0dca\u200d\u0dba", "f": "h\u2013" }, { "u": "\u0dbb\u0dca\u200d\u0dbb", "f": "r\u2013" }, { "u": "\u0dbb\u0dca", "f": "\u00be" }, { "u": "\u0dbbcf", "f": "rd" }, { "u": "\u0dbb\u0dd1", "f": "?" }, { "u": "\u0dbb\u0dd2", "f": "\u00df" }, { "u": "\u0dbb\u0dd3", "f": "\u00cd" }, { "u": "\u0dbb\u0dd4", "f": "re" }, { "u": "\u0dbb\u0dd6", "f": "rE" }, { "u": "\u0dbb\u0dd8", "f": "rD" }, { "u": "\u0dbb\u0dde", "f": "rDD" }, { "u": "\u0dbb\u0ddf", "f": "r!" }, { "u": "\u0dbb\u0dd9", "f": "fr" }, { "u": "\u0dbb\u0dda", "f": "fra" }, { "u": "\u0dbb\u0ddb", "f": "ffr" }, { "u": "\u0dbb\u0ddc", "f": "frd" }, { "u": "\u0dbb\u0ddd", "f": "frda" }, { "u": "\u0dbb\u0dde", "f": "fr!" }, { "u": "\u0dbb\u0d82", "f": "rx" }, { "u": "\u0dbb\u0d83", "f": "r#" }, { "u": "\u0dbb", "f": "r" }, { "u": "\u0d9c\u0dca\u200d\u0dba", "f": ".H" }, { "u": "\u0d9c\u0dca\u200d\u0dbb", "f": ".%" }, { "u": "\u0d9c\u0dca", "f": ".a" }, { "u": "\u0d9c\u0dcf", "f": ".d" }, { "u": "\u0d9c\u0dd1", "f": ".E" }, { "u": "\u0d9c\u0dd2", "f": ".s" }, { "u": "\u0d9c\u0dd3", "f": ".S" }, { "u": "\u0d9c\u0dd4", "f": ".=" }, { "u": "\u0d9c\u0dd6", "f": ".+" }, { "u": "\u0d9c\u0dd8", "f": ".D" }, { "u": "\u0d9c\u0dde", "f": ".DD" }, { "u": "\u0d9c\u0ddf", "f": ".!" }, { "u": "\u0d9c\u0dd9", "f": "f." }, { "u": "\u0d9c\u0dda", "f": "f.a" }, { "u": "\u0d9c\u0ddb", "f": "ff." }, { "u": "\u0d9c\u0ddc", "f": "f.d" }, { "u": "\u0d9c\u0ddd", "f": "f.da" }, { "u": "\u0d9c\u0dde", "f": "f.!" }, { "u": "\u0d9c\u0d82", "f": ".x" }, { "u": "\u0d9c\u0d83", "f": ".#" }, { "u": "\u0d9c", "f": "." }, { "u": "\u0da7\u0dca\u200d\u0dba", "f": "gH" }, { "u": "\u0da7\u0dca\u200d\u0dbb", "f": "g%" }, { "u": "\u0da7\u0dca", "f": "\u00dc" }, { "u": "\u0da7\u0dcf", "f": "gd" }, { "u": "\u0da7\u0dd1", "f": "gE" }, { "u": "\u0da7\u0dd2", "f": "\u00e1" }, { "u": "\u0da7\u0dd3", "f": "\u00e0" }, { "u": "\u0da7\u0dd4", "f": "gq" }, { "u": "\u0da7\u0dd6", "f": "gQ" }, { "u": "\u0da7\u0dd8", "f": "gD" }, { "u": "\u0da7\u0dde", "f": "gDD" }, { "u": "\u0da7\u0ddf", "f": "g!" }, { "u": "\u0da7\u0dd9", "f": "fg" }, { "u": "\u0da7\u0dda", "f": "f\u00dc" }, { "u": "\u0da7\u0ddb", "f": "ffg" }, { "u": "\u0da7\u0ddc", "f": "fgd" }, { "u": "\u0da7\u0ddd", "f": "fgda" }, { "u": "\u0da7\u0dde", "f": "fg!" }, { "u": "\u0da7\u0d82", "f": "gx" }, { "u": "\u0da7\u0d83", "f": "g#" }, { "u": "\u0da7", "f": "g" }, { "u": "\u0dad\u0dca\u200d\u0dba", "f": ";H" }, { "u": "\u0dad\u0dca\u200d\u0dbb", "f": ";%" }, { "u": "\u0dad\u0dca", "f": ";a" }, { "u": "\u0dad\u0dcf", "f": ";d" }, { "u": "\u0dad\u0dd1", "f": ";E" }, { "u": "\u0dad\u0dd2", "f": ";s" }, { "u": "\u0dad\u0dd3", "f": ";S" }, { "u": "\u0dad\u0dd4", "f": ";=" }, { "u": "\u0dad\u0dd6", "f": ";+" }, { "u": "\u0dad\u0dd8", "f": ";D" }, { "u": "\u0dad\u0dde", "f": ";DD" }, { "u": "\u0dad\u0ddf", "f": ";!" }, { "u": "\u0dad\u0dd9", "f": "f;" }, { "u": "\u0dad\u0dda", "f": "f;a" }, { "u": "\u0dad\u0ddb", "f": "ff;" }, { "u": "\u0dad\u0ddc", "f": "f;d" }, { "u": "\u0dad\u0ddd", "f": "f;da" }, { "u": "\u0dad\u0dde", "f": "f;!" }, { "u": "\u0dad\u0d82", "f": ";x" }, { "u": "\u0dad\u0d83", "f": ";#" }, { "u": "\u0dad", "f": ";" }, { "u": "\u0daf\u0dca\u200d\u0dba", "f": "oH" }, { "u": "\u0daf\u0dca\u200d\u0dbb", "f": "\u00f8" }, { "u": "\u0daf\u0dca", "f": "oa" }, { "u": "\u0daf\u0dcf", "f": "od" }, { "u": "\u0daf\u0dd1", "f": "oE" }, { "u": "\u0daf\u0dd2", "f": "\u00c8" }, { "u": "\u0daf\u0dd3", "f": "\u00a7" }, { "u": "\u0daf\u0dd4", "f": "\u00ff" }, { "u": "\u0daf\u0dd6", "f": "\u00a5" }, { "u": "\u0daf\u0dd8", "f": "oD" }, { "u": "\u0daf\u0dde", "f": "oDD" }, { "u": "\u0daf\u0ddf", "f": "o!" }, { "u": "\u0daf\u0dd9", "f": "fo" }, { "u": "\u0daf\u0dda", "f": "foa" }, { "u": "\u0daf\u0ddb", "f": "ffo" }, { "u": "\u0daf\u0ddc", "f": "fod" }, { "u": "\u0daf\u0ddd", "f": "foda" }, { "u": "\u0daf\u0dde", "f": "fo!" }, { "u": "\u0daf\u0d82", "f": "ox" }, { "u": "\u0daf\u0d83", "f": "o#" }, { "u": "\u0daf", "f": "o" }, { "u": "\u0db1\u0dca\u200d\u0dba", "f": "kH" }, { "u": "\u0db1\u0dca\u200d\u0dbb", "f": "k%" }, { "u": "\u0db1\u0dca", "f": "ka" }, { "u": "\u0db1\u0dcf", "f": "kd" }, { "u": "\u0db1\u0dd1", "f": "kE" }, { "u": "\u0db1\u0dd2", "f": "ks" }, { "u": "\u0db1\u0dd3", "f": "kS" }, { "u": "\u0db1\u0dd4", "f": "kq" }, { "u": "\u0db1\u0dd6", "f": "kQ" }, { "u": "\u0db1\u0dd8", "f": "kD" }, { "u": "\u0db1\u0dde", "f": "kDD" }, { "u": "\u0db1\u0ddf", "f": "k!" }, { "u": "\u0db1\u0dd9", "f": "fk" }, { "u": "\u0db1\u0dda", "f": "fka" }, { "u": "\u0db1\u0ddb", "f": "ffk" }, { "u": "\u0db1\u0ddc", "f": "fkd" }, { "u": "\u0db1\u0ddd", "f": "fkda" }, { "u": "\u0db1\u0dde", "f": "fk!" }, { "u": "\u0db1\u0d82", "f": "kx" }, { "u": "\u0db1\u0d83", "f": "k#" }, { "u": "\u0db1", "f": "k" }, { "u": "\u0db4\u0dca\u200d\u0dba", "f": "mH" }, { "u": "\u0db4\u0dca\u200d\u0dbb", "f": "m%" }, { "u": "\u0db4\u0dca", "f": "ma" }, { "u": "\u0db4\u0dcf", "f": "md" }, { "u": "\u0db4\u0dd1", "f": "mE" }, { "u": "\u0db4\u0dd2", "f": "ms" }, { "u": "\u0db4\u0dd3", "f": "mS" }, { "u": "\u0db4\u0dd4", "f": "mq" }, { "u": "\u0db4\u0dd6", "f": "mQ" }, { "u": "\u0db4\u0dd8", "f": "mD" }, { "u": "\u0db4\u0dde", "f": "mDD" }, { "u": "\u0db4\u0ddf", "f": "m!" }, { "u": "\u0db4\u0dd9", "f": "fm" }, { "u": "\u0db4\u0dda", "f": "fma" }, { "u": "\u0db4\u0ddb", "f": "ffm" }, { "u": "\u0db4\u0ddc", "f": "fmd" }, { "u": "\u0db4\u0ddd", "f": "fmda" }, { "u": "\u0db4\u0dde", "f": "fm!" }, { "u": "\u0db4\u0d82", "f": "mx" }, { "u": "\u0db4\u0d83", "f": "m#" }, { "u": "\u0db4", "f": "m" }, { "u": "\u0db6\u0dca\u200d\u0dba", "f": "nH" }, { "u": "\u0db6\u0dca\u200d\u0dbb", "f": "n%" }, { "u": "\u0db6\u0dca", "f": "\u00ed" }, { "u": "\u0db6\u0dcf", "f": "nd" }, { "u": "\u0db6\u0dd1", "f": "nE" }, { "u": "\u0db6\u0dd2", "f": "\u00ec" }, { "u": "\u0db6\u0dd3", "f": "\u00ee" }, { "u": "\u0db6\u0dd4", "f": "nq" }, { "u": "\u0db6\u0dd6", "f": "nQ" }, { "u": "\u0db6\u0dd8", "f": "nD" }, { "u": "\u0db6\u0dde", "f": "nDD" }, { "u": "\u0db6\u0ddf", "f": "n!" }, { "u": "\u0db6\u0dd9", "f": "fn" }, { "u": "\u0db6\u0dda", "f": "f\u00ed" }, { "u": "\u0db6\u0ddb", "f": "ffn" }, { "u": "\u0db6\u0ddc", "f": "fnd" }, { "u": "\u0db6\u0ddd", "f": "fnda" }, { "u": "\u0db6\u0dde", "f": "fn!" }, { "u": "\u0db6\u0d82", "f": "nx" }, { "u": "\u0db6\u0d83", "f": "n#" }, { "u": "\u0db6", "f": "n" }, { "u": "\u0db8\u0dca\u200d\u0dba", "f": "uH" }, { "u": "\u0db8\u0dca\u200d\u0dbb", "f": "u%" }, { "u": "\u0db8\u0dca", "f": "\u00ef" }, { "u": "\u0db8\u0dcf", "f": "ud" }, { "u": "\u0db8\u0dd1", "f": "uE" }, { "u": "\u0db8\u0dd2", "f": "\u00f1" }, { "u": "\u0db8\u0dd3", "f": "\u00f3" }, { "u": "\u0db8\u0dd4", "f": "uq" }, { "u": "\u0db8\u0dd6", "f": "uQ" }, { "u": "\u0db8\u0dd8", "f": "uD" }, { "u": "\u0db8\u0dde", "f": "uDD" }, { "u": "\u0db8\u0ddf", "f": "u!" }, { "u": "\u0db8\u0dd9", "f": "fu" }, { "u": "\u0db8\u0dda", "f": "f\u00ef" }, { "u": "\u0db8\u0ddb", "f": "ffu" }, { "u": "\u0db8\u0ddc", "f": "fud" }, { "u": "\u0db8\u0ddd", "f": "fuda" }, { "u": "\u0db8\u0dde", "f": "fu!" }, { "u": "\u0db8\u0d82", "f": "ux" }, { "u": "\u0db8\u0d83", "f": "u#" }, { "u": "\u0db8", "f": "u" }, { "u": "\u0dba\u0dca\u200d\u0dba", "f": "hH" }, { "u": "\u0dba\u0dca\u200d\u0dbb", "f": "h%" }, { "u": "\u0dba\u0dca", "f": "ha" }, { "u": "\u0dba\u0dcf", "f": "hd" }, { "u": "\u0dba\u0dd1", "f": "hE" }, { "u": "\u0dba\u0dd2", "f": "hs" }, { "u": "\u0dba\u0dd3", "f": "hS" }, { "u": "\u0dba\u0dd4", "f": "hq" }, { "u": "\u0dba\u0dd6", "f": "hQ" }, { "u": "\u0dba\u0dd8", "f": "hD" }, { "u": "\u0dba\u0dde", "f": "hDD" }, { "u": "\u0dba\u0ddf", "f": "h!" }, { "u": "\u0dba\u0dd9", "f": "fh" }, { "u": "\u0dba\u0dda", "f": "fha" }, { "u": "\u0dba\u0ddb", "f": "ffh" }, { "u": "\u0dba\u0ddc", "f": "fhd" }, { "u": "\u0dba\u0ddd", "f": "fhda" }, { "u": "\u0dba\u0dde", "f": "fh!" }, { "u": "\u0dba\u0d82", "f": "hx" }, { "u": "\u0dba\u0d83", "f": "h#" }, { "u": "\u0dba", "f": "h" }, { "u": "\u0dbd\u0dca\u200d\u0dba", "f": ",H" }, { "u": "\u0dbd\u0dca\u200d\u0dbb", "f": ",%" }, { "u": "\u0dbd\u0dca", "f": ",a" }, { "u": "\u0dbd\u0dcf", "f": ",d" }, { "u": "\u0dbd\u0dd1", "f": ",E" }, { "u": "\u0dbd\u0dd2", "f": ",s" }, { "u": "\u0dbd\u0dd3", "f": ",S" }, { "u": "\u0dbd\u0dd4", "f": "\u00a8" }, { "u": "\u0dbd\u0dd6", "f": "\u00c6" }, { "u": "\u0dbd\u0dd8", "f": ",D" }, { "u": "\u0dbd\u0dde", "f": ",DD" }, { "u": "\u0dbd\u0ddf", "f": ",!" }, { "u": "\u0dbd\u0dd9", "f": "f," }, { "u": "\u0dbd\u0dda", "f": "f,a" }, { "u": "\u0dbd\u0ddb", "f": "ff," }, { "u": "\u0dbd\u0ddc", "f": "f,d" }, { "u": "\u0dbd\u0ddd", "f": "f,da" }, { "u": "\u0dbd\u0dde", "f": "f,!" }, { "u": "\u0dbd\u0d82", "f": ",x" }, { "u": "\u0dbd\u0d83", "f": ",#" }, { "u": "\u0dbd", "f": "," }, { "u": "\u0dc0\u0dca\u200d\u0dba", "f": "jH" }, { "u": "\u0dc0\u0dca\u200d\u0dbb", "f": "j%" }, { "u": "\u0dc0\u0dca", "f": "\u00f5" }, { "u": "\u0dc0\u0dcf", "f": "jd" }, { "u": "\u0dc0\u0dd1", "f": "jE" }, { "u": "\u0dc0\u0dd2", "f": "\u00fa" }, { "u": "\u0dc0\u0dd3", "f": "\u00f9" }, { "u": "\u0dc0\u0dd4", "f": "jq" }, { "u": "\u0dc0\u0dd6", "f": "jQ" }, { "u": "\u0dc0\u0dd8", "f": "jD" }, { "u": "\u0dc0\u0dde", "f": "jDD" }, { "u": "\u0dc0\u0ddf", "f": "j!" }, { "u": "\u0dc0\u0dd9", "f": "fj" }, { "u": "\u0dc0\u0dda", "f": "f\u00f5" }, { "u": "\u0dc0\u0ddb", "f": "ffj" }, { "u": "\u0dc0\u0ddc", "f": "fjd" }, { "u": "\u0dc0\u0ddd", "f": "fjda" }, { "u": "\u0dc0\u0dde", "f": "fj!" }, { "u": "\u0dc0\u0d82", "f": "jx" }, { "u": "\u0dc0\u0d83", "f": "j#" }, { "u": "\u0dc0", "f": "j" }, { "u": "\u0dc1\u0dca\u200d\u0dba", "f": "YH" }, { "u": "\u0dc1\u0dca\u200d\u0dbb", "f": "Y%" }, { "u": "\u0dc1\u0dca", "f": "Ya" }, { "u": "\u0dc1\u0dcf", "f": "Yd" }, { "u": "\u0dc1\u0dd1", "f": "YE" }, { "u": "\u0dc1\u0dd2", "f": "Ys" }, { "u": "\u0dc1\u0dd3", "f": "YS" }, { "u": "\u0dc1\u0dd4", "f": "Y=" }, { "u": "\u0dc1\u0dd6", "f": "Y+" }, { "u": "\u0dc1\u0dd8", "f": "YD" }, { "u": "\u0dc1\u0dde", "f": "YDD" }, { "u": "\u0dc1\u0ddf", "f": "Y!" }, { "u": "\u0dc1\u0dd9", "f": "fY" }, { "u": "\u0dc1\u0dda", "f": "fYa" }, { "u": "\u0dc1\u0ddb", "f": "ffY" }, { "u": "\u0dc1\u0ddc", "f": "fYd" }, { "u": "\u0dc1\u0ddd", "f": "fYda" }, { "u": "\u0dc1\u0dde", "f": "fY!" }, { "u": "\u0dc1\u0d82", "f": "Yx" }, { "u": "\u0dc1\u0d83", "f": "Y#" }, { "u": "\u0dc1", "f": "Y" }, { "u": "\u0dc3\u0dca\u200d\u0dba", "f": "iH" }, { "u": "\u0dc3\u0dca\u200d\u0dbb", "f": "i%" }, { "u": "\u0dc3\u0dca", "f": "ia" }, { "u": "\u0dc3\u0dcf", "f": "id" }, { "u": "\u0dc3\u0dd1", "f": "iE" }, { "u": "\u0dc3\u0dd2", "f": "is" }, { "u": "\u0dc3\u0dd3", "f": "iS" }, { "u": "\u0dc3\u0dd4", "f": "iq" }, { "u": "\u0dc3\u0dd6", "f": "iQ" }, { "u": "\u0dc3\u0dd8", "f": "iD" }, { "u": "\u0dc3\u0dde", "f": "iDD" }, { "u": "\u0dc3\u0ddf", "f": "i!" }, { "u": "\u0dc3\u0dd9", "f": "fi" }, { "u": "\u0dc3\u0dda", "f": "fia" }, { "u": "\u0dc3\u0ddb", "f": "ffi" }, { "u": "\u0dc3\u0ddc", "f": "fid" }, { "u": "\u0dc3\u0ddd", "f": "fida" }, { "u": "\u0dc3\u0dde", "f": "fi!" }, { "u": "\u0dc3\u0d82", "f": "ix" }, { "u": "\u0dc3\u0d83", "f": "i#" }, { "u": "\u0dc3", "f": "i" }, { "u": "\u0dc4\u0dca\u200d\u0dba", "f": "yH" }, { "u": "\u0dc4\u0dca\u200d\u0dbb", "f": "y%" }, { "u": "\u0dc4\u0dca", "f": "ya" }, { "u": "\u0dc4\u0dcf", "f": "yd" }, { "u": "\u0dc4\u0dd1", "f": "yE" }, { "u": "\u0dc4\u0dd2", "f": "ys" }, { "u": "\u0dc4\u0dd3", "f": "yS" }, { "u": "\u0dc4\u0dd4", "f": "yq" }, { "u": "\u0dc4\u0dd6", "f": "yQ" }, { "u": "\u0dc4\u0dd8", "f": "yD" }, { "u": "\u0dc4\u0dde", "f": "yDD" }, { "u": "\u0dc4\u0ddf", "f": "y!" }, { "u": "\u0dc4\u0dd9", "f": "fy" }, { "u": "\u0dc4\u0dda", "f": "fya" }, { "u": "\u0dc4\u0ddb", "f": "ffy" }, { "u": "\u0dc4\u0ddc", "f": "fyd" }, { "u": "\u0dc4\u0ddd", "f": "fyda" }, { "u": "\u0dc4\u0dde", "f": "fy!" }, { "u": "\u0dc4\u0d82", "f": "yx" }, { "u": "\u0dc4\u0d83", "f": "y#" }, { "u": "\u0dc4", "f": "y" }, { "u": "\u0dca\u200d\u0dba", "f": "a\u200dh" }, { "u": "\u0dca\u200d\u0dbb", "f": "%" }, { "u": "\u0dca", "f": "a" }, { "u": "\u0dcf", "f": "d" }, { "u": "\u0dd1", "f": "E" }, { "u": "\u0dd2", "f": "s" }, { "u": "\u0dd3", "f": "S" }, { "u": "\u0dd4", "f": "q" }, { "u": "\u0dd6", "f": "Q" }, { "u": "\u0dd8", "f": "D" }, { "u": "\u0dde", "f": "DD" }, { "u": "\u0ddf", "f": "!" }, { "u": "\u0d82", "f": "x" }, { "u": "\u0d83", "f": "#" }, { "u": "\u0dd0", "f": "e" }]
+
+function pbFm(text: string): string {
+  let t = text
+  for (const m of FM_MAP) {
+    if (m.u) t = t.split(m.u).join(m.f)
+  }
+  return t
+}
+
+const ENG_RE = /[A-Za-z0-9]+(?: +[A-Za-z0-9]+)*/g
+function pbToFM(text: string): string {
+  const out: string[] = []
+  let idx = 0
+  let m: RegExpExecArray | null
+  ENG_RE.lastIndex = 0
+  while ((m = ENG_RE.exec(text)) !== null) {
+    out.push(pbFm(text.slice(idx, m.index)))
+    out.push(m[0])
+    idx = m.index + m[0].length
+  }
+  out.push(pbFm(text.slice(idx)))
+  return out.join('')
+}
+
+const WA_LINE = 'මෙම Profile Link එක හරහා අදාළ පුද්ගලයා සමඟ ඍජුව සම්බන්ධ විය හැක.'
+const TAGS = '#EmmaThinking #MatchmakingSriLanka #VerifiedMatchmaking #DateArrangement #DatingCounselling'
+
+function pbParse(raw: string) {
+  const t = (raw || '').replace(/\r\n?/g, '\n').trim()
+  if (!t) return null
+  const blocks = t.split(/\n\s*\n+/).map((b: string) => b.trim()).filter(Boolean)
+  const hl = (blocks[0] || '').split('\n').map((s: string) => s.trim())
+  let age = hl[0] || '', gender = ''
+  if (age.includes('|')) { const p = age.split('|'); age = p[0].trim(); gender = (p[1] || '').trim() }
+  return {
+    age, gender, city: hl[1] || '', religion: hl[2] || '', job: hl[3] || '',
+    caption: blocks[1] || '', longDesc: blocks[2] || '', shortDesc: blocks[3] || ''
+  }
+}
+
+function pbEsc(s: string) { return (s || '').replace(/[&<>]/g, (c: string) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] || c)) }
+
+interface PostBuilderModalProps {
+  postCode: string
+  onClose: () => void
+  role: string
+}
+
+function PostBuilderModal({ postCode, onClose, role }: PostBuilderModalProps) {
+  const [desc, setDesc] = useState('')
+  const [profileUrl, setProfileUrl] = useState('https://www.emmathinking.com/profile/')
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+
+  const d = pbParse(desc)
+
+  const copy = async (text: string, id: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedId(id)
+      setTimeout(() => setCopiedId(null), 1400)
+    } catch { }
+  }
+
+  const buildPart1 = () => {
+    if (!d) return ''
+    return `${d.caption} | ${postCode}\n\n${d.longDesc}\n\n${profileUrl}\n\n${WA_LINE}\n\n${TAGS}`
+  }
+
+  const isBackOffice = role === 'back_office' || role === 'admin'
+  const isCounselor = role === 'counselor' || role === 'admin'
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex flex-col">
+      {/* Header */}
+      <div className="bg-white border-b border-gray-100 px-4 py-3 flex items-center gap-3 flex-shrink-0">
+        <button onClick={onClose} className="p-1.5 rounded-xl bg-gray-100 text-gray-500">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+        </button>
+        <div>
+          <p className="text-xs font-extrabold text-gray-800">Post Builder</p>
+          <p className="text-[9px] text-gray-400 font-medium">Split description into copy-ready parts</p>
+        </div>
+        {postCode && (
+          <span className="ml-auto bg-pink-50 border border-pink-200 text-pink-700 text-[9px] font-bold px-2 py-1 rounded-lg">{postCode}</span>
+        )}
+      </div>
+
+      {/* Scrollable body */}
+      <div className="flex-1 overflow-y-auto bg-gray-50">
+        <div className="p-4 space-y-4 max-w-lg mx-auto">
+
+          {/* Role banners */}
+          {role === 'back_office' && (
+            <div className="bg-purple-50 border border-purple-100 rounded-xl px-3 py-2 text-[10px] text-purple-700 font-semibold">
+              Back Office: fill in the Profile URL below, then share this screen with the counsellor.
+            </div>
+          )}
+          {role === 'counselor' && (
+            <div className="bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 text-[10px] text-blue-700 font-semibold">
+              Counsellor: paste the full profile description below.
+            </div>
+          )}
+          {role === 'designer' && (
+            <div className="bg-pink-50 border border-pink-100 rounded-xl px-3 py-2 text-[10px] text-pink-700 font-semibold">
+              Designer: Profile Code is auto-filled. Review and copy each part for posting.
+            </div>
+          )}
+
+          {/* Profile URL — back office / admin */}
+          {isBackOffice && (
+            <div className="bg-white border border-gray-100 rounded-2xl p-4 space-y-2">
+              <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">Profile URL <span className="text-purple-500">← Back Office fills this</span></p>
+              <input
+                value={profileUrl}
+                onChange={e => setProfileUrl(e.target.value)}
+                placeholder="https://www.emmathinking.com/profile/..."
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none focus:border-pink-300"
+              />
+            </div>
+          )}
+
+          {/* Description — counselor / admin */}
+          <div className="bg-white border border-gray-100 rounded-2xl p-4 space-y-2">
+            <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">
+              Description <span className="text-blue-500">← Counsellor pastes here</span>
+            </p>
+            <textarea
+              value={desc}
+              onChange={e => setDesc(e.target.value)}
+              placeholder={'Paste the full description here…\ne.g.\n42 | Male\nColombo\nBuddhist\nEngineer\n\n(caption)\n\n(long description)\n\n(short description)'}
+              rows={6}
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none resize-none focus:border-pink-300"
+              style={{ fontFamily: 'inherit' }}
+            />
+          </div>
+
+          {!d && (
+            <div className="text-center text-gray-400 text-xs font-medium py-4">
+              Paste a description above to see the split parts.
+            </div>
+          )}
+
+          {d && (
+            <>
+              {/* Profile fields */}
+              <div className="bg-white border border-gray-100 rounded-2xl p-4">
+                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-3">Profile fields</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { label: 'Age', val: d.age },
+                    { label: 'Gender', val: d.gender },
+                    { label: 'City', val: d.city },
+                    { label: 'Religion', val: d.religion },
+                    { label: 'Job', val: d.job },
+                  ].map(({ label, val }) => (
+                    <div key={label} className="flex items-center justify-between bg-gray-50 border border-gray-100 rounded-xl px-3 py-2">
+                      <div>
+                        <p className="text-[8px] font-bold text-gray-400 uppercase">{label}</p>
+                        <p className="text-xs font-bold text-gray-800">{val || '—'}</p>
+                      </div>
+                      <button
+                        onClick={() => copy(val || '—', label)}
+                        className={`w-7 h-7 rounded-lg border flex items-center justify-center transition-all ${copiedId === label ? 'border-green-200 bg-green-50 text-green-600' : 'border-gray-200 bg-white text-gray-400'}`}
+                      >
+                        {copiedId === label
+                          ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M20 6 9 17l-5-5" /></svg>
+                          : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg>}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Caption — FM copy */}
+              <div className="bg-white border border-gray-100 rounded-2xl p-4 space-y-3">
+                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">Caption <span className="text-gray-300 font-normal">— copies as FM font</span></p>
+                <div className="bg-pink-50 border border-pink-100 rounded-xl px-3 py-2.5 text-sm font-semibold text-gray-800" style={{ fontFamily: "'Noto Sans Sinhala', sans-serif" }}>
+                  {d.caption || '—'}
+                </div>
+                <div className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-[11px] text-gray-400" style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                  {pbToFM(d.caption) || '—'}
+                </div>
+                <button
+                  onClick={() => copy(pbToFM(d.caption), 'caption')}
+                  className={`w-full rounded-xl py-2.5 text-xs font-bold transition-all ${copiedId === 'caption' ? 'bg-green-500 text-white' : 'bg-pink-600 text-white'}`}
+                >
+                  {copiedId === 'caption' ? '✓ Copied FM text' : 'Copy Caption FM'}
+                </button>
+              </div>
+
+              {/* Part 1 — full post */}
+              <div className="bg-white border border-gray-100 rounded-2xl p-4 space-y-3">
+                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">Part 1 — Caption post <span className="text-gray-300 font-normal">copies as Unicode</span></p>
+
+                {/* Profile URL (read view for non-back-office) */}
+                {!isBackOffice && (
+                  <div>
+                    <p className="text-[9px] font-semibold text-gray-400 uppercase mb-1">Profile URL</p>
+                    <input
+                      value={profileUrl}
+                      onChange={e => setProfileUrl(e.target.value)}
+                      placeholder="https://www.emmathinking.com/profile/..."
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs font-medium outline-none focus:border-pink-300"
+                    />
+                  </div>
+                )}
+
+                <div className="bg-pink-50 border border-dashed border-pink-200 rounded-xl px-3 py-3 text-xs text-gray-700 whitespace-pre-wrap leading-relaxed" style={{ fontFamily: "'Noto Sans Sinhala', 'Plus Jakarta Sans', sans-serif" }}>
+                  <span className="font-bold text-gray-900">{d.caption}</span>
+                  {' | '}
+                  <span className="text-pink-600 font-bold">{postCode || '…'}</span>
+                  {'\n\n'}
+                  {d.longDesc}
+                  {'\n\n'}
+                  <span className="text-pink-600">{profileUrl || '…'}</span>
+                  {'\n\n'}
+                  <span className="text-gray-400 text-[11px]">{WA_LINE}</span>
+                  {'\n\n'}
+                  <span className="text-pink-300 text-[11px]">{TAGS}</span>
+                </div>
+                <button
+                  onClick={() => copy(buildPart1(), 'part1')}
+                  className={`w-full rounded-xl py-2.5 text-xs font-bold transition-all ${copiedId === 'part1' ? 'bg-green-500 text-white' : 'bg-pink-600 text-white'}`}
+                >
+                  {copiedId === 'part1' ? '✓ Copied Part 1' : 'Copy Part 1'}
+                </button>
+              </div>
+
+              {/* Part 2 — short desc FM */}
+              <div className="bg-white border border-gray-100 rounded-2xl p-4 space-y-3">
+                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">Part 2 — Short description <span className="text-gray-300 font-normal">copies as FM font</span></p>
+                <div className="bg-pink-50 border border-pink-100 rounded-xl px-3 py-2.5 text-sm text-gray-800 leading-relaxed" style={{ fontFamily: "'Noto Sans Sinhala', sans-serif" }}>
+                  {d.shortDesc || '—'}
+                </div>
+                <div className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-[11px] text-gray-400" style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                  {pbToFM(d.shortDesc) || '—'}
+                </div>
+                <button
+                  onClick={() => copy(pbToFM(d.shortDesc), 'part2')}
+                  className={`w-full rounded-xl py-2.5 text-xs font-bold transition-all ${copiedId === 'part2' ? 'bg-green-500 text-white' : 'bg-pink-600 text-white'}`}
+                >
+                  {copiedId === 'part2' ? '✓ Copied FM text' : 'Copy Part 2 FM'}
+                </button>
+              </div>
+
+            </>
+          )}
+
+          <p className="text-[10px] text-gray-300 text-center font-medium pb-2">
+            FM text renders correctly with FM Malithi font · Profile code auto-filled from calendar
+          </p>
+        </div>
+      </div>
     </div>
   )
 }

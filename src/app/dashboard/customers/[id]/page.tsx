@@ -160,6 +160,7 @@ export default function CustomerDetailPage() {
   const [publicProfileLink, setPublicProfileLink] = useState('')
   const [showPartnerLink, setShowPartnerLink] = useState(false)
   const [showPostBuilder, setShowPostBuilder] = useState(false)
+  const [postBuilderPrefill, setPostBuilderPrefill] = useState('')
 
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
@@ -1851,12 +1852,23 @@ export default function CustomerDetailPage() {
 
           {/* ── POST BUILDER ─────────────────────────────── */}
           {(role === 'designer' || role === 'back_office' || role === 'counselor' || role === 'admin') && activeOrder && (
-            <button
-              onClick={() => setShowPostBuilder(true)}
-              className="w-full border-2 border-pink-200 text-pink-700 rounded-2xl py-3 text-xs font-bold flex items-center justify-center gap-2 bg-pink-50 active:scale-95 transition-all"
-            >
-              <span>🗂️</span> Post Builder
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setPostBuilderPrefill(''); setShowPostBuilder(true) }}
+                className="flex-1 border-2 border-pink-200 text-pink-700 rounded-2xl py-3 text-xs font-bold flex items-center justify-center gap-2 bg-pink-50 active:scale-95 transition-all"
+              >
+                <span>🗂️</span> Post Builder
+              </button>
+              {completedBrief && (
+                <button
+                  onClick={() => { setPostBuilderPrefill(completedBrief); setShowPostBuilder(true) }}
+                  className="flex-none border-2 border-violet-200 text-violet-700 rounded-2xl px-4 py-3 text-xs font-bold flex items-center justify-center gap-1.5 bg-violet-50 active:scale-95 transition-all"
+                  title="Auto-fill from existing brief"
+                >
+                  <span className="text-base leading-none">✦</span> AI
+                </button>
+              )}
+            </div>
           )}
 
           {/* PARTNER LINK */}
@@ -2331,6 +2343,7 @@ export default function CustomerDetailPage() {
           postCode={plannedSlot?.post_id_code || ''}
           onClose={() => setShowPostBuilder(false)}
           role={role || ''}
+          initialDesc={postBuilderPrefill}
         />
       )}
 
@@ -2613,10 +2626,11 @@ interface PostBuilderModalProps {
   postCode: string
   onClose: () => void
   role: string
+  initialDesc?: string
 }
 
-function PostBuilderModal({ postCode, onClose, role }: PostBuilderModalProps) {
-  const [desc, setDesc] = useState('')
+function PostBuilderModal({ postCode, onClose, role, initialDesc = '' }: PostBuilderModalProps) {
+  const [desc, setDesc] = useState(initialDesc)
   const [profileUrl, setProfileUrl] = useState('https://www.emmathinking.com/profile/')
   const [copiedId, setCopiedId] = useState<string | null>(null)
 
@@ -2672,6 +2686,11 @@ function PostBuilderModal({ postCode, onClose, role }: PostBuilderModalProps) {
           {role === 'designer' && (
             <div className="bg-pink-50 border border-pink-100 rounded-xl px-3 py-2 text-[10px] text-pink-700 font-semibold">
               Designer: Profile Code is auto-filled. Review and copy each part for posting.
+            </div>
+          )}
+          {initialDesc && (
+            <div className="bg-violet-50 border border-violet-200 rounded-xl px-3 py-2 text-[10px] text-violet-700 font-semibold flex items-center gap-2">
+              <span>✦</span> Brief auto-filled from this order — review and copy below.
             </div>
           )}
 

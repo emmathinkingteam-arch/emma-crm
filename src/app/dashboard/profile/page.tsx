@@ -6,7 +6,8 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
-import { Loader2, Camera, LogOut, MapPin, FileText, Download, ClipboardList, ChevronDown, ChevronUp } from 'lucide-react'
+import Link from 'next/link'
+import { Loader2, Camera, LogOut, MapPin, FileText, Download, ClipboardList, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react'
 import { canPunchOut, currentMonthYear, fmtDate } from '@/lib/utils'
 import { Attendance, RewardMilestone } from '@/types'
 import WorkerPersonalDetailsTab from '@/components/worker/WorkerPersonalDetailsTab'
@@ -392,6 +393,25 @@ export default function ProfilePage() {
               Attendance sheets <span className="opacity-70">({attendanceDocs.length})</span>
             </button>
           </div>
+          {/* Live attendance sheet — always shown in attendance tab */}
+          {docTab === 'attendance' && (
+            <Link
+              href="/dashboard/attendance-sheet"
+              className="flex items-center gap-3 bg-pink-50 border border-pink-100 rounded-2xl px-3 py-3 hover:border-pink-300 active:scale-[0.98] transition-all mb-2"
+            >
+              <div className="w-8 h-8 rounded-xl bg-pink-600 flex items-center justify-center flex-shrink-0">
+                <FileText size={14} className="text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold text-gray-800">This month's attendance sheet</p>
+                <p className="text-[9px] text-pink-500 font-semibold mt-0.5">
+                  Live · updated daily · tap to view
+                </p>
+              </div>
+              <ExternalLink size={13} className="text-pink-400 flex-shrink-0" />
+            </Link>
+          )}
+
           {docsLoading ? (
             <div className="flex items-center justify-center py-6">
               <Loader2 className="animate-spin text-pink-400" size={18} />

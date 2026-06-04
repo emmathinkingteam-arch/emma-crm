@@ -20,17 +20,22 @@ export async function GET(req: NextRequest) {
 
   if (usersErr) return NextResponse.json({ error: usersErr.message }, { status: 500 })
 
-  let profileQuery = sa.from('worker_profiles').select('*')
-  if (!showHidden) profileQuery = profileQuery.eq('is_hidden', false)
-
-  const { data: profiles, error: profilesErr } = await profileQuery
+  // Always fetch ALL profiles so hidden workers with no profile don't slip through
+  const { data: profiles, error: profilesErr } = await sa.from('worker_profiles').select('*')
   if (profilesErr) return NextResponse.json({ error: profilesErr.message }, { status: 500 })
 
   const profileMap = new Map((profiles ?? []).map((p: Record<string, unknown>) => [p.user_id, p]))
+
   const merged = (allUsers ?? []).map((u: Record<string, unknown>) => ({
     ...u,
     profile: profileMap.get(u.id as string) ?? null,
   }))
 
-  return NextResponse.json({ workers: merged })
+  // Filter AFTER merging — workers whose profile has is_hidden=true are excluded
+  // unless the admin explicitly requested to show them
+  const filtered = showHidden
+    ? merged
+    : merged.filter((w: any) => !w.profile?.is_hidden)
+
+  return NextResponse.json({ workers: filtered })
 }

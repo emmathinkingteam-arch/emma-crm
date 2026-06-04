@@ -7,7 +7,7 @@ import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import { Order, OrderStep } from '@/types'
-import { Loader2, Bell, ChevronRight, CheckCircle2, Sparkles, Clock, Phone } from 'lucide-react'
+import { Loader2, Bell, ChevronRight, CheckCircle2, Sparkles, Clock, Phone, TrendingUp } from 'lucide-react'
 import Link from 'next/link'
 import { type Lead, leadCountdown, leadPenaltySoFar } from '@/lib/leads'
 
@@ -170,15 +170,37 @@ export default function DashboardPage() {
 
       <div className="flex-1 overflow-y-auto px-4 py-4 pb-28 space-y-4">
 
+        {/* Greeting */}
+        {(() => {
+          const h = new Date().getHours()
+          const greet = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
+          return (
+            <div className="px-1 pt-1 pb-0.5">
+              <p className="text-base font-bold text-gray-800">{greet}{user?.full_name ? `, ${user.full_name.split(' ')[0]}` : ''} 👋</p>
+              <p className="text-[10px] text-gray-400 font-medium mt-0.5">
+                {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
+              </p>
+            </div>
+          )
+        })()}
+
         {/* Stats row */}
         <div className="grid grid-cols-2 gap-3">
-          <div className="bg-gray-50 border border-gray-100 rounded-2xl p-3.5">
-            <p className="text-xl font-bold text-pink-600">{newWorks.length + inProgress.length}</p>
-            <p className="text-xs text-gray-400 font-medium mt-0.5">My active assignments</p>
+          <div className="bg-pink-50 border border-pink-100 rounded-2xl p-3.5">
+            <div className="flex items-center justify-between mb-1">
+              <TrendingUp size={14} className="text-pink-400" />
+              <span className="text-[8px] font-bold text-pink-400 uppercase tracking-wide">Active</span>
+            </div>
+            <p className="text-2xl font-extrabold text-pink-600">{newWorks.length + inProgress.length}</p>
+            <p className="text-[10px] text-gray-400 font-semibold mt-0.5">My assignments</p>
           </div>
           <div className={`border rounded-2xl p-3.5 ${overdueCount > 0 ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100'}`}>
-            <p className={`text-xl font-bold ${overdueCount > 0 ? 'text-red-500' : 'text-gray-400'}`}>{overdueCount}</p>
-            <p className="text-xs text-gray-400 font-medium mt-0.5">Overdue</p>
+            <div className="flex items-center justify-between mb-1">
+              <Clock size={14} className={overdueCount > 0 ? 'text-red-400' : 'text-gray-300'} />
+              <span className={`text-[8px] font-bold uppercase tracking-wide ${overdueCount > 0 ? 'text-red-400' : 'text-gray-300'}`}>Overdue</span>
+            </div>
+            <p className={`text-2xl font-extrabold ${overdueCount > 0 ? 'text-red-500' : 'text-gray-300'}`}>{overdueCount}</p>
+            <p className="text-[10px] text-gray-400 font-semibold mt-0.5">{overdueCount > 0 ? 'Need attention' : 'All on track'}</p>
           </div>
         </div>
 

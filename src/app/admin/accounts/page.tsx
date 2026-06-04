@@ -165,11 +165,12 @@ export default function AccountsOverviewPage() {
                     tint="rose"
                 />
                 <Card
-                    icon={<PiggyBank size={15} className="text-pink-600" />}
+                    icon={<PiggyBank size={15} className={profit >= 0 ? 'text-emerald-600' : 'text-red-500'} />}
                     label="Net profit"
                     value={lkr0(profit)}
-                    tint="pink"
+                    tint={profit >= 0 ? 'emerald' : 'rose'}
                     big
+                    highlight={profit < 0 ? 'loss' : profit > 0 ? 'gain' : undefined}
                 />
                 <Card
                     icon={<Banknote size={15} className="text-sky-600" />}
@@ -209,8 +210,11 @@ export default function AccountsOverviewPage() {
                                 </div>
                                 <div className="flex-1 h-3 bg-gray-100 rounded-full overflow-hidden">
                                     <div
-                                        className="h-full bg-pink-500 rounded-full"
-                                        style={{ width: `${(c.amount / maxCat) * 100}%` }}
+                                        className="h-full rounded-full"
+                                        style={{
+                                            width: `${(c.amount / maxCat) * 100}%`,
+                                            background: `hsl(${330 - (catCosts.indexOf(c) / Math.max(catCosts.length - 1, 1)) * 120}, 70%, 55%)`,
+                                        }}
                                     />
                                 </div>
                                 <div className="w-28 text-right text-xs font-bold text-gray-700 tabular-nums">
@@ -259,14 +263,16 @@ function Card({
     value,
     tint,
     big,
+    highlight,
 }: {
     icon: React.ReactNode
     label: string
     value: string
     tint: string
     big?: boolean
+    highlight?: 'gain' | 'loss'
 }) {
-    const ring: Record<string, string> = {
+    const iconBg: Record<string, string> = {
         emerald: 'bg-emerald-50',
         rose: 'bg-rose-50',
         pink: 'bg-pink-50',
@@ -274,13 +280,26 @@ function Card({
         amber: 'bg-amber-50',
         gray: 'bg-gray-50',
     }
+    const cardBg: Record<string, string> = {
+        emerald: 'bg-emerald-50/40',
+        rose: 'bg-rose-50/40',
+        pink: 'bg-pink-50/40',
+        sky: 'bg-sky-50/40',
+        amber: 'bg-amber-50/40',
+        gray: 'bg-white',
+    }
+    const valueColor = highlight === 'gain'
+        ? 'text-emerald-700'
+        : highlight === 'loss'
+            ? 'text-red-600'
+            : 'text-gray-800'
+
     return (
         <div
-            className={`rounded-2xl border border-gray-100 shadow-sm p-4 bg-white ${big ? 'ring-1 ring-pink-100' : ''
-                }`}
+            className={`rounded-2xl border shadow-sm p-4 ${big ? 'ring-1' : ''} ${highlight === 'gain' ? 'border-emerald-200 ring-emerald-100' : highlight === 'loss' ? 'border-red-200 ring-red-100' : 'border-gray-100 ring-pink-100'} ${cardBg[tint] || 'bg-white'}`}
         >
             <div
-                className={`w-8 h-8 rounded-lg flex items-center justify-center ${ring[tint]}`}
+                className={`w-8 h-8 rounded-lg flex items-center justify-center ${iconBg[tint]}`}
             >
                 {icon}
             </div>
@@ -288,8 +307,7 @@ function Card({
                 {label}
             </p>
             <p
-                className={`font-extrabold text-gray-800 mt-0.5 ${big ? 'text-2xl' : 'text-lg'
-                    }`}
+                className={`font-extrabold mt-0.5 ${big ? 'text-2xl' : 'text-lg'} ${valueColor}`}
             >
                 {value}
             </p>

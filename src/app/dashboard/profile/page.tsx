@@ -48,6 +48,14 @@ export default function ProfilePage() {
   const [attendanceDocs, setAttendanceDocs] = useState<WorkerDoc[]>([])
   const [docsLoading, setDocsLoading] = useState(false)
   const [docTab, setDocTab] = useState<'salary' | 'attendance'>('salary')
+  const [approvedSheets, setApprovedSheets] = useState<any[]>([])
+
+  // Advance request state
+  const [showAdvanceForm, setShowAdvanceForm] = useState(false)
+  const [advanceAmount, setAdvanceAmount] = useState('')
+  const [advanceReason, setAdvanceReason] = useState('')
+  const [advanceLoading, setAdvanceLoading] = useState(false)
+  const [advanceSent, setAdvanceSent] = useState(false)
 
   // ── Personal details section ──────────────────────────────────
   const [showPersonalDetails, setShowPersonalDetails] = useState(false)
@@ -59,6 +67,7 @@ export default function ProfilePage() {
     if (!user) { router.replace('/auth/login'); return }
     fetchAll()
     fetchDocuments()
+    fetchApprovedSheets()
     // Check if worker has already filled personal details
     fetch('/api/worker-profile')
       .then(r => r.json())
@@ -219,6 +228,33 @@ export default function ProfilePage() {
     setShowLeaveForm(false)
     setLeaveDate('')
     setLeaveReason('')
+  }
+
+  const fetchApprovedSheets = async () => {
+    if (!user) return
+    const { data } = await supabase
+      .from('salary_sheets')
+      .select('id, month_year, sales_commission, basic_salary, attendance_allowance, performance_allowance, data_allowance, ot_payment, special_allowance_01, special_allowance_02, epf_employee, no_pay_deduction, salary_advance, stamp_duty, meeting_absence, advance_deduction, late_deductions, approved_at')
+      .eq('user_id', user.id)
+      .eq('status', 'approved')
+      .order('month_year', { ascending: false })
+    if (data) setApprovedSheets(data)
+  }
+
+  const submitAdvance = async () => {
+    if (!user || !advanceAmount || !advanceReason) return
+    setAdvanceLoading(true)
+    await fetch('/api/advance-requests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount: Number(advanceAmount), reason: advanceReason }),
+    })
+    setAdvanceLoading(false)
+    setShowAdvanceForm(false)
+    setAdvanceAmount('')
+    setAdvanceReason('')
+    setAdvanceSent(true)
+    setTimeout(() => setAdvanceSent(false), 4000)
   }
 
   const handleLogout = async () => {
@@ -393,6 +429,32 @@ export default function ProfilePage() {
               Attendance sheets <span className="opacity-70">({attendanceDocs.length})</span>
             </button>
           </div>
+          {/* Approved salary sheets — live generated payslips */}
+          {docTab === 'salary' && approvedSheets.length > 0 && (
+            <div className="space-y-2 mb-2">
+              {approvedSheets.map(s => {
+                const [yr, mo] = s.month_year.split('-')
+                const label = new Date(Number(yr), Number(mo) - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+                const gross = ['basic_salary','attendance_allowance','performance_allowance','data_allowance','ot_payment','sales_commission','special_allowance_01','special_allowance_02'].reduce((a, k) => a + Number(s[k] || 0), 0)
+                const ded = ['epf_employee','no_pay_deduction','salary_advance','stamp_duty','meeting_absence','advance_deduction','late_deductions'].reduce((a, k) => a + Number(s[k] || 0), 0)
+                const net = gross - ded
+                return (
+                  <Link key={s.id} href={`/dashboard/salary-sheet/${s.id}`}
+                    className="flex items-center gap-3 bg-white border border-gray-100 rounded-2xl px-3 py-2.5 hover:border-pink-200 active:scale-[0.98] transition-all">
+                    <div className="w-8 h-8 rounded-xl bg-green-50 flex items-center justify-center flex-shrink-0">
+                      <FileText size={14} className="text-green-500" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold text-gray-700">{label} Payslip</p>
+                      <p className="text-[9px] text-gray-400 font-medium mt-0.5">Net LKR {net.toLocaleString('en-LK', { minimumFractionDigits: 2 })} · Approved</p>
+                    </div>
+                    <ExternalLink size={13} className="text-gray-300 flex-shrink-0" />
+                  </Link>
+                )
+              })}
+            </div>
+          )}
+
           {/* Live attendance sheet — always shown in attendance tab */}
           {docTab === 'attendance' && (
             <Link
@@ -484,9 +546,14 @@ export default function ProfilePage() {
           })}
         </div>
 
-        {/* Leave / OT */}
+        {/* Leave / OT / Advance */}
         <div className="space-y-2">
-          {!showLeaveForm ? (
+          {advanceSent && (
+            <div className="bg-green-50 border border-green-100 rounded-2xl px-4 py-3 text-xs font-semibold text-green-700 text-center">
+              Advance request sent — waiting for approval ✓
+            </div>
+          )}
+          {!showLeaveForm && !showAdvanceForm ? (
             <div className="flex gap-2">
               <button onClick={() => setShowLeaveForm(true)}
                 className="flex-1 bg-gray-50 border border-gray-200 rounded-2xl py-3 text-xs font-semibold text-gray-500">
@@ -495,6 +562,36 @@ export default function ProfilePage() {
               <button className="flex-1 bg-gray-50 border border-gray-200 rounded-2xl py-3 text-xs font-semibold text-gray-500">
                 Request OT
               </button>
+              <button onClick={() => setShowAdvanceForm(true)}
+                className="flex-1 bg-amber-50 border border-amber-200 rounded-2xl py-3 text-xs font-semibold text-amber-600">
+                Request advance
+              </button>
+            </div>
+          ) : showAdvanceForm ? (
+            <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 space-y-3">
+              <p className="text-xs font-bold text-gray-700">Request salary advance</p>
+              <input
+                type="number"
+                value={advanceAmount}
+                onChange={e => setAdvanceAmount(e.target.value)}
+                placeholder="Amount (LKR)"
+                className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none"
+              />
+              <textarea
+                value={advanceReason}
+                onChange={e => setAdvanceReason(e.target.value)}
+                placeholder="Reason for advance..."
+                rows={2}
+                className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs font-medium outline-none resize-none"
+              />
+              <div className="flex gap-2">
+                <button onClick={() => setShowAdvanceForm(false)}
+                  className="flex-1 bg-gray-100 text-gray-500 rounded-xl py-2.5 text-xs font-bold">Cancel</button>
+                <button onClick={submitAdvance} disabled={advanceLoading}
+                  className="flex-1 bg-amber-500 text-white rounded-xl py-2.5 text-xs font-bold">
+                  {advanceLoading ? 'Sending…' : 'Submit'}
+                </button>
+              </div>
             </div>
           ) : (
             <div className="bg-gray-50 border border-gray-100 rounded-2xl p-4 space-y-3">

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
-import { Loader2, Printer, ArrowLeft } from 'lucide-react'
+import { Loader2, Printer, ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react'
 
 interface AttendanceRow {
   date: string
@@ -71,56 +71,83 @@ export default function AttendanceSheetPage() {
   const router = useRouter()
   const { user } = useAuthStore()
 
+  const now = new Date()
+  const today = now.toISOString().split('T')[0]
+
+  // Build list of available months: hire month up to current month
+  // We'll allow current month + all past months (up to 12 back)
+  const buildMonthList = () => {
+    const months: string[] = []
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+    }
+    return months
+  }
+  const availableMonths = buildMonthList()
+  const currentMonthYear = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+
+  const [selectedMonth, setSelectedMonth] = useState(currentMonthYear)
   const [loading, setLoading] = useState(true)
   const [profile, setProfile] = useState<WorkerProfile>({})
   const [attendance, setAttendance] = useState<AttendanceRow[]>([])
   const [commissions, setCommissions] = useState<CommissionDay[]>([])
 
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = now.getMonth() // 0-indexed
-  const monthYear = `${year}-${String(month + 1).padStart(2, '0')}`
-  const monthStart = `${monthYear}-01`
-  const today = now.toISOString().split('T')[0]
-  const monthLabel = now.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
-
-  // All days in the month up to today
-  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  // Derived from selectedMonth
+  const [selYear, selMon] = selectedMonth.split('-').map(Number)
+  const monthStart = `${selectedMonth}-01`
+  const isCurrentMonth = selectedMonth === currentMonthYear
+  // For past months show all days; for current month show up to today
+  const daysInMonth = new Date(selYear, selMon, 0).getDate()
+  const monthEnd = isCurrentMonth ? today : `${selectedMonth}-${String(daysInMonth).padStart(2, '0')}`
   const allDays: string[] = []
   for (let d = 1; d <= daysInMonth; d++) {
-    const ds = `${monthYear}-${String(d).padStart(2, '0')}`
-    if (ds <= today) allDays.push(ds)
+    const ds = `${selectedMonth}-${String(d).padStart(2, '0')}`
+    if (ds <= monthEnd) allDays.push(ds)
   }
+  const monthLabel = new Date(selYear, selMon - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+
+  // Navigate months — only within available range
+  const selectedIdx = availableMonths.indexOf(selectedMonth)
+  const canGoPrev = selectedIdx > 0
+  const canGoNext = selectedIdx < availableMonths.length - 1
 
   useEffect(() => {
     if (!user) { router.replace('/auth/login'); return }
-    load()
+    loadProfile()
   }, [user])
 
-  const load = async () => {
+  useEffect(() => {
+    if (!user) return
+    loadMonth()
+  }, [selectedMonth, user])
+
+  const loadProfile = async () => {
+    const profRes = await fetch('/api/worker-profile').then(r => r.json())
+    if (profRes.profile) setProfile(profRes.profile)
+  }
+
+  const loadMonth = async () => {
     if (!user) return
     setLoading(true)
 
-    const [profRes, attRes, commRes] = await Promise.all([
-      fetch('/api/worker-profile').then(r => r.json()),
+    const [attRes, commRes] = await Promise.all([
       supabase
         .from('attendance')
         .select('date, punch_in, punch_out, hours_worked, status, note')
         .eq('user_id', user.id)
         .gte('date', monthStart)
-        .lte('date', today)
+        .lte('date', monthEnd)
         .order('date'),
       supabase
         .from('commissions')
         .select('earned_at, amount')
         .eq('user_id', user.id)
-        .eq('month_year', monthYear),
+        .eq('month_year', selectedMonth),
     ])
 
-    if (profRes.profile) setProfile(profRes.profile)
     if (attRes.data) setAttendance(attRes.data as AttendanceRow[])
 
-    // Group commissions by date
     const commMap: Record<string, number> = {}
     for (const c of (commRes.data || []) as any[]) {
       const d = new Date(c.earned_at).toISOString().split('T')[0]
@@ -183,7 +210,31 @@ export default function AttendanceSheetPage() {
         >
           <ArrowLeft size={15} /> Back
         </button>
-        <div className="flex-1" />
+
+        {/* Month switcher */}
+        <div className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-full px-1 py-1 mx-auto">
+          <button
+            onClick={() => canGoPrev && setSelectedMonth(availableMonths[selectedIdx - 1])}
+            disabled={!canGoPrev}
+            className="w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-white disabled:opacity-30 transition"
+          >
+            <ChevronLeft size={14} />
+          </button>
+          <span className="text-xs font-bold text-gray-700 px-2 min-w-[110px] text-center">
+            {monthLabel}
+            {isCurrentMonth && (
+              <span className="ml-1.5 text-[8px] font-bold text-pink-500 bg-pink-50 px-1.5 py-0.5 rounded-full">LIVE</span>
+            )}
+          </span>
+          <button
+            onClick={() => canGoNext && setSelectedMonth(availableMonths[selectedIdx + 1])}
+            disabled={!canGoNext}
+            className="w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-white disabled:opacity-30 transition"
+          >
+            <ChevronRight size={14} />
+          </button>
+        </div>
+
         <button
           onClick={() => window.print()}
           className="flex items-center gap-2 bg-pink-600 text-white text-xs font-bold px-4 py-2 rounded-full shadow-sm hover:bg-pink-700 transition active:scale-95"

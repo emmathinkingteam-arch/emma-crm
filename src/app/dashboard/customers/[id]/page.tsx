@@ -14,6 +14,7 @@ import {
 import { Customer, Order, OrderStep, Interaction, Package as Pkg, MONTH_CODES } from '@/types'
 import { fmtDate, fmtTime, buildWaLink, openWaLink, WA, KOKO_SERVICE_CHARGE_RATE, getCounselorAvailability } from '@/lib/utils'
 import { formatPhoneDisplay } from '@/lib/country-codes'
+import InterestStatsCard from '@/components/shared/InterestStatsCard'
 
 const SLOT_LABELS: Record<string, string> = { W: '6:30am', X: '11:30am', Y: '3:30pm', Z: '8:30pm' }
 const SLOTS = ['W', 'X', 'Y', 'Z'] as const
@@ -1114,6 +1115,14 @@ export default function CustomerDetailPage() {
         </div>
 
         <div className="px-4 py-4 space-y-4">
+
+          {/* ── WEBSITE INTEREST STATS ──────────────────────── */}
+          {customer && (
+            <InterestStatsCard
+              phone={customer.phone}
+              postDate={activeOrder?.planned_post_date ?? null}
+            />
+          )}
 
           {isExpired && (
             <div className="bg-red-50 border border-red-200 rounded-2xl p-4 text-center">

@@ -83,13 +83,13 @@ export default function AdminDashboardPage() {
     Promise.all([
       supabase.from('orders').select('id', { count: 'exact', head: true }).eq('status', 'active'),
       supabase.from('customers').select('id', { count: 'exact', head: true }).gte('created_at', today),
-      supabase.from('order_steps').select('id', { count: 'exact', head: true }).eq('is_overdue', true),
+      supabase.from('order_steps').select('id', { count: 'exact', head: true }).eq('is_overdue', true).neq('status', 'done'),
       supabase.from('attendance').select('id', { count: 'exact', head: true }).eq('date', today).not('punch_in', 'is', null).is('punch_out', null),
       supabase.from('commissions').select('amount').eq('month_year', month),
       supabase.from('leave_requests').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
       supabase.from('customers').select('id', { count: 'exact', head: true }),
       supabase.from('orders').select('id', { count: 'exact', head: true }).eq('status', 'active').not('published_at', 'is', null),
-      supabase.from('order_steps').select('*, order:orders(customer:customers(name,phone)), assigned_user:users!assigned_to(full_name)').eq('is_overdue', true).limit(5),
+      supabase.from('order_steps').select('*, order:orders(customer:customers(name,phone)), assigned_user:users!assigned_to(full_name)').eq('is_overdue', true).neq('status', 'done').limit(5),
     ]).then(([ao, nt, ov, pi, mc, lp, tc, lv, oi]) => {
       setStats({
         activeOrders: (ao as any).count ?? 0, newToday: (nt as any).count ?? 0, overdue: (ov as any).count ?? 0,

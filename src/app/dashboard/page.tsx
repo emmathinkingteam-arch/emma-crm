@@ -287,19 +287,21 @@ export default function DashboardPage() {
         )}
 
         {/* Tabs */}
-        <div className="flex gap-1.5 bg-gray-50 border border-gray-100 rounded-full p-1">
+        <div className="grid grid-cols-3 gap-2">
           {tabList.map(t => (
             <button
               key={t.key}
               onClick={() => setActiveTab(t.key)}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-full text-[10px] font-bold uppercase tracking-wide transition-all ${activeTab === t.key ? 'bg-pink-600 text-white shadow-sm' : 'text-gray-400'
-                }`}
+              className={`flex flex-col items-center py-3 rounded-2xl text-[10px] font-bold uppercase tracking-wide transition-all ${
+                activeTab === t.key
+                  ? 'bg-pink-600 text-white shadow-md shadow-pink-200'
+                  : 'bg-gray-50 border border-gray-100 text-gray-400'
+              }`}
             >
-              {t.label}
-              <span className={`px-1.5 py-0.5 rounded-full text-[8px] ${activeTab === t.key ? 'bg-white/25' : 'bg-white text-gray-400'
-                }`}>
+              <span className={`text-lg font-extrabold mb-0.5 ${activeTab === t.key ? 'text-white' : t.key === 'in_progress' && overdueCount > 0 ? 'text-red-500' : 'text-gray-700'}`}>
                 {t.count}
               </span>
+              {t.label}
             </button>
           ))}
         </div>
@@ -393,18 +395,6 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Quick actions based on role */}
-        {role === 'crm_agent' && (
-          <div>
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">Quick action</p>
-            <Link
-              href="/entry"
-              className="block bg-pink-600 text-white rounded-2xl p-4 text-center font-bold text-sm shadow-lg shadow-pink-200 active:scale-95 transition-all"
-            >
-              Enter new number →
-            </Link>
-          </div>
-        )}
       </div>
 
       <BottomNav />

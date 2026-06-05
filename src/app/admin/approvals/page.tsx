@@ -217,8 +217,12 @@ export default function ApprovalsPage() {
     supabase.from('ot_requests').select('*, user:users!user_id(full_name)').eq('status', 'pending').order('created_at').then(({ data }) => { if (data) setOts(data) })
     supabase.from('advance_requests').select('*, user:users!user_id(full_name)').eq('status', 'pending').order('requested_at').then(({ data }) => { if (data) setAdvances(data) })
     supabase.from('advance_requests').select('*, user:users!user_id(full_name)').neq('status', 'pending').order('requested_at', { ascending: false }).limit(30).then(({ data }) => { if (data) setAdvanceHistory(data) })
-    supabase.from('salary_sheets').select('*').eq('status', 'pending_approval').order('month_year', { ascending: false }).then(({ data }) => { if (data) setPendingSheets(data) })
-    supabase.from('salary_sheets').select('*').neq('status', 'pending_approval').order('approved_at', { ascending: false }).limit(30).then(({ data }) => { if (data) setApprovedSheets(data) })
+    supabase.from('salary_sheets').select('*').in('status', ['pending_approval', 'approved', 'rejected']).order('month_year', { ascending: false }).then(({ data }) => {
+      if (data) {
+        setPendingSheets(data.filter((s: any) => s.status === 'pending_approval'))
+        setApprovedSheets(data.filter((s: any) => s.status !== 'pending_approval'))
+      }
+    })
     supabase.from('second_post_requests')
       .select('*, requester:users!requested_by(full_name), counselor:users!counselor_id(full_name), reviewer:users!reviewed_by(full_name)')
       .order('requested_at', { ascending: false })
@@ -433,14 +437,27 @@ export default function ApprovalsPage() {
                 const gross = ['basic_salary', 'attendance_allowance', 'performance_allowance', 'data_allowance', 'ot_payment', 'sales_commission', 'special_allowance_01', 'special_allowance_02'].reduce((a, k) => a + Number(s[k] || 0), 0)
                 const ded = ['epf_employee', 'no_pay_deduction', 'salary_advance', 'stamp_duty', 'meeting_absence', 'advance_deduction', 'late_deductions'].reduce((a, k) => a + Number(s[k] || 0), 0)
                 return (
-                  <div key={s.id} className="bg-white border border-gray-100 rounded-2xl px-5 py-3 shadow-sm flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-bold text-gray-700">{s.full_name} — {ml}</p>
-                      <p className="text-[10px] text-gray-400 font-medium mt-0.5">Net LKR {(gross - ded).toLocaleString('en-LK', { minimumFractionDigits: 2 })} · Commission LKR {Number(s.sales_commission || 0).toLocaleString()}</p>
+                  <div key={s.id}>
+                    <div className="bg-white border border-gray-100 rounded-2xl px-5 py-3 shadow-sm flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-bold text-gray-700">{s.full_name} — {ml}</p>
+                        <p className="text-[10px] text-gray-400 font-medium mt-0.5">Net LKR {(gross - ded).toLocaleString('en-LK', { minimumFractionDigits: 2 })} · Commission LKR {Number(s.sales_commission || 0).toLocaleString()}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[9px] font-bold px-2.5 py-1 rounded-full ${s.status === 'approved' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500'}`}>
+                          {s.status === 'approved' ? 'Approved' : 'Rejected'}
+                        </span>
+                        <button
+                          onClick={async () => {
+                            await supabase.from('salary_sheets').update({ status: 'pending_approval' }).eq('id', s.id)
+                            fetchAll()
+                          }}
+                          className="text-[9px] font-bold px-2.5 py-1 rounded-full bg-gray-100 text-gray-500 hover:bg-pink-50 hover:text-pink-600 transition"
+                        >
+                          Re-edit
+                        </button>
+                      </div>
                     </div>
-                    <span className={`text-[9px] font-bold px-2.5 py-1 rounded-full ${s.status === 'approved' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500'}`}>
-                      {s.status === 'approved' ? 'Approved' : 'Rejected'}
-                    </span>
                   </div>
                 )
               })

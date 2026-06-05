@@ -20,6 +20,7 @@ export default function EntryPage() {
   const [pasted, setPasted] = useState(false)
   const [detectedFlag, setDetectedFlag] = useState('')
   const [pasteError, setPasteError] = useState('')
+  const [existingCustomer, setExistingCustomer] = useState<{ id: string; name?: string; hasOrder: boolean; packageName?: string } | null>(null)
 
   useEffect(() => {
     if (role && role !== 'crm_agent') {
@@ -80,18 +81,39 @@ export default function EntryPage() {
   const handleStart = async () => {
     if (phone.length < 7) return
     setLoading(true)
+    setExistingCustomer(null)
 
     const fullPhone = normalisePhone(phone, countryDial)
 
     // Check if customer already exists
     const { data: existing } = await supabase
       .from('customers')
-      .select('id')
+      .select('id, name')
       .eq('phone', fullPhone)
       .single()
 
     if (existing) {
-      router.push(`/dashboard/customers/${existing.id}`)
+      // Check if they have an active order
+      const { data: order } = await supabase
+        .from('orders')
+        .select('id, package:packages(name)')
+        .eq('customer_id', existing.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+
+      if (order) {
+        // Show upgrade choice — don't auto-navigate
+        setExistingCustomer({
+          id: existing.id,
+          name: existing.name || undefined,
+          hasOrder: true,
+          packageName: (order as any).package?.name,
+        })
+      } else {
+        // No order — just go to customer
+        router.push(`/dashboard/customers/${existing.id}`)
+      }
     } else {
       router.push(`/entry/process?phone=${fullPhone}`)
     }
@@ -194,6 +216,31 @@ export default function EntryPage() {
           >
             {loading ? <Loader2 size={16} className="animate-spin" /> : <>Start Job Now <ChevronRight size={16} /></>}
           </button>
+
+          {/* Existing customer with order — upgrade choice */}
+          {existingCustomer?.hasOrder && (
+            <div className="mt-3 bg-amber-50 border-2 border-amber-200 rounded-2xl p-4 space-y-3">
+              <div>
+                <p className="text-xs font-bold text-amber-700 uppercase tracking-wide mb-1">⚠️ Existing customer with package</p>
+                <p className="text-sm font-bold text-gray-800">{existingCustomer.name || 'Customer'}</p>
+                <p className="text-[10px] text-gray-500 mt-0.5">Current package: <span className="font-bold text-pink-600">{existingCustomer.packageName || 'Unknown'}</span></p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => router.push(`/dashboard/customers/${existingCustomer.id}`)}
+                  className="flex-1 bg-white border border-gray-200 rounded-xl py-2.5 text-xs font-bold text-gray-600 active:scale-95 transition-all"
+                >
+                  View Customer
+                </button>
+                <button
+                  onClick={() => router.push(`/dashboard/customers/${existingCustomer.id}?upgrade=true`)}
+                  className="flex-1 bg-pink-600 text-white rounded-xl py-2.5 text-xs font-bold shadow-md shadow-pink-200 active:scale-95 transition-all"
+                >
+                  Upgrade Package →
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Daily stats */}
           <div className="grid grid-cols-2 gap-3 mt-6">

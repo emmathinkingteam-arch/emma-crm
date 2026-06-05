@@ -57,6 +57,13 @@ export default function ProfilePage() {
   const [advanceLoading, setAdvanceLoading] = useState(false)
   const [advanceSent, setAdvanceSent] = useState(false)
 
+  // OT request state
+  const [showOTForm, setShowOTForm] = useState(false)
+  const [otDate, setOtDate] = useState('')
+  const [otHours, setOtHours] = useState('')
+  const [otReason, setOtReason] = useState('')
+  const [otLoading, setOtLoading] = useState(false)
+
   // ── Personal details section ──────────────────────────────────
   const [showPersonalDetails, setShowPersonalDetails] = useState(false)
   const [profileSubmitted, setProfileSubmitted] = useState(false)
@@ -255,6 +262,21 @@ export default function ProfilePage() {
     setAdvanceReason('')
     setAdvanceSent(true)
     setTimeout(() => setAdvanceSent(false), 4000)
+  }
+
+  const submitOT = async () => {
+    if (!user || !otDate || !otHours || !otReason) return
+    setOtLoading(true)
+    await supabase.from('ot_requests').insert({
+      user_id: user.id,
+      ot_date: otDate,
+      ot_hours: Number(otHours),
+      reason: otReason,
+      status: 'pending',
+    })
+    setOtLoading(false)
+    setShowOTForm(false)
+    setOtDate(''); setOtHours(''); setOtReason('')
   }
 
   const handleLogout = async () => {
@@ -553,19 +575,40 @@ export default function ProfilePage() {
               Advance request sent — waiting for approval ✓
             </div>
           )}
-          {!showLeaveForm && !showAdvanceForm ? (
+          {!showLeaveForm && !showAdvanceForm && !showOTForm ? (
             <div className="flex gap-2">
               <button onClick={() => setShowLeaveForm(true)}
                 className="flex-1 bg-gray-50 border border-gray-200 rounded-2xl py-3 text-xs font-semibold text-gray-500">
                 Request leave
               </button>
-              <button className="flex-1 bg-gray-50 border border-gray-200 rounded-2xl py-3 text-xs font-semibold text-gray-500">
+              <button onClick={() => setShowOTForm(true)}
+                className="flex-1 bg-gray-50 border border-gray-200 rounded-2xl py-3 text-xs font-semibold text-gray-500">
                 Request OT
               </button>
               <button onClick={() => setShowAdvanceForm(true)}
                 className="flex-1 bg-amber-50 border border-amber-200 rounded-2xl py-3 text-xs font-semibold text-amber-600">
                 Request advance
               </button>
+            </div>
+          ) : showOTForm ? (
+            <div className="bg-gray-50 border border-gray-100 rounded-2xl p-4 space-y-3">
+              <p className="text-xs font-bold text-gray-700">Request OT</p>
+              <input type="date" value={otDate} onChange={e => setOtDate(e.target.value)}
+                className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none" />
+              <input type="number" value={otHours} onChange={e => setOtHours(e.target.value)}
+                placeholder="OT hours (e.g. 2.5)"
+                className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none" />
+              <textarea value={otReason} onChange={e => setOtReason(e.target.value)}
+                placeholder="Reason..." rows={2}
+                className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs font-medium outline-none resize-none" />
+              <div className="flex gap-2">
+                <button onClick={() => setShowOTForm(false)}
+                  className="flex-1 bg-gray-100 text-gray-500 rounded-xl py-2.5 text-xs font-bold">Cancel</button>
+                <button onClick={submitOT} disabled={otLoading}
+                  className="flex-1 bg-pink-600 text-white rounded-xl py-2.5 text-xs font-bold">
+                  {otLoading ? 'Sending…' : 'Submit'}
+                </button>
+              </div>
             </div>
           ) : showAdvanceForm ? (
             <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 space-y-3">

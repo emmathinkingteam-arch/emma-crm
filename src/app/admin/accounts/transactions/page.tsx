@@ -48,6 +48,8 @@ export default function TransactionsPage() {
     const [month, setMonth] = useState(monthYear())
     const [typeFilter, setTypeFilter] = useState('')
     const [q, setQ] = useState('')
+    const [orderIncome, setOrderIncome] = useState<any[]>([])
+    const [showPenalty, setShowPenalty] = useState(false)
 
     // edit state
     const [editingId, setEditingId] = useState<string | null>(null)
@@ -66,6 +68,8 @@ export default function TransactionsPage() {
 
     async function fetchRows() {
         setLoading(true)
+
+        // Fetch accounting entries — hide penalty by default
         let query = supabase
             .from('acc_entries')
             .select(
@@ -76,13 +80,35 @@ export default function TransactionsPage() {
             .order('created_at', { ascending: false })
             .limit(500)
         if (month) query = query.eq('period_month', month)
-        if (typeFilter) query = query.eq('entry_type', typeFilter)
+        if (typeFilter) {
+            query = query.eq('entry_type', typeFilter)
+        } else if (!showPenalty) {
+            query = query.neq('entry_type', 'penalty')
+        }
         const { data } = await query
         setRows((data || []) as any[])
+
+        // Fetch CRM order income for the month
+        if (month) {
+            const monthStart = `${month}-01`
+            const [yr, mo] = month.split('-').map(Number)
+            const monthEnd = new Date(yr, mo, 0).toISOString().split('T')[0]
+            const { data: orders } = await supabase
+                .from('orders')
+                .select('id, created_at, amount_paid, customer:customers(name, phone), package:packages(name), created_by_user:users!created_by(full_name)')
+                .gte('created_at', monthStart)
+                .lte('created_at', monthEnd + 'T23:59:59')
+                .gt('amount_paid', 0)
+                .order('created_at', { ascending: false })
+            setOrderIncome((orders || []) as any[])
+        } else {
+            setOrderIncome([])
+        }
+
         setLoading(false)
     }
 
-    useEffect(() => { fetchRows() }, [month, typeFilter])
+    useEffect(() => { fetchRows() }, [month, typeFilter, showPenalty])
 
     const filtered = useMemo(() => {
         if (!q.trim()) return rows
@@ -135,6 +161,49 @@ export default function TransactionsPage() {
 
     return (
         <div className="space-y-4">
+            {/* CRM Income section */}
+            {orderIncome.length > 0 && (
+                <div className="bg-white rounded-2xl border border-emerald-100 shadow-sm overflow-hidden">
+                    <div className="px-4 py-3 bg-emerald-50 border-b border-emerald-100 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <ArrowDownToLine size={14} className="text-emerald-600" />
+                            <span className="text-xs font-bold text-emerald-700">CRM Income — {month}</span>
+                        </div>
+                        <span className="text-xs font-extrabold text-emerald-700">
+                            LKR {orderIncome.reduce((s, o) => s + Number(o.amount_paid || 0), 0).toLocaleString('en-LK', { minimumFractionDigits: 2 })}
+                        </span>
+                    </div>
+                    <table className="w-full text-xs">
+                        <thead className="bg-gray-50 border-b border-gray-100">
+                            <tr>
+                                <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">Date</th>
+                                <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">Customer</th>
+                                <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">Package</th>
+                                <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">Agent</th>
+                                <th className="px-4 py-2 text-right text-[10px] font-bold text-gray-400 uppercase">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                            {orderIncome.map(o => (
+                                <tr key={o.id} className="hover:bg-emerald-50/30">
+                                    <td className="px-4 py-2.5 text-gray-500 font-medium whitespace-nowrap">
+                                        {new Date(o.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
+                                    </td>
+                                    <td className="px-4 py-2.5 font-semibold text-gray-800">
+                                        {o.customer?.name || o.customer?.phone || '—'}
+                                    </td>
+                                    <td className="px-4 py-2.5 text-gray-500">{o.package?.name || '—'}</td>
+                                    <td className="px-4 py-2.5 text-gray-400">{o.created_by_user?.full_name || '—'}</td>
+                                    <td className="px-4 py-2.5 text-right font-bold text-emerald-600">
+                                        LKR {Number(o.amount_paid).toLocaleString('en-LK', { minimumFractionDigits: 2 })}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+
             {/* Filter bar */}
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-wrap items-center gap-2">
                 <select
@@ -166,6 +235,12 @@ export default function TransactionsPage() {
                         className="flex-1 bg-transparent text-xs outline-none"
                     />
                 </div>
+                <button
+                    onClick={() => setShowPenalty(v => !v)}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold border transition ${showPenalty ? 'bg-red-50 border-red-200 text-red-600' : 'bg-gray-50 border-gray-200 text-gray-400'}`}
+                >
+                    {showPenalty ? 'Hide penalties' : 'Show penalties'}
+                </button>
             </div>
 
             {/* Table */}

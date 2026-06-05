@@ -1940,6 +1940,22 @@ export default function CustomerDetailPage() {
             </div>
           )}
 
+          {/* ── UPGRADE PACKAGE (existing order) ──────────── */}
+          {role === 'crm_agent' && activeOrder && !isUpgrade && !showOrderForm && (
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold text-amber-700">Customer has an active package</p>
+                <p className="text-[10px] text-gray-500 mt-0.5">Want to upgrade to a higher package?</p>
+              </div>
+              <button
+                onClick={() => setIsUpgrade(true)}
+                className="bg-amber-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-sm active:scale-95 transition-all flex-shrink-0"
+              >
+                ⬆️ Upgrade
+              </button>
+            </div>
+          )}
+
           {/* ── CREATE ORDER ──────────────────────────────── */}
           {role === 'crm_agent' && (!activeOrder || isUpgrade) && (
             <div>

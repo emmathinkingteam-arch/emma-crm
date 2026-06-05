@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { websiteSupabase } from '@/lib/website-supabase'
 
 export async function GET(req: NextRequest) {
+  if (!websiteSupabase) return NextResponse.json({ found: false, reason: 'not configured' })
+
   const phone = req.nextUrl.searchParams.get('phone')
   if (!phone) return NextResponse.json({ error: 'phone required' }, { status: 400 })
 

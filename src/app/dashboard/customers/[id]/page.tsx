@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
@@ -74,6 +74,8 @@ export default function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { user, role, setUser } = useAuthStore()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const isUpgrade = searchParams.get('upgrade') === 'true'
 
   const [customer, setCustomer] = useState<Customer | null>(null)
   const [interactions, setInteractions] = useState<Interaction[]>([])
@@ -169,6 +171,13 @@ export default function CustomerDetailPage() {
   }, [])
 
   useEffect(() => { fetchAll() }, [id])
+
+  // Auto-open order form when coming from upgrade flow
+  useEffect(() => {
+    if (isUpgrade && packages.length > 0) {
+      openOrderTab()
+    }
+  }, [isUpgrade, packages])
 
   useEffect(() => {
     if (!timerActive) return
@@ -988,6 +997,23 @@ export default function CustomerDetailPage() {
     <div className="h-screen flex flex-col bg-white overflow-hidden">
       <TopNav />
       <div className="flex-1 overflow-y-auto pb-28">
+
+        {/* Upgrade banner */}
+        {isUpgrade && (
+          <div className="bg-amber-500 px-4 py-3 flex items-center gap-3">
+            <span className="text-lg">⬆️</span>
+            <div className="flex-1">
+              <p className="text-xs font-bold text-white">Package Upgrade Mode</p>
+              <p className="text-[10px] text-amber-100 font-medium">Scroll down to create a new upgrade order — all old history is kept</p>
+            </div>
+            <button
+              onClick={openOrderTab}
+              className="bg-white text-amber-600 text-[10px] font-bold px-3 py-1.5 rounded-full active:scale-95 transition-all flex-shrink-0"
+            >
+              Create Order ↓
+            </button>
+          </div>
+        )}
 
         {/* Header */}
         <div className={`px-4 pt-4 pb-5 ${customer.is_priority ? 'bg-red-50' : 'bg-pink-50'}`}>
@@ -1899,12 +1925,12 @@ export default function CustomerDetailPage() {
           )}
 
           {/* ── CREATE ORDER ──────────────────────────────── */}
-          {role === 'crm_agent' && !activeOrder && (
+          {role === 'crm_agent' && (!activeOrder || isUpgrade) && (
             <div>
               {!showOrderForm ? (
                 <button onClick={openOrderTab}
-                  className="w-full bg-pink-600 text-white rounded-2xl py-4 text-xs font-bold shadow-lg shadow-pink-200 active:scale-95 transition-all">
-                  Create order
+                  className={`w-full rounded-2xl py-4 text-xs font-bold shadow-lg active:scale-95 transition-all ${isUpgrade ? 'bg-amber-500 text-white shadow-amber-200' : 'bg-pink-600 text-white shadow-pink-200'}`}>
+                  {isUpgrade ? '⬆️ Create Upgrade Order' : 'Create order'}
                 </button>
               ) : (
                 <div className="border border-pink-200 rounded-2xl overflow-hidden">

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useParams, useRouter, useSearchParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
@@ -75,8 +75,7 @@ export default function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { user, role, setUser } = useAuthStore()
   const router = useRouter()
-  const searchParams = useSearchParams()
-  const isUpgrade = searchParams.get('upgrade') === 'true'
+  const [isUpgrade, setIsUpgrade] = useState(false)
 
   const [customer, setCustomer] = useState<Customer | null>(null)
   const [interactions, setInteractions] = useState<Interaction[]>([])
@@ -172,6 +171,14 @@ export default function CustomerDetailPage() {
   }, [])
 
   useEffect(() => { fetchAll() }, [id])
+
+  // Safely read ?upgrade=true from URL (client only — avoids Next.js Suspense requirement)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      setIsUpgrade(params.get('upgrade') === 'true')
+    }
+  }, [])
 
   // Auto-open order form when coming from upgrade flow
   useEffect(() => {

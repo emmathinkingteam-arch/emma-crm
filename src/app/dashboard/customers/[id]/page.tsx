@@ -1832,14 +1832,14 @@ export default function CustomerDetailPage() {
                           </div>
                           {/* Package colour key — matches the FR PLAN calendar */}
                           <div className="px-3 py-2 border-t border-gray-100 flex gap-2 flex-wrap">
-                            {Object.entries(PACKAGE_TONE).map(([name, t]) => (
+                            {(['princess', 'silver', 'gold', 'platinum', 'vip'] as const).map(name => (
                               <span key={name} className="flex items-center gap-1 text-[8px] text-gray-500 font-medium capitalize">
-                                <span className={`w-2 h-2 rounded-full ${t.dot} ${t.border} border`} />
+                                <span className={`w-2 h-2 rounded-full ${PACKAGE_TONE[name].dot} shadow-sm`} />
                                 {name}
                               </span>
                             ))}
                             <span className="flex items-center gap-1 text-[8px] text-gray-400 font-medium">
-                              <span className="w-2 h-2 rounded-full bg-gray-300 border border-gray-300" />
+                              <span className="w-2 h-2 rounded-full bg-gray-300 shadow-sm" />
                               Expired
                             </span>
                           </div>

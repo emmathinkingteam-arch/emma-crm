@@ -16,14 +16,18 @@ export type PackageTone = {
   chip: string    // small package-name badge
 }
 
+// IMPORTANT: `princess` is listed FIRST so that names like "Princess Gold"
+// or "Princess VIP" resolve to the single Princess (pink) colour rather
+// than gold/vip — the keyword match below checks keys in this order.
 export const PACKAGE_TONE: Record<string, PackageTone> = {
-  bronze:   { bg: 'bg-amber-100',   border: 'border-amber-400',   text: 'text-amber-900',   dot: 'bg-amber-400',   chip: 'bg-amber-300 text-amber-900' },
-  silver:   { bg: 'bg-slate-100',   border: 'border-slate-400',   text: 'text-slate-900',   dot: 'bg-slate-400',   chip: 'bg-slate-300 text-slate-900' },
-  gold:     { bg: 'bg-yellow-100',  border: 'border-yellow-400',  text: 'text-yellow-900',  dot: 'bg-yellow-400',  chip: 'bg-yellow-300 text-yellow-900' },
-  platinum: { bg: 'bg-cyan-100',    border: 'border-cyan-400',    text: 'text-cyan-900',    dot: 'bg-cyan-400',    chip: 'bg-cyan-300 text-cyan-900' },
-  diamond:  { bg: 'bg-violet-100',  border: 'border-violet-400',  text: 'text-violet-900',  dot: 'bg-violet-400',  chip: 'bg-violet-300 text-violet-900' },
-  vip:      { bg: 'bg-pink-100',    border: 'border-pink-400',    text: 'text-pink-900',    dot: 'bg-pink-400',    chip: 'bg-pink-300 text-pink-900' },
-  elite:    { bg: 'bg-emerald-100', border: 'border-emerald-400', text: 'text-emerald-900', dot: 'bg-emerald-400', chip: 'bg-emerald-300 text-emerald-900' },
+  princess: { bg: 'bg-pink-100',    border: 'border-pink-300',    text: 'text-pink-700',    dot: 'bg-pink-500',    chip: 'bg-pink-200 text-pink-700' },
+  vip:      { bg: 'bg-violet-100',  border: 'border-violet-300',  text: 'text-violet-700',  dot: 'bg-violet-500',  chip: 'bg-violet-200 text-violet-700' },
+  platinum: { bg: 'bg-cyan-100',    border: 'border-cyan-300',    text: 'text-cyan-700',    dot: 'bg-cyan-500',    chip: 'bg-cyan-200 text-cyan-700' },
+  gold:     { bg: 'bg-amber-100',   border: 'border-amber-300',   text: 'text-amber-700',   dot: 'bg-amber-500',   chip: 'bg-amber-200 text-amber-800' },
+  silver:   { bg: 'bg-slate-100',   border: 'border-slate-300',   text: 'text-slate-600',   dot: 'bg-slate-400',   chip: 'bg-slate-200 text-slate-700' },
+  bronze:   { bg: 'bg-orange-100',  border: 'border-orange-300',  text: 'text-orange-700',  dot: 'bg-orange-500',  chip: 'bg-orange-200 text-orange-800' },
+  diamond:  { bg: 'bg-sky-100',     border: 'border-sky-300',     text: 'text-sky-700',     dot: 'bg-sky-500',     chip: 'bg-sky-200 text-sky-700' },
+  elite:    { bg: 'bg-emerald-100', border: 'border-emerald-300', text: 'text-emerald-700', dot: 'bg-emerald-500', chip: 'bg-emerald-200 text-emerald-700' },
 }
 
 export const PACKAGE_TONE_FALLBACK: PackageTone = {

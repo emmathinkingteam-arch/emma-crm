@@ -13,6 +13,9 @@ import { PACKAGE_TONE, packageTone } from '@/lib/package-colors'
 
 const SLOTS: TimeSlot[] = ['W', 'X', 'Y', 'Z']
 
+// Tiers shown in the calendar legend — the packages actually sold.
+const LEGEND_TIERS = ['princess', 'silver', 'gold', 'platinum', 'vip'] as const
+
 export default function CalendarPage() {
   const router = useRouter()
   const { user, role } = useAuthStore()
@@ -50,16 +53,16 @@ export default function CalendarPage() {
   const getSlot = (date: string, slot: TimeSlot) =>
     slots.find(s => s.slot_date === date && s.slot_time === slot)
 
+  const isExpiredSlot = (s: CalendarSlot | undefined) =>
+    !!(s?.published_at && s?.validity_expires_at && new Date(s.validity_expires_at) < new Date())
+
   const cellClass = (s: CalendarSlot | undefined) => {
-    if (!s) return 'bg-gray-50 hover:bg-pink-50 cursor-pointer'
-    const tone = packageTone((s as any).order?.package?.name)
-    const now = new Date()
+    if (!s) return 'bg-gray-50 border border-gray-100 hover:bg-pink-50 hover:border-pink-200 cursor-pointer'
     // Expired plans go grey regardless of package
-    if (s.published_at && s.validity_expires_at && new Date(s.validity_expires_at) < now) {
-      return 'bg-gray-100 text-gray-400 cursor-pointer'
-    }
-    // Otherwise: package colour, with clickable cursor to open the detail page
-    return `${tone.bg} border ${tone.border} cursor-pointer`
+    if (isExpiredSlot(s)) return 'bg-gray-100 border border-gray-200 cursor-pointer'
+    // Otherwise: soft package colour with its coloured ring + a glossy lift
+    const tone = packageTone((s as any).order?.package?.name)
+    return `${tone.bg} border ${tone.border} shadow-sm cursor-pointer hover:shadow-md hover:-translate-y-0.5`
   }
 
   // Click handlers for the grid cells:
@@ -76,6 +79,7 @@ export default function CalendarPage() {
   }
 
   const days = getDaysInMonth()
+  const todayStr = new Date().toISOString().split('T')[0]
   const monthLabel = currentDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
 
   const prevMonth = () => setCurrentDate(d => new Date(d.getFullYear(), d.getMonth() - 1, 1))
@@ -87,61 +91,72 @@ export default function CalendarPage() {
       <div className="flex-1 overflow-hidden flex flex-col">
 
         {/* Header */}
-        <div className="px-4 py-3 flex items-center justify-between border-b border-gray-100">
-          <button onClick={prevMonth} className="p-2 rounded-xl bg-gray-50 border border-gray-100"><ChevronLeft size={16} className="text-gray-500" /></button>
-          <p className="text-sm font-bold text-gray-800">{monthLabel} — FR PLAN</p>
-          <button onClick={nextMonth} className="p-2 rounded-xl bg-gray-50 border border-gray-100"><ChevronRight size={16} className="text-gray-500" /></button>
+        <div className="px-4 py-3.5 flex items-center justify-between border-b border-gray-100 bg-white">
+          <button onClick={prevMonth} className="w-9 h-9 flex items-center justify-center rounded-xl bg-gray-50 border border-gray-200 text-gray-500 hover:bg-pink-50 hover:text-pink-600 active:scale-95 transition-all"><ChevronLeft size={18} /></button>
+          <div className="text-center">
+            <p className="text-base font-extrabold text-gray-800 tracking-tight">{monthLabel}</p>
+            <p className="text-[9px] font-bold text-pink-500 uppercase tracking-[0.25em] mt-0.5">FR Plan</p>
+          </div>
+          <button onClick={nextMonth} className="w-9 h-9 flex items-center justify-center rounded-xl bg-gray-50 border border-gray-200 text-gray-500 hover:bg-pink-50 hover:text-pink-600 active:scale-95 transition-all"><ChevronRight size={18} /></button>
         </div>
 
         {!canEdit && (
-          <div className="mx-4 mt-3 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 text-[9px] text-blue-600 font-medium">
+          <div className="mx-4 mt-3 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 text-[10px] text-blue-600 font-semibold">
             View only — only Designer can plan slots
           </div>
         )}
 
         {/* Scrollable grid */}
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 overflow-auto px-2 py-2">
           <div className="min-w-max">
             {/* Day headers */}
-            <div className="flex sticky top-0 bg-white border-b border-gray-100 z-10">
-              <div className="w-16 flex-shrink-0 px-2 py-2 text-[8px] font-bold text-gray-400 uppercase">Slot</div>
-              {days.map(d => (
-                <div key={d} className="w-20 flex-shrink-0 px-1 py-2 text-center">
-                  <p className="text-[9px] font-bold text-gray-500">{new Date(d).getDate()}</p>
-                  <p className="text-[7.5px] text-gray-300 font-medium">{new Date(d).toLocaleDateString('en-GB', { weekday: 'short' })}</p>
-                </div>
-              ))}
+            <div className="flex sticky top-0 bg-white/95 backdrop-blur border-b border-gray-100 z-10 pb-1">
+              <div className="w-14 flex-shrink-0 px-2 py-2.5 text-[9px] font-extrabold text-gray-400 uppercase tracking-wide flex items-end">Slot</div>
+              {days.map(d => {
+                const dd = new Date(d)
+                const isToday = d === todayStr
+                return (
+                  <div key={d} className="w-[88px] flex-shrink-0 px-1 py-1.5 text-center">
+                    <div className={`mx-auto w-8 h-8 flex items-center justify-center rounded-full transition-colors ${isToday ? 'bg-pink-600 text-white shadow-sm shadow-pink-200' : 'text-gray-700'}`}>
+                      <span className="text-sm font-extrabold leading-none">{dd.getDate()}</span>
+                    </div>
+                    <p className={`text-[9px] font-bold uppercase tracking-wide mt-1 ${isToday ? 'text-pink-500' : 'text-gray-300'}`}>{dd.toLocaleDateString('en-GB', { weekday: 'short' })}</p>
+                  </div>
+                )
+              })}
             </div>
 
             {/* Rows for each time slot */}
             {SLOTS.map(slot => (
-              <div key={slot} className="flex border-b border-gray-50">
-                <div className="w-16 flex-shrink-0 px-2 py-2 flex flex-col justify-center border-r border-gray-100">
-                  <p className="text-[8px] font-bold text-gray-500">{slot}</p>
-                  <p className="text-[7px] text-gray-300 font-medium">{TIME_SLOT_LABELS[slot]}</p>
+              <div key={slot} className="flex items-stretch">
+                <div className="w-14 flex-shrink-0 px-1 py-1 flex flex-col justify-center items-center text-center">
+                  <p className="text-sm font-extrabold text-gray-700 leading-none">{slot}</p>
+                  <p className="text-[8px] text-gray-400 font-semibold mt-1">{TIME_SLOT_LABELS[slot]}</p>
                 </div>
                 {days.map(d => {
                   const s = getSlot(d, slot)
+                  const expired = isExpiredSlot(s)
                   const tone = s ? packageTone((s as any).order?.package?.name) : null
                   return (
-                    <div
-                      key={d}
-                      onClick={() => handleCellClick(s, d, slot)}
-                      className={`w-20 flex-shrink-0 border-r border-gray-50 p-1 min-h-[44px] transition-all ${cellClass(s)}`}
-                    >
-                      {s && tone && (
-                        <div className="text-[7px] leading-tight font-semibold">
-                          <p className={`font-bold truncate ${tone.text}`}>{s.post_id_code}</p>
-                          <p className={`truncate ${tone.text} opacity-80`}>
-                            {(s as any).order?.customer?.name || (s as any).order?.customer?.phone}
-                          </p>
-                          {(s as any).order?.package?.name && (
-                            <span className={`inline-block mt-0.5 px-1 py-px rounded text-[6px] font-bold uppercase ${tone.chip}`}>
-                              {(s as any).order.package.name}
-                            </span>
-                          )}
-                        </div>
-                      )}
+                    <div key={d} className="w-[88px] flex-shrink-0 p-1">
+                      <div
+                        onClick={() => handleCellClick(s, d, slot)}
+                        className={`h-full min-h-[76px] rounded-2xl p-2.5 transition-all active:scale-[0.97] ${cellClass(s)}`}
+                      >
+                        {s && tone && (
+                          <div className="leading-tight">
+                            <p className={`text-[11px] font-extrabold truncate ${expired ? 'text-gray-400' : tone.text}`}>{s.post_id_code}</p>
+                            <p className={`text-[10px] font-semibold truncate mt-0.5 ${expired ? 'text-gray-400' : `${tone.text} opacity-80`}`}>
+                              {(s as any).order?.customer?.name || (s as any).order?.customer?.phone}
+                            </p>
+                            {(s as any).order?.package?.name && (
+                              <span className={`inline-block mt-1.5 px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-wide ${expired ? 'bg-gray-200 text-gray-400' : tone.chip}`}>
+                                {(s as any).order.package.name}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )
                 })}
@@ -150,16 +165,16 @@ export default function CalendarPage() {
           </div>
         </div>
 
-        {/* Legend — package colour key */}
-        <div className="px-4 py-2 border-t border-gray-100 flex gap-3 flex-wrap">
-          {Object.entries(PACKAGE_TONE).map(([name, tone]) => (
-            <span key={name} className="flex items-center gap-1.5 text-[9px] text-gray-500 font-medium capitalize">
-              <span className={`w-2.5 h-2.5 rounded-full ${tone.dot} ${tone.border} border`} />
+        {/* Legend — package colour key (only the tiers actually in use) */}
+        <div className="px-4 py-2.5 border-t border-gray-100 flex gap-x-3.5 gap-y-1.5 flex-wrap">
+          {LEGEND_TIERS.map(name => (
+            <span key={name} className="flex items-center gap-1.5 text-[10px] text-gray-600 font-semibold capitalize">
+              <span className={`w-3 h-3 rounded-full ${PACKAGE_TONE[name].dot} shadow-sm`} />
               {name}
             </span>
           ))}
-          <span className="flex items-center gap-1.5 text-[9px] text-gray-400 font-medium">
-            <span className="w-2.5 h-2.5 rounded-full bg-gray-300 border border-gray-300" />
+          <span className="flex items-center gap-1.5 text-[10px] text-gray-400 font-semibold">
+            <span className="w-3 h-3 rounded-full bg-gray-300 shadow-sm" />
             Expired
           </span>
         </div>

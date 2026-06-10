@@ -35,7 +35,18 @@ export const EXPIRED_TONE: PackageTone = {
   bg: 'bg-gray-50', border: 'border-gray-200', text: 'text-gray-400', dot: 'bg-gray-300', chip: 'bg-gray-200 text-gray-500',
 }
 
+// Real package names are things like "Gold Pass", "Princess Silver",
+// "VIP Pass" — NOT bare "gold"/"silver". So we match by the tier KEYWORD
+// found inside the name. The tier keywords never overlap as substrings,
+// so the order of checking doesn't matter.
 export function packageTone(name?: string | null): PackageTone {
   if (!name) return PACKAGE_TONE_FALLBACK
-  return PACKAGE_TONE[name.trim().toLowerCase()] ?? PACKAGE_TONE_FALLBACK
+  const n = name.trim().toLowerCase()
+  // Exact match wins (e.g. a package literally named "gold").
+  if (PACKAGE_TONE[n]) return PACKAGE_TONE[n]
+  // Otherwise find the tier keyword contained in the name.
+  for (const key of Object.keys(PACKAGE_TONE)) {
+    if (n.includes(key)) return PACKAGE_TONE[key]
+  }
+  return PACKAGE_TONE_FALLBACK
 }

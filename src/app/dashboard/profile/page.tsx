@@ -9,6 +9,7 @@ import BottomNav from '@/components/shared/BottomNav'
 import Link from 'next/link'
 import { Loader2, Camera, LogOut, MapPin, FileText, Download, ClipboardList, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react'
 import { canPunchOut, currentMonthYear, fmtDate } from '@/lib/utils'
+import { recordPing } from '@/lib/location'
 import { Attendance, RewardMilestone } from '@/types'
 import WorkerPersonalDetailsTab from '@/components/worker/WorkerPersonalDetailsTab'
 
@@ -170,6 +171,8 @@ export default function ProfilePage() {
       status: isLate ? 'late' : 'present',
     }, { onConflict: 'user_id,date' })
 
+    await recordPing(user.id, 'punch_in', null, lat != null && lng != null ? { lat, lng } : null)
+
     await fetchAll()
     setPunchLoading(false)
   }
@@ -192,6 +195,8 @@ export default function ProfilePage() {
       punch_out: now, punch_out_lat: lat, punch_out_lng: lng,
       hours_worked: Math.round(hoursWorked * 100) / 100,
     }).eq('id', attendance.id)
+
+    await recordPing(user.id, 'punch_out', null, lat != null && lng != null ? { lat, lng } : null)
 
     await fetchAll()
     setPunchLoading(false)

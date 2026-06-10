@@ -1,8 +1,13 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { MapPin, Clock, RefreshCw, Navigation } from 'lucide-react'
 import { formatLastSeen } from '@/lib/utils'
+import { distanceMeters } from '@/lib/location'
+import LocationMap, { type MapPing } from '@/components/admin/LocationMap'
+
+const OUTLIER_M = 100
+const MIN_HISTORY = 3
 
 const ROLE_LABELS: Record<string, string> = {
   crm_agent: 'CRM Agent', back_office: 'Back Office', counselor: 'Counselor',
@@ -11,27 +16,55 @@ const ROLE_LABELS: Record<string, string> = {
 
 export default function LocationsPage() {
   const [workers, setWorkers] = useState<any[]>([])
+  const [pings, setPings] = useState<MapPing[]>([])
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState(Date.now())
 
-  const load = () => {
+  const load = async () => {
     setLoading(true)
-    supabase.from('users')
-      .select('id,full_name,role,last_lat,last_lng,last_seen,profile_photo_url')
-      .not('role', 'in', '("admin","ceo")')
-      .eq('is_active', true)
-      .order('full_name')
-      .then(({ data }) => {
-        if (data) setWorkers(data)
-        setLoading(false)
-        setLastRefresh(Date.now())
-      })
+    const [{ data: workerData }, { data: pingData }] = await Promise.all([
+      supabase.from('users')
+        .select('id,full_name,role,last_lat,last_lng,last_seen,profile_photo_url')
+        .not('role', 'in', '("admin","ceo")')
+        .eq('is_active', true)
+        .order('full_name'),
+      supabase.from('location_pings')
+        .select('id,lat,lng,accuracy,type,created_at,user_id,users(full_name,role),customers(name,phone)')
+        .order('created_at', { ascending: false })
+        .limit(3000),
+    ])
+    if (workerData) setWorkers(workerData)
+    setPings(
+      ((pingData as any[]) || []).map(p => ({
+        id: p.id, lat: p.lat, lng: p.lng, accuracy: p.accuracy, type: p.type,
+        created_at: p.created_at, user_id: p.user_id,
+        worker_name: p.users?.full_name,
+        customer_name: p.customers?.name ?? null,
+        customer_phone: p.customers?.phone ?? null,
+      })),
+    )
+    setLoading(false)
+    setLastRefresh(Date.now())
   }
 
   useEffect(() => { load() }, [])
 
   const withLoc = workers.filter(w => w.last_lat && w.last_lng)
   const noLoc = workers.filter(w => !w.last_lat || !w.last_lng)
+
+  // Count pings that sit outside their worker's 100m home zone.
+  const outlierCount = useMemo(() => {
+    const groups: Record<string, MapPing[]> = {}
+    pings.forEach(p => { (groups[p.user_id] ||= []).push(p) })
+    let n = 0
+    Object.values(groups).forEach(ps => {
+      if (ps.length < MIN_HISTORY) return
+      const lat = ps.reduce((s, p) => s + p.lat, 0) / ps.length
+      const lng = ps.reduce((s, p) => s + p.lng, 0) / ps.length
+      ps.forEach(p => { if (distanceMeters(p.lat, p.lng, lat, lng) > OUTLIER_M) n++ })
+    })
+    return n
+  }, [pings])
 
   return (
     <div className="p-8">
@@ -40,7 +73,7 @@ export default function LocationsPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Worker Locations</h1>
           <p className="text-xs text-gray-400 font-medium mt-0.5">
-            Captured when workers punch in/out · {withLoc.length} of {workers.length} have location
+            Captured at punch in/out & new entries · {pings.length} pings · {withLoc.length} of {workers.length} have location
           </p>
         </div>
         <button onClick={load} disabled={loading}
@@ -50,7 +83,7 @@ export default function LocationsPage() {
       </div>
 
       {/* Summary strip */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <div className="bg-pink-50 border border-pink-100 rounded-2xl p-4">
           <p className="text-2xl font-extrabold text-pink-600">{workers.length}</p>
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mt-0.5">Total workers</p>
@@ -59,10 +92,30 @@ export default function LocationsPage() {
           <p className="text-2xl font-extrabold text-green-600">{withLoc.length}</p>
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mt-0.5">Location known</p>
         </div>
-        <div className="bg-gray-50 border border-gray-100 rounded-2xl p-4">
-          <p className="text-2xl font-extrabold text-gray-400">{noLoc.length}</p>
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mt-0.5">No location yet</p>
+        <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
+          <p className="text-2xl font-extrabold text-blue-600">{pings.length}</p>
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mt-0.5">Location pings</p>
         </div>
+        <div className="bg-red-50 border border-red-100 rounded-2xl p-4">
+          <p className="text-2xl font-extrabold text-red-600">{outlierCount}</p>
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mt-0.5">Outside home zone</p>
+        </div>
+      </div>
+
+      {/* Map */}
+      <div className="mb-2">
+        <LocationMap pings={pings} />
+      </div>
+      <div className="flex items-center gap-4 mb-6 px-1">
+        <span className="flex items-center gap-1.5 text-[10px] font-semibold text-gray-500">
+          <span className="w-2.5 h-2.5 rounded-full bg-pink-500 inline-block" /> Normal
+        </span>
+        <span className="flex items-center gap-1.5 text-[10px] font-semibold text-gray-500">
+          <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" /> Outside 100m home zone
+        </span>
+        <span className="flex items-center gap-1.5 text-[10px] font-semibold text-gray-500">
+          <span className="w-3 h-3 rounded-full border border-pink-400 bg-pink-100 inline-block" /> Home zone (100m)
+        </span>
       </div>
 
       {/* Workers with location */}

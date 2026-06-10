@@ -7,6 +7,7 @@ import { useAuthStore } from '@/store/auth'
 import { Loader2, ArrowLeft, Package, Landmark, CalendarClock } from 'lucide-react'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
+import { recordPing } from '@/lib/location'
 
 function ProcessContent() {
   const router = useRouter()
@@ -67,6 +68,9 @@ function ProcessContent() {
     }
 
     if (!customerId) { setLoading(false); return }
+
+    // Capture where this CRM entry was made (fresh GPS).
+    await recordPing(user.id, 'new_entry', customerId)
 
     if (notes) {
       await supabase.from('interactions').insert({

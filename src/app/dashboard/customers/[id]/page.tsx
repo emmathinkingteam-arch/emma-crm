@@ -15,6 +15,11 @@ import { Customer, Order, OrderStep, Interaction, Package as Pkg, MONTH_CODES } 
 import { fmtDate, fmtTime, buildWaLink, openWaLink, WA, KOKO_SERVICE_CHARGE_RATE, getCounselorAvailability } from '@/lib/utils'
 import { formatPhoneDisplay } from '@/lib/country-codes'
 import InterestStatsCard from '@/components/shared/InterestStatsCard'
+import { packageTone, PACKAGE_TONE } from '@/lib/package-colors'
+
+// Slot occupancy info for the planner grid — package tier + expiry so each
+// taken cell can be coloured the same way as the FR PLAN calendar.
+type TakenInfo = { pkg: string | null; expired: boolean }
 
 const SLOT_LABELS: Record<string, string> = { W: '6:30am', X: '11:30am', Y: '3:30pm', Z: '8:30pm' }
 const SLOTS = ['W', 'X', 'Y', 'Z'] as const
@@ -153,7 +158,7 @@ export default function CustomerDetailPage() {
   // Designer calendar
   const [showCalendar, setShowCalendar] = useState(false)
   const [calendarDates] = useState<string[]>(getNext14Days())
-  const [takenSlots, setTakenSlots] = useState<Record<string, boolean>>({})
+  const [takenSlots, setTakenSlots] = useState<Record<string, TakenInfo>>({})
   const [selectedCell, setSelectedCell] = useState<string | null>(null)
   const [expiryDate, setExpiryDate] = useState('')
 
@@ -897,12 +902,21 @@ export default function CustomerDetailPage() {
   const fetchCalendarSlots = async () => {
     const { data } = await supabase
       .from('calendar_slots')
-      .select('slot_date, slot_time')
+      // Pull the owning order's package + expiry so each taken cell can be
+      // coloured by tier (and greyed when the plan has expired).
+      .select('slot_date, slot_time, order:orders(validity_expires_at, package:packages(name))')
       .gte('slot_date', calendarDates[0])
       .lte('slot_date', calendarDates[calendarDates.length - 1])
     if (data) {
-      const taken: Record<string, boolean> = {}
-      data.forEach((s: any) => { taken[`${s.slot_date}-${s.slot_time}`] = true })
+      const taken: Record<string, TakenInfo> = {}
+      const now = new Date()
+      data.forEach((s: any) => {
+        const exp = s.order?.validity_expires_at
+        taken[`${s.slot_date}-${s.slot_time}`] = {
+          pkg: s.order?.package?.name ?? null,
+          expired: !!(exp && new Date(exp) < now),
+        }
+      })
       setTakenSlots(taken)
     }
   }
@@ -1787,12 +1801,25 @@ export default function CustomerDetailPage() {
                                     </td>
                                     {calendarDates.map(d => {
                                       const key = `${d}-${slot}`
-                                      const taken = takenSlots[key]
+                                      const info = takenSlots[key]
+                                      const taken = !!info
                                       const selected = selectedCell === key
+                                      // Coloured by package tier; expired plans go grey.
+                                      const tone = info && !info.expired ? packageTone(info.pkg) : null
+                                      const cellCls = taken
+                                        ? (info!.expired
+                                            ? 'bg-gray-100 border-gray-200 cursor-not-allowed'
+                                            : `${tone!.bg} ${tone!.border} cursor-not-allowed`)
+                                        : selected
+                                          ? 'bg-pink-600 border-pink-600 cursor-pointer'
+                                          : 'bg-white border-gray-50 cursor-pointer hover:bg-pink-50'
+                                      const markCls = taken
+                                        ? (info!.expired ? 'text-gray-400' : tone!.text)
+                                        : selected ? 'text-white' : 'text-gray-200'
                                       return (
-                                        <td key={key} onClick={() => selectPlanCell(key, !!taken)}
-                                          className={`text-center py-2 border border-gray-50 transition-all ${taken ? 'bg-gray-100 cursor-not-allowed' : selected ? 'bg-pink-600 cursor-pointer' : 'bg-white cursor-pointer hover:bg-pink-50'}`}>
-                                          <span className={`text-[10px] font-bold ${taken ? 'text-gray-300' : selected ? 'text-white' : 'text-gray-200'}`}>
+                                        <td key={key} onClick={() => selectPlanCell(key, taken)}
+                                          className={`text-center py-2 border transition-all ${cellCls}`}>
+                                          <span className={`text-[10px] font-bold ${markCls}`}>
                                             {taken ? '●' : selected ? '✓' : '○'}
                                           </span>
                                         </td>
@@ -1802,6 +1829,19 @@ export default function CustomerDetailPage() {
                                 ))}
                               </tbody>
                             </table>
+                          </div>
+                          {/* Package colour key — matches the FR PLAN calendar */}
+                          <div className="px-3 py-2 border-t border-gray-100 flex gap-2 flex-wrap">
+                            {Object.entries(PACKAGE_TONE).map(([name, t]) => (
+                              <span key={name} className="flex items-center gap-1 text-[8px] text-gray-500 font-medium capitalize">
+                                <span className={`w-2 h-2 rounded ${t.bg} ${t.border} border`} />
+                                {name}
+                              </span>
+                            ))}
+                            <span className="flex items-center gap-1 text-[8px] text-gray-400 font-medium">
+                              <span className="w-2 h-2 rounded bg-gray-100 border border-gray-200" />
+                              Expired
+                            </span>
                           </div>
                           {selectedCell && (
                             <div className="p-3 bg-pink-50 border-t border-pink-100">

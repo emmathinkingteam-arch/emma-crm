@@ -7,7 +7,7 @@ import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import { Customer } from '@/types'
-import { Search, Phone, ChevronRight, Loader2, Star, CalendarDays, CreditCard } from 'lucide-react'
+import { Search, Phone, ChevronRight, Star, CalendarDays, CreditCard } from 'lucide-react'
 import Link from 'next/link'
 import { formatPhoneDisplay } from '@/lib/country-codes'
 
@@ -259,8 +259,10 @@ export default function CustomersPage() {
         )}
 
         {loading ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="animate-spin text-pink-600" size={24} />
+          <div className="space-y-2">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="skeleton h-[68px] rounded-2xl" />
+            ))}
           </div>
         ) : sorted.length === 0 ? (
           <div className="text-center py-16">
@@ -275,7 +277,7 @@ export default function CustomersPage() {
             )}
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-2 animate-fade-in">
             {sorted.map(c => {
               const isWillBuyToday = isPastOrToday(c.willBuyOnDate)
               const isInstallment = c.installmentPending

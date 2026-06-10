@@ -76,6 +76,7 @@ function BankReminder() {
 export default function AdminDashboardPage() {
   const [stats, setStats] = useState({ activeOrders: 0, newToday: 0, overdue: 0, punchedIn: 0, monthCommission: 0, leavePending: 0, totalCustomers: 0, livePosts: 0 })
   const [overdueItems, setOverdueItems] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0]
@@ -97,6 +98,7 @@ export default function AdminDashboardPage() {
         leavePending: (lp as any).count ?? 0, totalCustomers: (tc as any).count ?? 0, livePosts: (lv as any).count ?? 0,
       })
       if ((oi as any).data) setOverdueItems((oi as any).data)
+      setLoading(false)
     })
   }, [])
 
@@ -152,8 +154,26 @@ export default function AdminDashboardPage() {
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
   const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 
+  if (loading) {
+    return (
+      <div className="p-8">
+        <div className="mb-7 space-y-2">
+          <div className="skeleton h-7 w-56" />
+          <div className="skeleton h-4 w-40" />
+        </div>
+        <div className="skeleton h-40 rounded-2xl mb-6" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="skeleton h-28 rounded-2xl" />
+          ))}
+        </div>
+        <div className="skeleton h-48 rounded-2xl" />
+      </div>
+    )
+  }
+
   return (
-    <div className="p-8">
+    <div className="p-8 animate-fade-in">
       {/* Header */}
       <div className="mb-7">
         <h1 className="text-2xl font-bold text-gray-800">{greeting} 👋</h1>

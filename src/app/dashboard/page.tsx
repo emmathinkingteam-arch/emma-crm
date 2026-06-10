@@ -7,7 +7,7 @@ import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import { Order, OrderStep } from '@/types'
-import { Loader2, Bell, ChevronRight, CheckCircle2, Sparkles, Clock, Phone, TrendingUp } from 'lucide-react'
+import { Bell, ChevronRight, CheckCircle2, Sparkles, Clock, Phone, TrendingUp } from 'lucide-react'
 import Link from 'next/link'
 import { type Lead, leadCountdown, leadPenaltySoFar } from '@/lib/leads'
 
@@ -158,8 +158,33 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="h-screen flex items-center justify-center bg-white">
-        <Loader2 className="animate-spin text-pink-600" size={28} />
+      <div className="h-screen flex flex-col bg-white overflow-hidden">
+        <TopNav />
+        <div className="flex-1 overflow-y-auto px-4 py-4 pb-28 space-y-4">
+          {/* Greeting placeholder */}
+          <div className="px-1 pt-1 space-y-2">
+            <div className="skeleton h-5 w-40" />
+            <div className="skeleton h-3 w-28" />
+          </div>
+          {/* Stats row placeholder */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="skeleton h-24 rounded-2xl" />
+            <div className="skeleton h-24 rounded-2xl" />
+          </div>
+          {/* Tabs placeholder */}
+          <div className="grid grid-cols-3 gap-2">
+            <div className="skeleton h-16 rounded-2xl" />
+            <div className="skeleton h-16 rounded-2xl" />
+            <div className="skeleton h-16 rounded-2xl" />
+          </div>
+          {/* List placeholder */}
+          <div className="space-y-2">
+            <div className="skeleton h-20 rounded-2xl" />
+            <div className="skeleton h-20 rounded-2xl" />
+            <div className="skeleton h-20 rounded-2xl" />
+          </div>
+        </div>
+        <BottomNav />
       </div>
     )
   }
@@ -168,7 +193,7 @@ export default function DashboardPage() {
     <div className="h-screen flex flex-col bg-white overflow-hidden">
       <TopNav />
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 pb-28 space-y-4">
+      <div className="flex-1 overflow-y-auto px-4 py-4 pb-28 space-y-4 animate-fade-in">
 
         {/* Greeting */}
         {(() => {

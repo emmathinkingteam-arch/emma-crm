@@ -297,8 +297,18 @@ export default function ProfilePage() {
   }
 
   if (loading || !user) return (
-    <div className="h-screen flex items-center justify-center bg-white">
-      <Loader2 className="animate-spin text-pink-600" size={28} />
+    <div className="h-screen flex flex-col bg-white overflow-hidden">
+      <TopNav />
+      <div className="flex-1 overflow-y-auto px-4 py-4 pb-28 space-y-5">
+        <div className="skeleton h-32 rounded-3xl" />
+        <div className="grid grid-cols-2 gap-3">
+          <div className="skeleton h-20 rounded-2xl" />
+          <div className="skeleton h-20 rounded-2xl" />
+        </div>
+        <div className="skeleton h-24 rounded-2xl" />
+        <div className="skeleton h-40 rounded-2xl" />
+      </div>
+      <BottomNav />
     </div>
   )
 
@@ -319,7 +329,7 @@ export default function ProfilePage() {
   return (
     <div className="h-screen flex flex-col bg-white overflow-hidden">
       <TopNav />
-      <div className="flex-1 overflow-y-auto px-4 py-4 pb-28 space-y-5">
+      <div className="flex-1 overflow-y-auto px-4 py-4 pb-28 space-y-5 animate-fade-in">
 
         {/* Profile card */}
         <div className="text-center pt-2">

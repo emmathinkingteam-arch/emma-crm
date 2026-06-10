@@ -398,15 +398,17 @@ export default function AssignLeadsPage() {
                     Recent batches
                 </p>
                 {loading ? (
-                    <div className="flex justify-center py-10">
-                        <Loader2 className="animate-spin text-pink-600" size={24} />
+                    <div className="space-y-2">
+                        {Array.from({ length: 4 }).map((_, i) => (
+                            <div key={i} className="skeleton h-20 rounded-2xl" />
+                        ))}
                     </div>
                 ) : batches.length === 0 ? (
                     <div className="bg-gray-50 rounded-2xl p-8 text-center text-xs font-semibold text-gray-400">
                         No batches yet
                     </div>
                 ) : (
-                    <div className="space-y-2">
+                    <div className="space-y-2 animate-fade-in">
                         {batches.map((b) => {
                             const total = (b.queued || 0) + (b.active || 0) + (b.responded || 0)
                             const pct = total ? Math.round(((b.responded || 0) / total) * 100) : 0

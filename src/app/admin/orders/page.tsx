@@ -7,15 +7,23 @@ import { Wrench } from 'lucide-react'
 
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
   useEffect(() => {
     supabase.from('orders').select('*, customer:customers(name,phone), package:packages(name), created_by_user:users!created_by(full_name)').order('created_at', { ascending: false })
-      .then(({ data }) => { if (data) setOrders(data) })
+      .then(({ data }) => { if (data) setOrders(data); setLoading(false) })
   }, [])
   const statusColor = (s: string) => s === 'active' ? 'bg-green-50 text-green-600' : s === 'expired' ? 'bg-gray-100 text-gray-400' : 'bg-red-50 text-red-500'
   return (
     <div className="p-8">
       <h1 className="text-2xl font-bold text-gray-800 mb-6">All Orders</h1>
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      {loading ? (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-2">
+          {Array.from({ length: 10 }).map((_, i) => (
+            <div key={i} className="skeleton h-10 rounded-lg" />
+          ))}
+        </div>
+      ) : (
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden animate-fade-in">
         <table className="w-full text-xs">
           <thead className="bg-gray-50 border-b border-gray-100">
             <tr>{['Customer', 'Package', 'Step', 'Amount', 'Status', 'Created', 'CRM', 'Action'].map(h => <th key={h} className="px-4 py-3 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wide">{h}</th>)}</tr>
@@ -43,6 +51,7 @@ export default function AdminOrdersPage() {
           </tbody>
         </table>
       </div>
+      )}
     </div>
   )
 }

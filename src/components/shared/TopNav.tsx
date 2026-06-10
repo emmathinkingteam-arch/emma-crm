@@ -146,8 +146,8 @@ export default function TopNav() {
 
       {/* ── Wallet drawer ── */}
       {walletOpen && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm px-4 pb-6" onClick={() => setWalletOpen(false)}>
-          <div className="bg-white w-full max-w-md rounded-[28px] shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm px-4 pb-6 animate-fade-in" onClick={() => setWalletOpen(false)}>
+          <div className="bg-white w-full max-w-md rounded-[28px] shadow-2xl overflow-hidden animate-slide-up" onClick={(e) => e.stopPropagation()}>
             {/* Header */}
             <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-gray-50">
               <div>
@@ -245,8 +245,8 @@ export default function TopNav() {
 
       {/* ── Task notification panel ── */}
       {notifOpen && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm px-4 pb-6" onClick={() => setNotifOpen(false)}>
-          <div className="bg-white w-full max-w-md rounded-[28px] shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm px-4 pb-6 animate-fade-in" onClick={() => setNotifOpen(false)}>
+          <div className="bg-white w-full max-w-md rounded-[28px] shadow-2xl overflow-hidden animate-slide-up" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-gray-50">
               <div>
                 <h2 className="text-sm font-bold text-gray-800">My Tasks</h2>

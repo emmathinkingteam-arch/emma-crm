@@ -7,7 +7,6 @@ import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import { Commission, SalaryPayment } from '@/types'
 import { currentMonthYear, fmtDate } from '@/lib/utils'
-import { Loader2 } from 'lucide-react'
 
 export default function WalletPage() {
   const { user } = useAuthStore()
@@ -57,13 +56,29 @@ export default function WalletPage() {
   const progressPct = monthTarget > 0 ? Math.min(100, Math.round((thisMonthEarned / monthTarget) * 100)) : 0
 
   if (loading) return (
-    <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-pink-600" size={24} /></div>
+    <div className="h-screen flex flex-col overflow-hidden" style={{ background: 'var(--bg-base)' }}>
+      <TopNav />
+      <div className="flex-1 overflow-y-auto px-4 py-4 pb-28 space-y-4">
+        <div className="skeleton h-32 rounded-3xl" />
+        <div className="grid grid-cols-3 gap-2">
+          <div className="skeleton h-20 rounded-2xl" />
+          <div className="skeleton h-20 rounded-2xl" />
+          <div className="skeleton h-20 rounded-2xl" />
+        </div>
+        <div className="space-y-2">
+          <div className="skeleton h-14 rounded-2xl" />
+          <div className="skeleton h-14 rounded-2xl" />
+          <div className="skeleton h-14 rounded-2xl" />
+        </div>
+      </div>
+      <BottomNav />
+    </div>
   )
 
   return (
     <div className="h-screen flex flex-col overflow-hidden" style={{ background: 'var(--bg-base)' }}>
       <TopNav />
-      <div className="flex-1 overflow-y-auto px-4 py-4 pb-28 space-y-4">
+      <div className="flex-1 overflow-y-auto px-4 py-4 pb-28 space-y-4 animate-fade-in">
 
         {/* Wallet card */}
         <div className="bg-gradient-to-br from-pink-600 to-pink-400 rounded-3xl p-5 text-white">

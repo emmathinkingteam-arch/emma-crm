@@ -154,12 +154,12 @@ export default function CalendarPage() {
         <div className="px-4 py-2 border-t border-gray-100 flex gap-3 flex-wrap">
           {Object.entries(PACKAGE_TONE).map(([name, tone]) => (
             <span key={name} className="flex items-center gap-1.5 text-[9px] text-gray-500 font-medium capitalize">
-              <span className={`w-2.5 h-2.5 rounded ${tone.bg} ${tone.border} border`} />
+              <span className={`w-2.5 h-2.5 rounded-full ${tone.dot} ${tone.border} border`} />
               {name}
             </span>
           ))}
           <span className="flex items-center gap-1.5 text-[9px] text-gray-400 font-medium">
-            <span className="w-2.5 h-2.5 rounded bg-gray-100 border border-gray-200" />
+            <span className="w-2.5 h-2.5 rounded-full bg-gray-300 border border-gray-300" />
             Expired
           </span>
         </div>

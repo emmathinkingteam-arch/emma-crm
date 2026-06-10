@@ -6,14 +6,14 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
-import { MONTH_CODES } from '@/types'
+import { MONTH_CODES, getSlotLabel } from '@/types'
 import { buildWaLink, openWaLink } from '@/lib/utils'
 import {
     Loader2, ArrowLeft, Sparkles, Clock, RefreshCw, Send,
     CheckCircle, FileText, Lock, CalendarDays, Hash,
 } from 'lucide-react'
 
-const SLOT_LABELS: Record<string, string> = { W: '6:30am', X: '11:30am', Y: '3:30pm', Z: '8:30pm' }
+// Slot clock-times vary by weekday/weekend — use getSlotLabel(slot, date).
 const SLOTS = ['W', 'X', 'Y', 'Z'] as const
 
 const STATUS_LABELS: Record<string, string> = {
@@ -180,7 +180,7 @@ export default function SecondPostPage() {
 
         // Open WhatsApp FIRST (synchronous, preserves the click gesture).
         if (req.customer_phone) {
-            const msg = `Hi ${req.customer_name || ''},\n\nGood news — your new Emma Thinking profile post has been planned.\n\n   Post Date : ${niceDate}\n   Post Time : ${SLOT_LABELS[planSlot]}\n\nWe'll take care of everything and notify you once it goes live.\n\nEmma Thinking (Pvt) Ltd`
+            const msg = `Hi ${req.customer_name || ''},\n\nGood news — your new Emma Thinking profile post has been planned.\n\n   Post Date : ${niceDate}\n   Post Time : ${getSlotLabel(planSlot, planDate)}\n\nWe'll take care of everything and notify you once it goes live.\n\nEmma Thinking (Pvt) Ltd`
             openWaLink(buildWaLink(req.customer_phone, msg))
         }
 
@@ -210,7 +210,7 @@ export default function SecondPostPage() {
                 await supabase.from('interactions').insert({
                     customer_id: req.customer_id,
                     type: 'order',
-                    description: `2nd post planned — ${planDate} at ${SLOT_LABELS[planSlot]} | Post ID: ${code} | WhatsApp sent`,
+                    description: `2nd post planned — ${planDate} at ${getSlotLabel(planSlot, planDate)} | Post ID: ${code} | WhatsApp sent`,
                     created_by: user?.id,
                 })
             }
@@ -400,7 +400,7 @@ export default function SecondPostPage() {
                                         {SLOTS.map(s => (
                                             <button key={s} onClick={() => setPlanSlot(s)}
                                                 className={`py-2.5 rounded-xl text-[10px] font-bold transition-all border ${planSlot === s ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-gray-50 text-gray-500 border-gray-200'}`}>
-                                                {s}<br /><span className="text-[8px] font-medium opacity-80">{SLOT_LABELS[s]}</span>
+                                                {s}<br /><span className="text-[8px] font-medium opacity-80">{getSlotLabel(s, planDate)}</span>
                                             </button>
                                         ))}
                                     </div>
@@ -437,7 +437,7 @@ export default function SecondPostPage() {
                                     <p className="text-gray-400 font-semibold">Post date</p>
                                     <p className="text-gray-800 font-bold">
                                         {req.planned_post_date ? new Date(req.planned_post_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
-                                        {req.planned_slot ? ` · ${SLOT_LABELS[req.planned_slot]}` : ''}
+                                        {req.planned_slot ? ` · ${getSlotLabel(req.planned_slot, (req.planned_post_date || '').slice(0, 10))}` : ''}
                                     </p>
                                 </div>
                             </div>

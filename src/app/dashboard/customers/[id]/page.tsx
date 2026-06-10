@@ -11,7 +11,7 @@ import {
   ThumbsUp, ShoppingCart, Lock, Upload, CheckCircle, ExternalLink, Filter,
   CreditCard, AlertCircle, Pencil, Receipt, Building2
 } from 'lucide-react'
-import { Customer, Order, OrderStep, Interaction, Package as Pkg, MONTH_CODES } from '@/types'
+import { Customer, Order, OrderStep, Interaction, Package as Pkg, MONTH_CODES, getSlotLabel } from '@/types'
 import { fmtDate, fmtTime, buildWaLink, openWaLink, WA, KOKO_SERVICE_CHARGE_RATE, getCounselorAvailability } from '@/lib/utils'
 import { formatPhoneDisplay } from '@/lib/country-codes'
 import InterestStatsCard from '@/components/shared/InterestStatsCard'
@@ -26,7 +26,7 @@ type TakenInfo = { pkg: string | null; expired: boolean }
 const fmtPlanDate = (d?: string | null) =>
   d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : ''
 
-const SLOT_LABELS: Record<string, string> = { W: '6:30am', X: '11:30am', Y: '3:30pm', Z: '8:30pm' }
+// Slot clock-times vary by weekday/weekend — use getSlotLabel(slot, date).
 const SLOTS = ['W', 'X', 'Y', 'Z'] as const
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -541,8 +541,8 @@ export default function CustomerDetailPage() {
       planned_at: new Date().toISOString(),
     })
     await supabase.from('orders').update({ planned_post_date: new Date(date).toISOString() }).eq('id', activeOrder.id)
-    await logAction(`Post planned — ${date} at ${SLOT_LABELS[slot]} | Post ID: ${code}`)
-    const msg = `Ayubowan ${customer.name || customer.phone}!\n\nYour Emma Thinking profile post has been planned!\n\nPost Date: ${date}\nTime: ${SLOT_LABELS[slot]}\nPost ID: ${code}\n\nThank you for choosing Emma Thinking!`
+    await logAction(`Post planned — ${date} at ${getSlotLabel(slot, date)} | Post ID: ${code}`)
+    const msg = `Ayubowan ${customer.name || customer.phone}!\n\nYour Emma Thinking profile post has been planned!\n\nPost Date: ${date}\nTime: ${getSlotLabel(slot, date)}\nPost ID: ${code}\n\nThank you for choosing Emma Thinking!`
     openWa(buildWaLink(customer.phone, msg))
     setSelectedCell(null); setShowCalendar(false)
     await fetchCalendarSlots(); await fetchAll()
@@ -565,7 +565,7 @@ export default function CustomerDetailPage() {
     // OPEN WHATSAPP FIRST — synchronous within click handler.
     openWa(buildWaLink(
       customer.phone,
-      WA.planAndExpiry(customer.name || customer.phone, fmtPostDate, SLOT_LABELS[slot], fmtExpiryDate)
+      WA.planAndExpiry(customer.name || customer.phone, fmtPostDate, getSlotLabel(slot, date), fmtExpiryDate)
     ))
 
     setActionLoading(true)
@@ -617,7 +617,7 @@ export default function CustomerDetailPage() {
       }
 
       await logAction(
-        `Plan locked — ${date} at ${SLOT_LABELS[slot]} | Post ID: ${code} | Expires: ${expiryDate} | WhatsApp sent`
+        `Plan locked — ${date} at ${getSlotLabel(slot, date)} | Post ID: ${code} | Expires: ${expiryDate} | WhatsApp sent`
       )
 
       setSelectedCell(null); setShowCalendar(false); setExpiryDate('')
@@ -1802,7 +1802,7 @@ export default function CustomerDetailPage() {
                                 {SLOTS.map(slot => (
                                   <tr key={slot}>
                                     <td className="bg-gray-50 px-2 py-1.5 font-bold text-gray-500 sticky left-0 whitespace-nowrap">
-                                      {slot}<br /><span className="font-medium text-gray-400">{SLOT_LABELS[slot]}</span>
+                                      {slot}<br /><span className="font-medium text-gray-400">{getSlotLabel(slot)}</span>
                                     </td>
                                     {calendarDates.map(d => {
                                       const key = `${d}-${slot}`
@@ -1851,7 +1851,7 @@ export default function CustomerDetailPage() {
                           {selectedCell && (
                             <div className="p-3 bg-pink-50 border-t border-pink-100">
                               <p className="text-[9px] font-bold text-pink-600 mb-1">
-                                Selected: {selectedCell.split('-').slice(0, 3).join('-')} at {SLOT_LABELS[selectedCell.split('-')[3]]}
+                                Selected: {selectedCell.split('-').slice(0, 3).join('-')} at {getSlotLabel(selectedCell.split('-')[3], selectedCell.split('-').slice(0, 3).join('-'))}
                               </p>
                               <p className="text-[9px] font-bold text-gray-500 mb-2">
                                 Post ID: {generatePostCode(selectedCell.split('-').slice(0, 3).join('-'), selectedCell.split('-')[3])}
@@ -1908,7 +1908,7 @@ export default function CustomerDetailPage() {
                       <p className="text-xs font-bold text-gray-800 mt-0.5">
                         {new Date(plannedSlot.slot_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
                       </p>
-                      <p className="text-[9px] text-gray-500 font-medium">{SLOT_LABELS[plannedSlot.slot_time]}</p>
+                      <p className="text-[9px] text-gray-500 font-medium">{getSlotLabel(plannedSlot.slot_time, plannedSlot.slot_date)}</p>
                     </div>
                     <div className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2">
                       <p className="text-[8px] font-bold text-gray-400 uppercase tracking-wide">Plan expires</p>

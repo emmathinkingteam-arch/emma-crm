@@ -19,7 +19,7 @@ export type PaymentType = 'cash' | 'bank_transfer' | 'card' | 'koko' | 'other'
 export type LeaveType = 'annual' | 'casual' | 'sick' | 'other'
 export type RequestStatus = 'pending' | 'approved' | 'rejected'
 export type MilestoneType = 'wallet_balance' | 'order_count' | 'package_specific' | 'daily_entry' | 'custom'
-export type TimeSlot = 'W' | 'X' | 'Y' | 'Z' // W=6:30am X=11:30am Y=3:30pm Z=8:30pm
+export type TimeSlot = 'W' | 'X' | 'Y' | 'Z' // four daily sittings; clock time varies by weekday/weekend — see getSlotLabel
 export type FlowVariant = 'standard' | 'silver_bronze'
 
 // ── Database row types ───────────────────────────────────────
@@ -272,8 +272,39 @@ export const MONTH_CODES: Record<number, string> = {
   7: 'G', 8: 'H', 9: 'I', 10: 'J', 11: 'K', 12: 'L'
 }
 
+// W/X/Y/Z are the four daily sittings, but the actual clock time depends on the
+// day of week:
+//   Mon–Fri : 8:30am · 11:30am · 1:30pm · 7:00pm
+//   Saturday: 9:00am · 12:00pm · 2:00pm · 8:00pm
+//   Sunday  : 10:00am · 1:00pm · 3:00pm · 7:00pm
+const SLOT_ORDER: TimeSlot[] = ['W', 'X', 'Y', 'Z']
+const WEEKDAY_SLOT_TIMES = ['8:30am', '11:30am', '1:30pm', '7:00pm']
+const SATURDAY_SLOT_TIMES = ['9:00am', '12:00pm', '2:00pm', '8:00pm']
+const SUNDAY_SLOT_TIMES = ['10:00am', '1:00pm', '3:00pm', '7:00pm']
+
+// Day of week (0=Sun..6=Sat) for a 'YYYY-MM-DD' string, parsed in LOCAL time so
+// it never drifts a day versus a UTC interpretation.
+function slotDayOfWeek(date?: string | Date | null): number {
+  if (!date) return 1 // no date → treat as a weekday
+  if (date instanceof Date) return date.getDay()
+  const [y, m, d] = date.split('-').map(Number)
+  if (!y || !m || !d) return 1
+  return new Date(y, m - 1, d).getDay()
+}
+
+// Clock-time label for a slot on a given date. With no date it falls back to the
+// weekday schedule (used for generic row headers that span multiple days).
+export function getSlotLabel(slot: TimeSlot | string, date?: string | Date | null): string {
+  const idx = SLOT_ORDER.indexOf(slot as TimeSlot)
+  if (idx === -1) return ''
+  const dow = slotDayOfWeek(date)
+  const times = dow === 0 ? SUNDAY_SLOT_TIMES : dow === 6 ? SATURDAY_SLOT_TIMES : WEEKDAY_SLOT_TIMES
+  return times[idx]
+}
+
+// Kept for backwards-compatible imports; defaults to the weekday schedule.
 export const TIME_SLOT_LABELS: Record<TimeSlot, string> = {
-  W: '6:30am', X: '11:30am', Y: '3:30pm', Z: '8:30pm'
+  W: WEEKDAY_SLOT_TIMES[0], X: WEEKDAY_SLOT_TIMES[1], Y: WEEKDAY_SLOT_TIMES[2], Z: WEEKDAY_SLOT_TIMES[3]
 }
 // ── Legacy Invoices (from old Kalpani Back Office) ──
 

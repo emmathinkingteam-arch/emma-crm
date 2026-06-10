@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
-import { CalendarSlot, TimeSlot, TIME_SLOT_LABELS } from '@/types'
+import { CalendarSlot, TimeSlot, TIME_SLOT_LABELS, getSlotLabel } from '@/types'
 import { generatePostId } from '@/lib/utils'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { PACKAGE_TONE, packageTone } from '@/lib/package-colors'
@@ -137,12 +137,20 @@ export default function CalendarPage() {
                   const s = getSlot(d, slot)
                   const expired = isExpiredSlot(s)
                   const tone = s ? packageTone((s as any).order?.package?.name) : null
+                  // Sat/Sun run on a different schedule. Surface that day's actual
+                  // time inside the cell whenever it differs from the weekday time
+                  // shown on the left, so weekend columns are never misread.
+                  const dayTime = getSlotLabel(slot, d)
+                  const showDayTime = dayTime !== TIME_SLOT_LABELS[slot]
                   return (
                     <div key={d} className="w-[88px] flex-shrink-0 p-1">
                       <div
                         onClick={() => handleCellClick(s, d, slot)}
                         className={`h-full min-h-[76px] rounded-2xl p-2.5 transition-all active:scale-[0.97] ${cellClass(s)}`}
                       >
+                        {showDayTime && (
+                          <p className={`text-[8px] font-bold leading-none mb-1 ${s && !expired && tone ? `${tone.text} opacity-70` : 'text-pink-400'}`}>{dayTime}</p>
+                        )}
                         {s && tone && (
                           <div className="leading-tight">
                             <p className={`text-[11px] font-extrabold truncate ${expired ? 'text-gray-400' : tone.text}`}>{s.post_id_code}</p>
@@ -187,7 +195,7 @@ export default function CalendarPage() {
           <div className="bg-white w-full max-w-sm rounded-3xl p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
             <h3 className="text-sm font-bold text-gray-800 mb-1">Empty slot</h3>
             <p className="text-xs text-gray-400 font-medium mb-4">
-              {new Date(selectedCell.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })} · {TIME_SLOT_LABELS[selectedCell.slot]}
+              {new Date(selectedCell.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })} · {getSlotLabel(selectedCell.slot, selectedCell.date)}
             </p>
             <p className="text-[10px] text-gray-500 font-medium mb-4 leading-relaxed">
               To plan a customer in this slot, open the customer's page from your assignments

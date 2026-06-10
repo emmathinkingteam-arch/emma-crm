@@ -15,11 +15,16 @@ import { Customer, Order, OrderStep, Interaction, Package as Pkg, MONTH_CODES } 
 import { fmtDate, fmtTime, buildWaLink, openWaLink, WA, KOKO_SERVICE_CHARGE_RATE, getCounselorAvailability } from '@/lib/utils'
 import { formatPhoneDisplay } from '@/lib/country-codes'
 import InterestStatsCard from '@/components/shared/InterestStatsCard'
+import WhatsappBoostPanel from '@/components/shared/WhatsappBoostPanel'
 import { packageTone, PACKAGE_TONE } from '@/lib/package-colors'
 
 // Slot occupancy info for the planner grid — package tier + expiry so each
 // taken cell can be coloured the same way as the FR PLAN calendar.
 type TakenInfo = { pkg: string | null; expired: boolean }
+
+// Format a calendar plan date for the WhatsApp Boost bold headline.
+const fmtPlanDate = (d?: string | null) =>
+  d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : ''
 
 const SLOT_LABELS: Record<string, string> = { W: '6:30am', X: '11:30am', Y: '3:30pm', Z: '8:30pm' }
 const SLOTS = ['W', 'X', 'Y', 'Z'] as const
@@ -1951,6 +1956,19 @@ export default function CustomerDetailPage() {
                 </button>
               )}
             </div>
+          )}
+
+          {/* ── WHATSAPP BOOST ───────────────────────────── */}
+          {/* Back office / admin: blast this profile to numbers via the same  */}
+          {/* Meta Cloud template as /admin/whatsapp. Auto-fills the bold       */}
+          {/* headline (caption | plan date) and description from the brief.    */}
+          {/* Works on both active and completed (old) orders.                  */}
+          {(role === 'back_office' || role === 'admin') && activeOrder && (
+            <WhatsappBoostPanel
+              brief={completedBrief || brief || ''}
+              planDate={fmtPlanDate(plannedSlot?.slot_date || activeOrder.planned_post_date)}
+              contextLabel={(completedBrief || brief) ? "Auto-filled from this profile's brief" : undefined}
+            />
           )}
 
           {/* PARTNER LINK */}

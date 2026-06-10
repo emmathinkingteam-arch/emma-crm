@@ -51,8 +51,8 @@ export async function POST(req: Request) {
             .eq('auth_user_id', user.id)
             .single()
 
-        if (profile?.role !== 'admin') {
-            return NextResponse.json({ error: 'Forbidden — admin only' }, { status: 403 })
+        if (profile?.role !== 'admin' && profile?.role !== 'back_office') {
+            return NextResponse.json({ error: 'Forbidden — admin or back office only' }, { status: 403 })
         }
 
         // ─── Validate input ────────────────────────────────────────────────

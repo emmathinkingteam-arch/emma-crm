@@ -25,6 +25,25 @@ const VERSION = process.env.WHATSAPP_API_VERSION || 'v21.0'
 
 const DEBOUNCE_MS = 3000   // wait this long to batch rapid messages
 
+// ── Greeting helpers ─────────────────────────────────────────────────────────
+function timeGreeting(): string {
+  const hour = new Date().toLocaleString('en-US', { timeZone: 'Asia/Colombo', hour: 'numeric', hour12: false })
+  const h = parseInt(hour, 10)
+  if (h >= 5 && h < 12) return 'Good morning'
+  if (h >= 12 && h < 17) return 'Good afternoon'
+  if (h >= 17 && h < 21) return 'Good evening'
+  return 'Hello'
+}
+
+async function isFirstMessageEver(convId: string, sb: SB): Promise<boolean> {
+  const { count } = await sb
+    .from('support_messages')
+    .select('id', { count: 'exact', head: true })
+    .eq('conversation_id', convId)
+    .eq('sender', 'bot')
+  return (count ?? 0) === 0
+}
+
 export interface InboundMsg {
   metaMessageId: string
   from: string
@@ -169,6 +188,17 @@ export async function processInbound(msg: InboundMsg): Promise<void> {
   if (!(await botGloballyEnabled(sb))) {
     await escalateSilently(conv.id, 'bot_disabled', sb)
     return
+  }
+
+  // ── First-message greeting: send before debounce so it arrives fast ─────────
+  const firstTime = await isFirstMessageEver(conv.id, sb)
+  if (firstTime) {
+    const greetDelay1 = 3000 + Math.random() * 1500   // 3–4.5s
+    const greetDelay2 = 4000 + Math.random() * 1500   // 4–5.5s after first
+    await sleep(greetDelay1)
+    await sendAndLog(conv.id, conv.customer_phone, `${timeGreeting()}! 👋`, sb)
+    await sleep(greetDelay2)
+    await sendAndLog(conv.id, conv.customer_phone, `I'm Mashi, from Emma Thinking 🌸`, sb)
   }
 
   // ── Debounce: wait, then bail if a newer customer message arrived ──────────

@@ -63,6 +63,7 @@ const SECTIONS: Section[] = [
       { href: '/admin/whatsapp', icon: MessageCircle, label: 'WhatsApp' },
       { href: '/admin/whatsapp/delivery', icon: BarChart2, label: 'WA Delivery' },
       { href: '/admin/whatsapp/support', icon: Headphones, label: 'WA Support' },
+      { href: '/admin/whatsapp/complaints', icon: AlertOctagon, label: 'WA Complaints' },
       { href: '/admin/notifications', icon: MessageSquare, label: 'Notifications' },
       { href: '/admin/settings', icon: Settings, label: 'Settings' },
     ],

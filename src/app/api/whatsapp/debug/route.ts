@@ -1,7 +1,7 @@
 // POST /api/whatsapp/debug
 
 import { NextResponse } from 'next/server'
-import { handleIncomingMessage } from '@/lib/whatsapp-support'
+import { handleIncomingMessage } from '@/lib/maashi-inbound'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 
 export const dynamic = 'force-dynamic'

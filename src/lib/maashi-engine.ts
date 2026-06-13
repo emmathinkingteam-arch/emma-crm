@@ -1,0 +1,361 @@
+// ============================================================================
+// Maashi engine — turns a customer message into Maashi's reply
+// ============================================================================
+//
+// "Code decides, Claude speaks." We pre-fetch the customer's real data from
+// the DB and inject it as facts. Claude only TALKS, and uses 3 action tools:
+//   lookup_by_invoice · lodge_complaint · escalate_to_agent
+// ============================================================================
+
+import { supabaseAdmin } from './supabase-admin'
+import {
+  callClaude, ClaudeMessage, ClaudeTool, ContentBlock, ImageBlock, ToolUseBlock,
+  MAASHI_MODEL,
+} from './anthropic'
+import {
+  fullSystemPrompt, buildCustomerContext, CustomerFile,
+} from './maashi-prompt'
+
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://emmathinking.com'
+
+type SB = ReturnType<typeof supabaseAdmin>
+
+const STEP_NAMES: Record<number, string> = {
+  1: 'Customer Onboarding',
+  2: 'Invoice Making',
+  3: 'Personal Relationship Manager assigned',
+  4: 'Counselling Session',
+  5: 'Manager Post Approval',
+  6: 'Design & Publish',
+}
+
+function fmtDate(iso: string | null): string | null {
+  if (!iso) return null
+  return new Date(iso).toLocaleDateString('en-GB', {
+    day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Colombo',
+  })
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Build the customer file from the phone number
+// ─────────────────────────────────────────────────────────────────────────
+
+async function loadCustomerFile(phone: string, convId: string, sb: SB): Promise<CustomerFile> {
+  const normalised = phone.startsWith('+') ? phone.slice(1) : phone
+
+  const { data: customer } = await sb
+    .from('customers')
+    .select('id, name')
+    .or(`phone.eq.${phone},phone.eq.${normalised},phone.eq.+${normalised}`)
+    .maybeSingle()
+
+  // open complaint check (by phone)
+  const { data: openComplaint } = await sb
+    .from('support_complaints')
+    .select('id')
+    .eq('customer_phone', phone)
+    .in('status', ['pending', 'reviewed'])
+    .limit(1)
+    .maybeSingle()
+
+  if (!customer) return { found: false, hasOpenComplaint: !!openComplaint }
+
+  const { data: order } = await sb
+    .from('orders')
+    .select(`
+      id, current_step, status, tracking_token,
+      planned_post_date, published_at, package_id,
+      package:packages(name, post_validity_days)
+    `)
+    .eq('customer_id', customer.id)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (!order) {
+    return { found: false, name: customer.name, hasOpenComplaint: !!openComplaint }
+  }
+
+  const pkg = (order.package as unknown) as { name: string; post_validity_days: number } | null
+
+  const { data: step6 } = await sb
+    .from('order_steps')
+    .select('planned_post_date')
+    .eq('order_id', order.id)
+    .eq('step_number', 6)
+    .maybeSingle()
+
+  const token = (order as { tracking_token?: string }).tracking_token ?? order.id
+  const published = !!order.published_at
+
+  return {
+    found: true,
+    name: customer.name,
+    packageName: pkg?.name ?? null,
+    stageName: STEP_NAMES[order.current_step] ?? `Step ${order.current_step}`,
+    invoiceLink: `${APP_URL}/invoice/${order.id}`,
+    trackingLink: `${APP_URL}/track/${token}`,
+    postDate: fmtDate(step6?.planned_post_date ?? order.planned_post_date ?? null),
+    publishedLink: published ? `${APP_URL}/track/${token}` : null,
+    hasOpenComplaint: !!openComplaint,
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tools
+// ─────────────────────────────────────────────────────────────────────────
+
+const TOOLS: ClaudeTool[] = [
+  {
+    name: 'lookup_by_invoice',
+    description:
+      'Look up a customer by their invoice number (e.g. EM00705) when no order was found for their phone. Returns their details or "not found".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        invoice_number: { type: 'string', description: 'The invoice number the customer gave, e.g. EM00705' },
+      },
+      required: ['invoice_number'],
+    },
+  },
+  {
+    name: 'lodge_complaint',
+    description:
+      'Lodge a formal complaint ticket when the customer has a real grievance (no matches, no numbers received, no response, something went wrong). Returns a ticket reference to give the customer.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        category: { type: 'string', enum: ['no_numbers', 'no_matches', 'no_response', 'refund', 'other'] },
+        subject: { type: 'string', description: 'Short subject line, in English, summarising the issue' },
+        description: { type: 'string', description: 'A short factual description of the complaint, in English' },
+      },
+      required: ['category', 'subject'],
+    },
+  },
+  {
+    name: 'escalate_to_agent',
+    description:
+      'Hand this chat to a human agent. Use when the customer is angry/abusive, explicitly wants a person/call, asks for refund/cancellation, or you cannot help. The customer must NOT be told a handoff happened.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        reason: { type: 'string', enum: ['angry', 'wants_agent', 'refund', 'cannot_help', 'other'] },
+      },
+      required: ['reason'],
+    },
+  },
+]
+
+// ── Ticket reference like 2-0011414496 ──────────────────────────────────────
+function genTicketRef(): string {
+  const n = Math.floor(1_000_000_000 + Math.random() * 8_999_999_999) // 10 digits
+  return `2-${n}`
+}
+
+interface ToolOutcome { escalated: boolean; escalationReason?: string }
+
+async function runTool(
+  tool: ToolUseBlock,
+  conv: { id: string; customer_phone: string; customer_name: string | null },
+  sb: SB,
+  outcome: ToolOutcome,
+): Promise<string> {
+  try {
+    if (tool.name === 'lookup_by_invoice') {
+      const inv = String((tool.input as { invoice_number?: string }).invoice_number ?? '').trim()
+      if (!inv) return 'No invoice number provided.'
+
+      // New orders
+      const { data: order } = await sb
+        .from('orders')
+        .select('id, current_step, status, tracking_token, planned_post_date, published_at, customer:customers(name), package:packages(name)')
+        .ilike('invoice_number', `%${inv}%`)
+        .limit(1)
+        .maybeSingle()
+
+      if (order) {
+        const cust = (order.customer as unknown) as { name?: string } | null
+        const pkg = (order.package as unknown) as { name?: string } | null
+        const token = (order as { tracking_token?: string }).tracking_token ?? order.id
+        return [
+          `FOUND. Name: ${cust?.name ?? 'customer'}.`,
+          `Package: ${pkg?.name ?? 'unknown'}.`,
+          `Stage: ${STEP_NAMES[order.current_step] ?? order.current_step}.`,
+          `Invoice link: ${APP_URL}/invoice/${order.id}.`,
+          `Tracking link: ${APP_URL}/track/${token}.`,
+          order.published_at ? `Published: ${APP_URL}/track/${token}.` : `Not published yet.`,
+        ].join(' ')
+      }
+
+      // Legacy invoices
+      const { data: legacy } = await sb
+        .from('legacy_invoices_with_count')
+        .select('customer_name, phone_number, invoice_number, invoice_date')
+        .ilike('invoice_number', `%${inv}%`)
+        .limit(1)
+        .maybeSingle()
+
+      if (legacy) {
+        return `FOUND (legacy). Name: ${legacy.customer_name ?? 'customer'}. Invoice: ${legacy.invoice_number}. This is an older record — if they need live tracking or stage info, escalate to an agent.`
+      }
+
+      return `NOT FOUND for invoice "${inv}". Ask them to double-check the number, or escalate if they're sure.`
+    }
+
+    if (tool.name === 'lodge_complaint') {
+      const inp = tool.input as { category?: string; subject?: string; description?: string }
+      const ticket = genTicketRef()
+
+      // try to attach customer/order ids
+      const normalised = conv.customer_phone.startsWith('+') ? conv.customer_phone.slice(1) : conv.customer_phone
+      const { data: customer } = await sb
+        .from('customers').select('id')
+        .or(`phone.eq.${conv.customer_phone},phone.eq.${normalised},phone.eq.+${normalised}`)
+        .maybeSingle()
+
+      await sb.from('support_complaints').insert({
+        ticket_ref: ticket,
+        conversation_id: conv.id,
+        customer_id: customer?.id ?? null,
+        customer_phone: conv.customer_phone,
+        customer_name: conv.customer_name,
+        category: inp.category ?? 'other',
+        subject: inp.subject ?? 'Customer complaint',
+        description: inp.description ?? null,
+        status: 'pending',
+      })
+
+      return `Complaint lodged successfully. Ticket reference: ${ticket}. Give this exact ticket reference to the customer.`
+    }
+
+    if (tool.name === 'escalate_to_agent') {
+      const reason = String((tool.input as { reason?: string }).reason ?? 'other')
+      outcome.escalated = true
+      outcome.escalationReason = reason
+      return `Escalation flagged (${reason}). A human will take over from the panel. Send your one short holding line now and then stop.`
+    }
+
+    return `Unknown tool ${tool.name}.`
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error'
+    console.error('[maashi tool]', tool.name, msg)
+    return `Tool error: ${msg}`
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Build alternating message history from support_messages
+// ─────────────────────────────────────────────────────────────────────────
+
+interface DbMsg { sender: string; message: string; type?: string | null; transcript?: string | null }
+
+function mapHistory(rows: DbMsg[]): ClaudeMessage[] {
+  const out: ClaudeMessage[] = []
+  for (const r of rows) {
+    const role: 'user' | 'assistant' = r.sender === 'customer' ? 'user' : 'assistant'
+    let text = r.message ?? ''
+    if (r.type === 'audio' && r.transcript) text = `(voice note) ${r.transcript}`
+    else if (r.type === 'image' && r.sender === 'customer') text = text || '(sent an image)'
+    if (!text.trim()) continue
+    const last = out[out.length - 1]
+    if (last && last.role === role && typeof last.content === 'string') {
+      last.content = `${last.content}\n${text}`
+    } else {
+      out.push({ role, content: text })
+    }
+  }
+  // must start with a user turn
+  while (out.length && out[0].role !== 'user') out.shift()
+  return out
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Main: produce Maashi's reply messages for the latest customer turn
+// ─────────────────────────────────────────────────────────────────────────
+
+export interface MaashiResult {
+  messages: string[]          // bubbles to send (split on |||)
+  escalated: boolean
+  escalationReason?: string
+  model: string
+  tokensIn: number
+  tokensOut: number
+}
+
+export async function runMaashiTurn(
+  conv: { id: string; customer_phone: string; customer_name: string | null },
+  sb: SB,
+  currentImages: ImageBlock[] = [],
+): Promise<MaashiResult> {
+  // 1. Customer file (real facts)
+  const file = await loadCustomerFile(conv.customer_phone, conv.id, sb)
+  const contextBlock = buildCustomerContext(file)
+
+  // 2. History (last 20 messages, ascending)
+  const { data: rows } = await sb
+    .from('support_messages')
+    .select('sender, message, type, transcript, created_at')
+    .eq('conversation_id', conv.id)
+    .order('created_at', { ascending: false })
+    .limit(20)
+  const history = mapHistory((rows ?? []).reverse() as DbMsg[])
+
+  if (history.length === 0) {
+    history.push({ role: 'user', content: '(customer started the chat)' })
+  }
+
+  // 3. Inject the customer file + images into the LAST user turn
+  const lastUser = [...history].reverse().find(m => m.role === 'user')
+  if (lastUser) {
+    const userText = typeof lastUser.content === 'string' ? lastUser.content : ''
+    const blocks: ContentBlock[] = [{ type: 'text', text: `${contextBlock}\n\n---\nCustomer: ${userText}` }]
+    for (const img of currentImages) blocks.push(img)
+    lastUser.content = blocks
+  }
+
+  const system = fullSystemPrompt()
+  const outcome: ToolOutcome = { escalated: false }
+  let tokensIn = 0
+  let tokensOut = 0
+
+  // 4. Tool-use loop (max 4 rounds)
+  const messages: ClaudeMessage[] = [...history]
+  let finalText = ''
+
+  for (let round = 0; round < 4; round++) {
+    const res = await callClaude({ system, messages, tools: TOOLS, maxTokens: 400, temperature: 0.8 })
+    tokensIn += res.usage?.input_tokens ?? 0
+    tokensOut += res.usage?.output_tokens ?? 0
+
+    const toolUses = res.content.filter(b => b.type === 'tool_use') as ToolUseBlock[]
+    const textParts = res.content.filter(b => b.type === 'text') as { type: 'text'; text: string }[]
+    if (textParts.length) finalText = textParts.map(t => t.text).join('\n').trim()
+
+    if (toolUses.length === 0) break
+
+    // run tools, feed results back
+    messages.push({ role: 'assistant', content: res.content })
+    const results: ContentBlock[] = []
+    for (const tu of toolUses) {
+      const result = await runTool(tu, conv, sb, outcome)
+      results.push({ type: 'tool_result', tool_use_id: tu.id, content: result })
+    }
+    messages.push({ role: 'user', content: results })
+  }
+
+  // 5. Split into bubbles
+  const bubbles = finalText
+    .split('|||')
+    .map(s => s.trim())
+    .filter(Boolean)
+
+  return {
+    messages: bubbles.length ? bubbles : ['🙏'],
+    escalated: outcome.escalated,
+    escalationReason: outcome.escalationReason,
+    model: MAASHI_MODEL,
+    tokensIn,
+    tokensOut,
+  }
+}

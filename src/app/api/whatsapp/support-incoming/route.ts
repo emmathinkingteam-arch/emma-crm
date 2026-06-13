@@ -40,7 +40,7 @@
 // ============================================================================
 
 import { NextResponse } from 'next/server'
-import { handleIncomingMessage } from '@/lib/whatsapp-support'
+import { handleIncomingMessage } from '@/lib/maashi-inbound'
 
 export const dynamic = 'force-dynamic'
 export const runtime  = 'nodejs'

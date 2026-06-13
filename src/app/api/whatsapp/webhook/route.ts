@@ -5,10 +5,11 @@
 import { NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { supabaseAdmin } from '@/lib/supabase-admin'
-import { handleIncomingMessage } from '@/lib/whatsapp-support'
+import { processInbound, InboundMsg } from '@/lib/maashi-inbound'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
+export const maxDuration = 60   // AI turn + media + delays can take a few seconds
 
 const STATUS_RANK: Record<string, number> = {
     accepted: 1,
@@ -75,13 +76,25 @@ function extractStatuses(body: unknown): WaStatus[] {
     return out
 }
 
-function extractInboundMessages(body: unknown): { from: string; text: string; name?: string }[] {
-    const out: { from: string; text: string; name?: string }[] = []
+interface RawMsg {
+    id?: string
+    from?: string
+    type?: string
+    text?: { body?: string }
+    image?: { id?: string; caption?: string }
+    audio?: { id?: string }
+    voice?: { id?: string }
+    document?: { id?: string; caption?: string }
+    interactive?: unknown
+}
+
+function extractInboundMessages(body: unknown): InboundMsg[] {
+    const out: InboundMsg[] = []
     const b = body as {
         entry?: Array<{
             changes?: Array<{
                 value?: {
-                    messages?: Array<{ from?: string; text?: { body?: string }; type?: string }>
+                    messages?: RawMsg[]
                     contacts?: Array<{ profile?: { name?: string }; wa_id?: string }>
                 }
             }>
@@ -91,9 +104,28 @@ function extractInboundMessages(body: unknown): { from: string; text: string; na
         for (const change of entry.changes ?? []) {
             const val = change.value
             for (const msg of val?.messages ?? []) {
-                if (msg.type !== 'text' || !msg.from || !msg.text?.body) continue
-                const contact = val?.contacts?.find(c => c.wa_id === msg.from)
-                out.push({ from: msg.from, text: msg.text.body, name: contact?.profile?.name })
+                if (!msg.from || !msg.id) continue
+                const name = val?.contacts?.find(c => c.wa_id === msg.from)?.profile?.name
+
+                const base = { metaMessageId: msg.id, from: msg.from, name }
+
+                switch (msg.type) {
+                    case 'text':
+                        out.push({ ...base, type: 'text', text: msg.text?.body ?? '' })
+                        break
+                    case 'image':
+                        out.push({ ...base, type: 'image', text: msg.image?.caption, mediaId: msg.image?.id })
+                        break
+                    case 'audio':
+                        out.push({ ...base, type: 'audio', mediaId: msg.audio?.id ?? msg.voice?.id })
+                        break
+                    case 'document':
+                        out.push({ ...base, type: 'document', text: msg.document?.caption, mediaId: msg.document?.id })
+                        break
+                    default:
+                        // interactive / unsupported → still give the bot the text if any
+                        out.push({ ...base, type: 'other', text: msg.text?.body })
+                }
             }
         }
     }
@@ -133,13 +165,14 @@ export async function POST(req: Request) {
         const statuses = extractStatuses(body)
 
         if (statuses.length === 0) {
-            // Inbound customer message — handle with support bot
+            // Inbound customer message — handle with Maashi AI
             const inbound = extractInboundMessages(body)
             console.log('[WA webhook] inbound messages:', inbound.length)
-            for (const msg of inbound) {
-                await handleIncomingMessage(msg.from, msg.text, msg.name)
-            }
-            return NextResponse.json({ ok: true, processed: 0 })
+            // Parallel so the per-conversation debounce collapses a burst into one reply
+            await Promise.all(inbound.map(msg => processInbound(msg).catch(e =>
+                console.error('[WA webhook] processInbound failed', e)
+            )))
+            return NextResponse.json({ ok: true, processed: inbound.length })
         }
 
         // Status updates for broadcast messages

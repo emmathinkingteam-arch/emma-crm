@@ -292,26 +292,30 @@ export async function runMaashiTurn(
   const file = await loadCustomerFile(conv.customer_phone, conv.id, sb)
   const contextBlock = buildCustomerContext(file)
 
-  // 2. History (last 20 messages, ascending)
+  // 2. History (last 8 messages only — more than enough context, far fewer tokens)
   const { data: rows } = await sb
     .from('support_messages')
     .select('sender, message, type, transcript, created_at')
     .eq('conversation_id', conv.id)
     .order('created_at', { ascending: false })
-    .limit(20)
+    .limit(8)
   const history = mapHistory((rows ?? []).reverse() as DbMsg[])
 
   if (history.length === 0) {
     history.push({ role: 'user', content: '(customer started the chat)' })
   }
 
-  // 3. Inject the customer file + images into the LAST user turn
-  const lastUser = [...history].reverse().find(m => m.role === 'user')
-  if (lastUser) {
-    const userText = typeof lastUser.content === 'string' ? lastUser.content : ''
-    const blocks: ContentBlock[] = [{ type: 'text', text: `${contextBlock}\n\n---\nCustomer: ${userText}` }]
-    for (const img of currentImages) blocks.push(img)
-    lastUser.content = blocks
+  // 3. Inject images into the LAST user turn only.
+  //    Customer context is now passed as a separate cached system block (not in the user turn)
+  //    so it doesn't get re-charged on every tool-loop round.
+  if (currentImages.length > 0) {
+    const lastUser = [...history].reverse().find(m => m.role === 'user')
+    if (lastUser) {
+      const userText = typeof lastUser.content === 'string' ? lastUser.content : ''
+      const blocks: ContentBlock[] = [{ type: 'text', text: userText }]
+      for (const img of currentImages) blocks.push(img)
+      lastUser.content = blocks
+    }
   }
 
   const system = fullSystemPrompt()
@@ -319,12 +323,35 @@ export async function runMaashiTurn(
   let tokensIn = 0
   let tokensOut = 0
 
-  // 4. Tool-use loop (max 4 rounds)
+  // 4. Tool-use loop (max 4 rounds).
+  //    Images are stripped from the messages array after round 1 — a phone photo can be
+  //    20k–140k tokens and there's no reason to re-send it on every subsequent round.
   const messages: ClaudeMessage[] = [...history]
   let finalText = ''
 
   for (let round = 0; round < 4; round++) {
-    const res = await callClaude({ system, messages, tools: TOOLS, maxTokens: 400, temperature: 0.8 })
+    // After the first round, remove any image blocks from the messages array so we don't
+    // re-send the full photo (20k–140k tokens) on every subsequent tool-loop call.
+    if (round === 1) {
+      for (const m of messages) {
+        if (Array.isArray(m.content)) {
+          m.content = (m.content as ContentBlock[]).filter(b => b.type !== 'image')
+          // if the message is now just a single text block, flatten it back to a string
+          if (m.content.length === 1 && m.content[0].type === 'text') {
+            m.content = (m.content[0] as { type: 'text'; text: string }).text
+          }
+        }
+      }
+    }
+
+    const res = await callClaude({
+      system,
+      customerContext: contextBlock,   // cached as 2nd system block — not re-charged if unchanged
+      messages,
+      tools: TOOLS,
+      maxTokens: 400,
+      temperature: 0.8,
+    })
     tokensIn += res.usage?.input_tokens ?? 0
     tokensOut += res.usage?.output_tokens ?? 0
 

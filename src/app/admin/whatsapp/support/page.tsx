@@ -11,7 +11,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import {
   Search, MoreVertical, Phone, X, Send, CheckCheck, Clock,
-  MessageSquare, Smile, ChevronDown, AlertTriangle, Video, Plus,
+  MessageSquare, Smile, ChevronDown, AlertTriangle, Video, Plus, Trash2,
 } from 'lucide-react'
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -211,6 +211,23 @@ export default function WhatsAppSupportPage() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
   }
 
+  // Flush Chat: close this conversation so the next message from the customer starts
+  // a brand-new chat with zero history sent to the AI — dramatically cuts token usage.
+  // Complaints in support_complaints are untouched.
+  const handleFlushChat = async () => {
+    if (!activeConv) return
+    if (!confirm('Flush this chat? The conversation will close. Next message from this customer starts fresh (less AI tokens used). Complaints are kept.')) return
+    setActionLoading(true)
+    await supabase.from('support_conversations').update({
+      state: 'closed',
+      closed_at: new Date().toISOString(),
+    }).eq('id', activeConv.id)
+    setActiveConv(null)
+    setMessages([])
+    setActionLoading(false)
+    await loadConversations()
+  }
+
   const filtered = conversations.filter(c => {
     if (filter === 'queued' && c.state !== 'queued') return false
     if (filter === 'live' && c.state !== 'live') return false
@@ -329,6 +346,18 @@ export default function WhatsAppSupportPage() {
                   fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
                 }}><X size={14} /> {actionLoading ? 'Closing…' : 'Close'}</button>
               )}
+              <button
+                onClick={handleFlushChat}
+                disabled={actionLoading}
+                title="Flush Chat — close this conversation so next message starts fresh (saves AI tokens)"
+                style={{
+                  background: 'none', border: '1px solid #FECACA', borderRadius: 7, cursor: actionLoading ? 'not-allowed' : 'pointer',
+                  padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 5,
+                  color: '#DC2626', fontSize: 12, fontWeight: 600, opacity: actionLoading ? 0.5 : 1,
+                }}
+              >
+                <Trash2 size={13} /> Flush Chat
+              </button>
               <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><Video size={20} color={WA.sub} /></button>
               <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><Phone size={19} color={WA.sub} /></button>
               <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><MoreVertical size={20} color={WA.sub} /></button>

@@ -58,7 +58,8 @@ export interface ClaudeResponse {
 }
 
 interface CallOpts {
-  system: string            // cached system prompt
+  system: string            // static system prompt — cached across all customers
+  customerContext?: string  // per-customer data — cached as a 2nd block (reused within a convo)
   messages: ClaudeMessage[]
   tools?: ClaudeTool[]
   maxTokens?: number
@@ -75,10 +76,18 @@ export async function callClaude(opts: CallOpts): Promise<ClaudeResponse> {
     model: MAASHI_MODEL,
     max_tokens: opts.maxTokens ?? 400,
     temperature: opts.temperature ?? 0.8,
-    // Cache the whole persona/system prompt — identical every call.
-    system: [
-      { type: 'text', text: opts.system, cache_control: { type: 'ephemeral' } },
-    ],
+    // Two-level prompt cache:
+    //   Block 1 (static):  full persona + rules — same for ALL customers, stays cached 5 min.
+    //   Block 2 (dynamic): per-customer file — same within one conversation, cached per customer.
+    // Without the anthropic-beta header above, both blocks would be charged full price every call.
+    system: opts.customerContext
+      ? [
+          { type: 'text', text: opts.system, cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: opts.customerContext, cache_control: { type: 'ephemeral' } },
+        ]
+      : [
+          { type: 'text', text: opts.system, cache_control: { type: 'ephemeral' } },
+        ],
     messages: opts.messages,
   }
   if (opts.tools && opts.tools.length) body.tools = opts.tools
@@ -89,6 +98,9 @@ export async function callClaude(opts: CallOpts): Promise<ClaudeResponse> {
       'x-api-key': key,
       'anthropic-version': VERSION,
       'content-type': 'application/json',
+      // Required to activate prompt caching — without this header,
+      // cache_control is silently ignored and you pay full price every call.
+      'anthropic-beta': 'prompt-caching-2024-07-31',
     },
     body: JSON.stringify(body),
   })

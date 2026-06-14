@@ -48,13 +48,19 @@ export interface ClaudeTool {
   name: string
   description: string
   input_schema: Record<string, unknown>
+  cache_control?: { type: 'ephemeral' }
 }
 
 export interface ClaudeResponse {
   id: string
   content: ContentBlock[]
   stop_reason: string | null
-  usage?: { input_tokens?: number; output_tokens?: number }
+  usage?: {
+    input_tokens?: number
+    output_tokens?: number
+    cache_creation_input_tokens?: number  // tokens written to cache (charged at 1.25×)
+    cache_read_input_tokens?: number      // tokens read from cache (charged at 0.1×)
+  }
 }
 
 interface CallOpts {

@@ -106,46 +106,62 @@ async function loadCustomerFile(phone: string, convId: string, sb: SB): Promise<
 // Tools
 // ─────────────────────────────────────────────────────────────────────────
 
-const TOOLS: ClaudeTool[] = [
-  {
-    name: 'lookup_by_invoice',
-    description:
-      'Look up a customer by their invoice number (e.g. EM00705) when no order was found for their phone. Returns their details or "not found".',
-    input_schema: {
-      type: 'object',
-      properties: {
-        invoice_number: { type: 'string', description: 'The invoice number the customer gave, e.g. EM00705' },
-      },
-      required: ['invoice_number'],
+// ── Tool for unknown customers only (invoice lookup) ──────────────────────────
+const TOOL_LOOKUP: ClaudeTool = {
+  name: 'lookup_by_invoice',
+  description:
+    'Look up a customer by their invoice number (e.g. EM00705) when no order was found for their phone. Returns their details or "not found".',
+  input_schema: {
+    type: 'object',
+    properties: {
+      invoice_number: { type: 'string', description: 'The invoice number the customer gave, e.g. EM00705' },
     },
+    required: ['invoice_number'],
   },
-  {
-    name: 'lodge_complaint',
-    description:
-      'Lodge a formal complaint ticket when the customer has a real grievance (no matches, no numbers received, no response, something went wrong). Returns a ticket reference to give the customer.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        category: { type: 'string', enum: ['no_numbers', 'no_matches', 'no_response', 'refund', 'other'] },
-        subject: { type: 'string', description: 'Short subject line, in English, summarising the issue' },
-        description: { type: 'string', description: 'A short factual description of the complaint, in English' },
-      },
-      required: ['category', 'subject'],
+}
+
+// ── Tools available to all conversations ──────────────────────────────────────
+const TOOL_COMPLAINT: ClaudeTool = {
+  name: 'lodge_complaint',
+  description:
+    'Lodge a formal complaint ticket when the customer has a real grievance (no matches, no numbers received, no response, something went wrong). Returns a ticket reference to give the customer.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      category: { type: 'string', enum: ['no_numbers', 'no_matches', 'no_response', 'refund', 'other'] },
+      subject: { type: 'string', description: 'Short subject line, in English, summarising the issue' },
+      description: { type: 'string', description: 'A short factual description of the complaint, in English' },
     },
+    required: ['category', 'subject'],
   },
-  {
-    name: 'escalate_to_agent',
-    description:
-      'Hand this chat to a human agent. Use when the customer is angry/abusive, explicitly wants a person/call, asks for refund/cancellation, or you cannot help. The customer must NOT be told a handoff happened.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        reason: { type: 'string', enum: ['angry', 'wants_agent', 'refund', 'cannot_help', 'other'] },
-      },
-      required: ['reason'],
+}
+
+const TOOL_ESCALATE: ClaudeTool = {
+  name: 'escalate_to_agent',
+  description:
+    'Hand this chat to a human agent. Use when the customer is angry/abusive, explicitly wants a person/call, asks for refund/cancellation, or you cannot help. The customer must NOT be told a handoff happened.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      reason: { type: 'string', enum: ['angry', 'wants_agent', 'refund', 'cannot_help', 'other'] },
     },
+    required: ['reason'],
   },
-]
+}
+
+// Build the tool list for this turn and mark the last one for caching.
+// - Unknown customer → 3 tools (lookup + complaint + escalate)
+// - Known customer   → 2 tools (complaint + escalate only — lookup is irrelevant)
+// Adding cache_control to the last tool caches ALL tools up to that point.
+// This saves ~2,000–4,000 input tokens per call after the first within 5 minutes.
+function buildTools(customerFound: boolean): ClaudeTool[] {
+  const list: ClaudeTool[] = customerFound
+    ? [TOOL_COMPLAINT, TOOL_ESCALATE]
+    : [TOOL_LOOKUP, TOOL_COMPLAINT, TOOL_ESCALATE]
+  // Mark the last tool as the cache breakpoint
+  list[list.length - 1] = { ...list[list.length - 1], cache_control: { type: 'ephemeral' } }
+  return list
+}
 
 // ── Ticket reference like 2-0011414496 ──────────────────────────────────────
 function genTicketRef(): string {
@@ -279,8 +295,10 @@ export interface MaashiResult {
   escalated: boolean
   escalationReason?: string
   model: string
-  tokensIn: number
+  tokensIn: number            // non-cached input tokens (new content per call)
   tokensOut: number
+  cacheCreated: number        // tokens written to cache this turn (charged at 1.25×)
+  cacheRead: number           // tokens read from cache (charged at 0.1× — the savings)
 }
 
 export async function runMaashiTurn(
@@ -319,9 +337,12 @@ export async function runMaashiTurn(
   }
 
   const system = fullSystemPrompt()
+  const tools = buildTools(file.found)
   const outcome: ToolOutcome = { escalated: false }
   let tokensIn = 0
   let tokensOut = 0
+  let cacheCreated = 0
+  let cacheRead = 0
 
   // 4. Tool-use loop (max 4 rounds).
   //    Images are stripped from the messages array after round 1 — a phone photo can be
@@ -346,14 +367,16 @@ export async function runMaashiTurn(
 
     const res = await callClaude({
       system,
-      customerContext: contextBlock,   // cached as 2nd system block — not re-charged if unchanged
+      customerContext: contextBlock,   // cached as 2nd system block
       messages,
-      tools: TOOLS,
+      tools,                           // dynamic: 2 tools for known customers, 3 for unknown
       maxTokens: 400,
       temperature: 0.8,
     })
-    tokensIn += res.usage?.input_tokens ?? 0
-    tokensOut += res.usage?.output_tokens ?? 0
+    tokensIn    += res.usage?.input_tokens                ?? 0
+    tokensOut   += res.usage?.output_tokens               ?? 0
+    cacheCreated += res.usage?.cache_creation_input_tokens ?? 0
+    cacheRead    += res.usage?.cache_read_input_tokens     ?? 0
 
     const toolUses = res.content.filter(b => b.type === 'tool_use') as ToolUseBlock[]
     const textParts = res.content.filter(b => b.type === 'text') as { type: 'text'; text: string }[]
@@ -377,6 +400,8 @@ export async function runMaashiTurn(
     .map(s => s.trim())
     .filter(Boolean)
 
+  console.log('[maashi] tokens — in:', tokensIn, '| out:', tokensOut, '| cache_created:', cacheCreated, '| cache_read:', cacheRead)
+
   return {
     messages: bubbles.length ? bubbles : ['🙏'],
     escalated: outcome.escalated,
@@ -384,5 +409,7 @@ export async function runMaashiTurn(
     model: MAASHI_MODEL,
     tokensIn,
     tokensOut,
+    cacheCreated,
+    cacheRead,
   }
 }

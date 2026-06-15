@@ -62,22 +62,32 @@ export function fieldInnerHtml(f: RField): string {
   return `<span style="font-family:inherit;font-size:13px;color:#0f172a">${v}</span>`
 }
 
-// ── The full signed document (letterhead behind, body + signatures on top) ───
+// ── The full signed document — MULTI-PAGE.
+// The letterhead tiles once per A4 page (repeat-y), the body flows across as many
+// pages as the content needs, and each field is placed by (page, x%, y%) → exact mm.
+// @page A4 + margin:0 makes the browser slice it into real pages on print/PDF.
+const PAGE_MM = 297
+const PAGE_W_MM = 210
+const HEADER_MM = 40   // top text margin (clears the letterhead header band)
+const FOOTER_MM = 32   // bottom text margin (clears the letterhead footer band)
+const SIDE_MM = 22     // left / right text margin
+
 export function renderDocumentHtml(
   doc: RDoc,
   fields: RField[],
-  opts: { forPrint?: boolean } = {},
+  _opts: { forPrint?: boolean } = {},
 ): string {
   const lh = doc.letterhead_url
   const fieldsHtml = fields
     .filter((f) => f.value)
-    .map(
-      (f) => `
-      <div style="position:absolute;left:${f.pos_x}%;top:${f.pos_y}%;width:${f.width}%;
+    .map((f) => {
+      const topMm = (Math.max(1, f.page) - 1) * PAGE_MM + (f.pos_y / 100) * PAGE_MM
+      return `
+      <div style="position:absolute;left:${f.pos_x}%;top:${topMm}mm;width:${f.width}%;
                   display:flex;align-items:flex-end;border-bottom:1px solid #cbd5e1;padding-bottom:2px;">
         ${fieldInnerHtml(f)}
-      </div>`,
-    )
+      </div>`
+    })
     .join('')
 
   return `<!doctype html><html><head><meta charset="utf-8">
@@ -85,12 +95,15 @@ export function renderDocumentHtml(
   <style>
     @page { size: A4; margin: 0; }
     * { box-sizing: border-box; }
-    body { margin:0; font-family: 'Segoe UI', Arial, sans-serif; color:#1e293b; background:#f1f5f9; }
+    body { margin:0; font-family: 'Segoe UI', Arial, sans-serif; color:#1e293b; background:#e2e8f0; }
     .sheet {
-      position: relative; width: 210mm; min-height: 297mm; margin: 0 auto; background:#fff;
-      ${lh ? `background-image:url('${lh}');background-size:100% auto;background-repeat:no-repeat;background-position:top center;` : ''}
+      position: relative; width: ${PAGE_W_MM}mm; min-height: ${PAGE_MM}mm; margin: 0 auto; background:#fff;
+      ${lh ? `background-image:url('${lh}');background-size:${PAGE_W_MM}mm ${PAGE_MM}mm;background-repeat:repeat-y;background-position:top center;` : ''}
     }
-    .content { position: relative; padding: 38mm 22mm 32mm 22mm; font-size: 14px; line-height: 1.7; }
+    .content {
+      position: relative; padding: ${HEADER_MM}mm ${SIDE_MM}mm ${FOOTER_MM}mm ${SIDE_MM}mm;
+      font-size: 14px; line-height: 1.7;
+    }
     .content h1,.content h2,.content h3 { color:#0f172a; }
     .content img { max-width: 100%; }
     .field-layer { position:absolute; inset:0; pointer-events:none; }

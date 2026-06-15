@@ -64,6 +64,9 @@ export default function EsignEditor({ initial, defaultLetterhead, createdBy }: P
   // page geometry (measured) ───────────────────────────────────────────────
   const [canvasW, setCanvasW] = useState(760)
   const [contentH, setContentH] = useState(0)
+  const [isEmpty, setIsEmpty] = useState<boolean>(
+    !(initial?.body_html && initial.body_html.replace(/<[^>]*>/g, '').trim().length > 0),
+  )
   const pageH = canvasW * A4
   const headerInset = pageH * HEADER_FRAC
   const footerInset = pageH * FOOTER_FRAC
@@ -102,6 +105,7 @@ export default function EsignEditor({ initial, defaultLetterhead, createdBy }: P
     if (!bodyRef.current) return
     const h = bodyRef.current.scrollHeight
     setContentH(headerInset + h + footerInset)
+    setIsEmpty((bodyRef.current.textContent || '').trim().length === 0)
   }, [headerInset, footerInset])
 
   useEffect(() => { remeasure() }, [canvasW, letterhead, remeasure])
@@ -262,6 +266,7 @@ export default function EsignEditor({ initial, defaultLetterhead, createdBy }: P
             {/* page backgrounds (letterhead on each) */}
             {Array.from({ length: pageCount }).map((_, i) => (
               <div key={i} className="absolute left-0 right-0 bg-white shadow-md select-none"
+                onMouseDown={() => { if (!locked) bodyRef.current?.focus() }}
                 style={{
                   top: i * pageH, height: pageH,
                   backgroundImage: letterhead ? `url('${letterhead}')` : undefined,
@@ -284,9 +289,15 @@ export default function EsignEditor({ initial, defaultLetterhead, createdBy }: P
               suppressContentEditableWarning
               onInput={remeasure}
               className="esign-body absolute outline-none text-[13px] leading-relaxed text-gray-800 select-text"
-              style={{ left: sideInset, right: sideInset, top: headerInset, height: 'auto', userSelect: 'text', WebkitUserSelect: 'text', cursor: 'text', zIndex: 5 }}
-              dangerouslySetInnerHTML={{ __html: initial?.body_html || '<p>Start typing or paste your document text here… it will flow onto more pages automatically.</p>' }}
+              style={{ left: sideInset, right: sideInset, top: headerInset, height: 'auto', minHeight: Math.max(160, pageH - headerInset - footerInset), userSelect: 'text', WebkitUserSelect: 'text', cursor: 'text', zIndex: 5 }}
+              dangerouslySetInnerHTML={{ __html: initial?.body_html || '' }}
             />
+            {isEmpty && !locked && (
+              <div className="absolute text-gray-300 text-[13px] leading-relaxed pointer-events-none"
+                style={{ left: sideInset, right: sideInset, top: headerInset, zIndex: 4 }}>
+                Start typing, or paste your document text here — it flows onto more pages automatically.
+              </div>
+            )}
 
             {/* field overlay (placed by page) */}
             {fields.map((f) => {

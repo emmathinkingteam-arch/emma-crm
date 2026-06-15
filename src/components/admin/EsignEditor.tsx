@@ -258,10 +258,10 @@ export default function EsignEditor({ initial, defaultLetterhead, createdBy }: P
         {/* Multi-page document */}
         <div ref={wrapRef} className="mx-auto" style={{ width: '100%', maxWidth: 780 }}>
           <div ref={canvasRef} onPointerMove={onMove} onPointerUp={onUp}
-            className="relative select-none" style={{ width: '100%', height: stackH }}>
+            className="relative" style={{ width: '100%', height: stackH }}>
             {/* page backgrounds (letterhead on each) */}
             {Array.from({ length: pageCount }).map((_, i) => (
-              <div key={i} className="absolute left-0 right-0 bg-white shadow-md"
+              <div key={i} className="absolute left-0 right-0 bg-white shadow-md select-none"
                 style={{
                   top: i * pageH, height: pageH,
                   backgroundImage: letterhead ? `url('${letterhead}')` : undefined,
@@ -283,8 +283,8 @@ export default function EsignEditor({ initial, defaultLetterhead, createdBy }: P
               contentEditable={!locked}
               suppressContentEditableWarning
               onInput={remeasure}
-              className="esign-body absolute outline-none text-[13px] leading-relaxed text-gray-800"
-              style={{ left: sideInset, right: sideInset, top: headerInset, height: 'auto' }}
+              className="esign-body absolute outline-none text-[13px] leading-relaxed text-gray-800 select-text"
+              style={{ left: sideInset, right: sideInset, top: headerInset, height: 'auto', userSelect: 'text', WebkitUserSelect: 'text', cursor: 'text', zIndex: 5 }}
               dangerouslySetInnerHTML={{ __html: initial?.body_html || '<p>Start typing or paste your document text here… it will flow onto more pages automatically.</p>' }}
             />
 
@@ -295,10 +295,10 @@ export default function EsignEditor({ initial, defaultLetterhead, createdBy }: P
               const top = (f.page - 1) * pageH + (f.pos_y / 100) * pageH
               return (
                 <div key={f.key} onPointerDown={(e) => onFieldDown(e, f)}
-                  className="absolute rounded-md flex items-center justify-center text-[10px] font-semibold cursor-move group"
+                  className="absolute rounded-md flex items-center justify-center text-[10px] font-semibold cursor-move group select-none"
                   style={{
                     left: `${f.pos_x}%`, top, width: `${f.width}%`, height: (f.height / 100) * pageH,
-                    background: `${color}1a`, border: `1.5px dashed ${color}`, color,
+                    background: `${color}1a`, border: `1.5px dashed ${color}`, color, zIndex: 10,
                   }}>
                   <span className="truncate px-1">{f.label} · {signer?.name || 'signer'}</span>
                   {!locked && (

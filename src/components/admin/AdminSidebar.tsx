@@ -7,7 +7,7 @@ import {
   MapPin, Briefcase, UserPlus, BarChart2,
   CalendarRange, ShieldCheck, Settings, LogOut,
   Bell, DollarSign, Target, Archive, MessageSquare, MessageCircle, AlertOctagon,
-  Wallet, Megaphone, Eye, Headphones,
+  Wallet, Megaphone, Eye, Headphones, FileSignature,
 } from 'lucide-react'
 
 import { supabase } from '@/lib/supabase'
@@ -46,6 +46,12 @@ const SECTIONS: Section[] = [
       { href: '/admin/calendar', icon: CalendarRange, label: 'Calendar' },
       { href: '/admin/locations', icon: MapPin, label: 'Locations' },
       { href: '/admin/add-worker', icon: UserPlus, label: 'Add Worker' },
+    ],
+  },
+  {
+    title: 'Documents',
+    items: [
+      { href: '/admin/documents', icon: FileSignature, label: 'E-Sign' },
     ],
   },
   {
@@ -129,7 +135,9 @@ export default function AdminSidebar() {
                             ? pathname.startsWith('/admin/inspector')
                             : href === '/admin/workers'
                               ? pathname.startsWith('/admin/workers')
-                              : pathname === href
+                              : href === '/admin/documents'
+                                ? pathname.startsWith('/admin/documents')
+                                : pathname === href
                   return (
                     <Link
                       key={href}

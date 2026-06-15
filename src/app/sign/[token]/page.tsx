@@ -125,7 +125,17 @@ export default function SignPage() {
           <h1 className="text-xl font-bold text-gray-800">Thank you, {data?.signer?.name}</h1>
           <p className="text-sm text-gray-500 mt-2">Your signature has been recorded for <b>{data?.document?.title}</b>.</p>
           {allSigned ? (
-            <p className="text-sm text-pink-600 font-semibold mt-3">All parties have signed — the document is complete and a certificate has been issued.</p>
+            <>
+              <p className="text-sm text-pink-600 font-semibold mt-3">All parties have signed — the document is complete and a certificate has been issued.</p>
+              {data?.document?.id && (
+                <div className="flex items-center justify-center gap-2 mt-4">
+                  <a href={`/api/esign/render/${data.document.id}`} target="_blank" rel="noreferrer"
+                    className="bg-pink-600 text-white rounded-xl px-4 py-2 text-sm font-semibold hover:bg-pink-700">View signed document</a>
+                  <a href={`/api/esign/render/${data.document.id}?type=certificate`} target="_blank" rel="noreferrer"
+                    className="bg-white border border-pink-200 text-pink-600 rounded-xl px-4 py-2 text-sm font-semibold hover:bg-pink-50">Pink certificate</a>
+                </div>
+              )}
+            </>
           ) : (
             <p className="text-sm text-gray-400 mt-3">We're now waiting on the other signer(s). You'll get the final copy once everyone has signed.</p>
           )}

@@ -38,7 +38,6 @@ export default function DocumentPage() {
   if (loading) return <div className="p-8 text-sm text-gray-400">Loading…</div>
   if (!doc) return <div className="p-8 text-sm text-gray-400">Document not found.</div>
 
-  const certUrl = doc.meta?.certificate_url
   const signedTotal = (doc.esign_signers || []).length
   const signedDone = (doc.esign_signers || []).filter((s: any) => s.status === 'signed').length
 
@@ -56,18 +55,14 @@ export default function DocumentPage() {
             <p className="text-xs text-gray-400">{doc.certificate_no || 'Certificate pending'}</p>
           </div>
           <div className="flex items-center gap-2 ml-auto">
-            {doc.final_url && (
-              <a href={doc.final_url} target="_blank" rel="noreferrer"
-                className="flex items-center gap-1.5 bg-pink-600 text-white rounded-xl px-3.5 py-2 text-sm font-semibold hover:bg-pink-700">
-                <Download size={15} /> Signed document
-              </a>
-            )}
-            {certUrl && (
-              <a href={certUrl} target="_blank" rel="noreferrer"
-                className="flex items-center gap-1.5 bg-white border border-pink-200 text-pink-600 rounded-xl px-3.5 py-2 text-sm font-semibold hover:bg-pink-50">
-                <Award size={15} /> Pink certificate
-              </a>
-            )}
+            <a href={`/api/esign/render/${id}`} target="_blank" rel="noreferrer"
+              className="flex items-center gap-1.5 bg-pink-600 text-white rounded-xl px-3.5 py-2 text-sm font-semibold hover:bg-pink-700">
+              <Download size={15} /> Signed document
+            </a>
+            <a href={`/api/esign/render/${id}?type=certificate`} target="_blank" rel="noreferrer"
+              className="flex items-center gap-1.5 bg-white border border-pink-200 text-pink-600 rounded-xl px-3.5 py-2 text-sm font-semibold hover:bg-pink-50">
+              <Award size={15} /> Pink certificate
+            </a>
             <button onClick={finalize} disabled={finalizing}
               className="flex items-center gap-1.5 bg-white border border-gray-200 text-gray-500 rounded-xl px-3 py-2 text-sm font-semibold hover:bg-gray-50 disabled:opacity-50"
               title="Re-render & re-upload">

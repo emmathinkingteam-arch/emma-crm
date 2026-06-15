@@ -39,6 +39,7 @@ export default function EsignEditor({ initial, defaultLetterhead, createdBy }: P
   const wrapRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
+  const inited = useRef(false)
 
   const [docId, setDocId] = useState<string | undefined>(initial?.id)
   const [status, setStatus] = useState<string>(initial?.status || 'draft')
@@ -114,7 +115,26 @@ export default function EsignEditor({ initial, defaultLetterhead, createdBy }: P
     return () => clearTimeout(t)
   }, [remeasure])
 
+  // Seed the editor's HTML ONCE, then leave the DOM entirely to the browser.
+  // (contentEditable + React re-renders fight each other and wipe typed text —
+  //  keeping it uncontrolled is the fix.)
+  useEffect(() => {
+    if (bodyRef.current && !inited.current) {
+      bodyRef.current.innerHTML = initial?.body_html || ''
+      inited.current = true
+      remeasure()
+    }
+  }, [remeasure])
+
   const exec = (cmd: string, val?: string) => { document.execCommand(cmd, false, val); bodyRef.current?.focus(); remeasure() }
+
+  // Paste as clean text (keeps line breaks, drops messy Word/editor markup).
+  const onPaste = (e: React.ClipboardEvent) => {
+    e.preventDefault()
+    const text = e.clipboardData.getData('text/plain')
+    document.execCommand('insertText', false, text)
+    remeasure()
+  }
 
   const addSigner = () => {
     const c = COLORS[signers.length % COLORS.length]
@@ -131,9 +151,18 @@ export default function EsignEditor({ initial, defaultLetterhead, createdBy }: P
   const addField = (type: FieldType) => {
     if (!activeSigner) { setToast('Add a signer first'); return }
     const d = DEFAULTS[type]
+    // Drop the field in the middle of whatever part of the page you're looking at.
+    let page = pageCount, pos_y = 70
+    const el = canvasRef.current
+    if (el) {
+      const rect = el.getBoundingClientRect()
+      const absY = Math.max(0, Math.min(stackH - (d.h / 100) * pageH, (window.innerHeight / 2) - rect.top))
+      page = Math.max(1, Math.min(pageCount, Math.floor(absY / pageH) + 1))
+      pos_y = Math.max(0, Math.min(100 - d.h, ((absY - (page - 1) * pageH) / pageH) * 100))
+    }
     setFields([...fields, {
-      key: uid(), signerKey: activeSigner, type, page: pageCount, // drop on the last page
-      pos_x: 12, pos_y: 70, width: d.w, height: d.h, label: d.label,
+      key: uid(), signerKey: activeSigner, type, page,
+      pos_x: 12, pos_y, width: d.w, height: d.h, label: d.label,
     }])
   }
   const removeField = (key: string) => setFields(fields.filter((f) => f.key !== key))
@@ -288,9 +317,10 @@ export default function EsignEditor({ initial, defaultLetterhead, createdBy }: P
               contentEditable={!locked}
               suppressContentEditableWarning
               onInput={remeasure}
+              onBlur={remeasure}
+              onPaste={onPaste}
               className="esign-body absolute outline-none text-[13px] leading-relaxed text-gray-800 select-text"
               style={{ left: sideInset, right: sideInset, top: headerInset, height: 'auto', minHeight: Math.max(160, pageH - headerInset - footerInset), userSelect: 'text', WebkitUserSelect: 'text', cursor: 'text', zIndex: 5 }}
-              dangerouslySetInnerHTML={{ __html: initial?.body_html || '' }}
             />
             {isEmpty && !locked && (
               <div className="absolute text-gray-300 text-[13px] leading-relaxed pointer-events-none"

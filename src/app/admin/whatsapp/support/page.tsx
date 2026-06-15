@@ -106,6 +106,37 @@ export default function WhatsAppSupportPage() {
   const [actionLoading, setActionLoading] = useState(false)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
   const [showEmoji, setShowEmoji] = useState(false)
+  const [aiProvider, setAiProvider] = useState<'claude' | 'gemini'>('claude')
+  const [providerSaving, setProviderSaving] = useState(false)
+
+  // Load the active AI provider once
+  useEffect(() => {
+    fetch('/api/whatsapp/bot-settings')
+      .then(r => r.json())
+      .then(d => { if (d?.ok && d.ai_provider) setAiProvider(d.ai_provider) })
+      .catch(() => {})
+  }, [])
+
+  const switchProvider = async (next: 'claude' | 'gemini') => {
+    if (next === aiProvider || providerSaving) return
+    setProviderSaving(true)
+    const prev = aiProvider
+    setAiProvider(next) // optimistic
+    try {
+      const r = await fetch('/api/whatsapp/bot-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ai_provider: next }),
+      })
+      const d = await r.json()
+      if (!d?.ok) { setAiProvider(prev); alert(d?.reason || 'Failed to switch provider') }
+    } catch {
+      setAiProvider(prev)
+      alert('Failed to switch provider')
+    } finally {
+      setProviderSaving(false)
+    }
+  }
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -252,9 +283,20 @@ export default function WhatsAppSupportPage() {
             <Avatar name={user?.full_name || 'Agent'} size={40} />
             <div style={{ color: WA.text, fontSize: 16, fontWeight: 600 }}>Chats</div>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {queuedCount > 0 && <span style={{ background: '#EF4444', color: '#fff', borderRadius: 10, padding: '2px 8px', fontSize: 12, fontWeight: 700 }}>{queuedCount} need you</span>}
             {liveCount > 0 && <span style={{ background: WA.green, color: '#fff', borderRadius: 10, padding: '2px 8px', fontSize: 12, fontWeight: 700 }}>{liveCount} live</span>}
+            {/* AI provider switch — flips the Maashi bot between Claude and Gemini */}
+            <div title="Which AI model powers Maashi" style={{ display: 'flex', background: '#fff', border: `1px solid ${WA.border}`, borderRadius: 999, padding: 2, opacity: providerSaving ? 0.6 : 1 }}>
+              {(['claude', 'gemini'] as const).map(p => (
+                <button key={p} onClick={() => switchProvider(p)} disabled={providerSaving} style={{
+                  padding: '3px 10px', borderRadius: 999, border: 'none', cursor: providerSaving ? 'default' : 'pointer',
+                  fontSize: 11, fontWeight: 700, textTransform: 'capitalize',
+                  background: aiProvider === p ? (p === 'gemini' ? '#1A73E8' : '#D97757') : 'transparent',
+                  color: aiProvider === p ? '#fff' : WA.sub,
+                }}>{p}</button>
+              ))}
+            </div>
           </div>
         </div>
 

@@ -16,6 +16,7 @@ import {
   downloadMedia, transcribeAudio, storeMedia, toClaudeImage, DownloadedMedia,
 } from './whatsapp-media'
 import { ImageBlock } from './anthropic'
+import { getAiProvider } from './ai-provider'
 
 type SB = ReturnType<typeof supabaseAdmin>
 
@@ -137,7 +138,8 @@ async function persistInbound(msg: InboundMsg, convId: string, sb: SB): Promise<
       const update: Record<string, unknown> = { media_url: url }
 
       if (msg.type === 'audio') {
-        const transcript = await transcribeAudio(media)
+        const provider = await getAiProvider(sb)
+        const transcript = await transcribeAudio(media, provider)
         update.transcript = transcript
         update.message = transcript ? '🎤 ' + transcript : '🎤 voice message'
       } else if (msg.type === 'image') {

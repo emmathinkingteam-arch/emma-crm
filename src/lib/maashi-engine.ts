@@ -9,9 +9,9 @@
 
 import { supabaseAdmin } from './supabase-admin'
 import {
-  callClaude, ClaudeMessage, ClaudeTool, ContentBlock, ImageBlock, ToolUseBlock,
-  MAASHI_MODEL,
+  ClaudeMessage, ClaudeTool, ContentBlock, ImageBlock, ToolUseBlock,
 } from './anthropic'
+import { getAiProvider, modelFor, callAI } from './ai-provider'
 import {
   fullSystemPrompt, buildCustomerContext, CustomerFile,
 } from './maashi-prompt'
@@ -336,6 +336,7 @@ export async function runMaashiTurn(
     }
   }
 
+  const provider = await getAiProvider(sb)
   const system = fullSystemPrompt()
   const tools = buildTools(file.found)
   const outcome: ToolOutcome = { escalated: false }
@@ -365,7 +366,7 @@ export async function runMaashiTurn(
       }
     }
 
-    const res = await callClaude({
+    const res = await callAI(provider, {
       system,
       customerContext: contextBlock,   // cached as 2nd system block
       messages,
@@ -406,7 +407,7 @@ export async function runMaashiTurn(
     messages: bubbles.length ? bubbles : ['🙏'],
     escalated: outcome.escalated,
     escalationReason: outcome.escalationReason,
-    model: MAASHI_MODEL,
+    model: modelFor(provider),
     tokensIn,
     tokensOut,
     cacheCreated,

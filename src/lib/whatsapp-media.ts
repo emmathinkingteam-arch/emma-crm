@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { v2 as cloudinary } from 'cloudinary'
+import { GEMINI_MODEL } from './gemini'
 
 const TOKEN = process.env.WHATSAPP_ACCESS_TOKEN!
 const VERSION = process.env.WHATSAPP_API_VERSION || 'v21.0'
@@ -45,8 +46,24 @@ export async function downloadMedia(mediaId: string): Promise<DownloadedMedia | 
   return { buffer, mimeType: info.mimeType }
 }
 
-// ── Transcribe a voice note via OpenAI Whisper ──────────────────────────────
-export async function transcribeAudio(media: DownloadedMedia): Promise<string | null> {
+// ── Transcribe a voice note ─────────────────────────────────────────────────
+// Follows the active AI provider:
+//   gemini → Gemini (inline audio), with Whisper as fallback if it fails
+//   claude → OpenAI Whisper (Anthropic has no STT)
+export async function transcribeAudio(
+  media: DownloadedMedia,
+  provider: 'claude' | 'gemini' = 'claude',
+): Promise<string | null> {
+  if (provider === 'gemini' && process.env.GEMINI_API_KEY) {
+    const out = await transcribeWithGemini(media)
+    if (out !== null) return out
+    // fall through to Whisper if Gemini returned nothing
+  }
+  return transcribeWithWhisper(media)
+}
+
+// ── OpenAI Whisper ──────────────────────────────────────────────────────────
+async function transcribeWithWhisper(media: DownloadedMedia): Promise<string | null> {
   const key = process.env.OPENAI_API_KEY
   if (!key) {
     console.error('[wa-media] OPENAI_API_KEY not set — cannot transcribe')
@@ -71,6 +88,47 @@ export async function transcribeAudio(media: DownloadedMedia): Promise<string | 
     return (data.text ?? '').trim() || null
   } catch (e) {
     console.error('[wa-media] whisper error', e)
+    return null
+  }
+}
+
+// ── Gemini audio transcription (inline audio bytes) ─────────────────────────
+async function transcribeWithGemini(media: DownloadedMedia): Promise<string | null> {
+  const key = process.env.GEMINI_API_KEY
+  if (!key) return null
+  try {
+    // Gemini wants a bare audio mime type (no "; codecs=opus" suffix)
+    const mimeType = media.mimeType.split(';')[0].trim() || 'audio/ogg'
+    const url =
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(key)}`
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType, data: media.buffer.toString('base64') } },
+            { text: 'Transcribe this voice note verbatim. The speaker may mix Sinhala and English (Singlish). Output ONLY the transcript text, nothing else.' },
+          ],
+        }],
+        generationConfig: { temperature: 0 },
+      }),
+    })
+    if (!res.ok) {
+      console.error('[wa-media] gemini transcribe failed', res.status, await res.text())
+      return null
+    }
+    const data = await res.json() as {
+      candidates?: { content?: { parts?: { text?: string }[] } }[]
+    }
+    const text = (data.candidates?.[0]?.content?.parts ?? [])
+      .map(p => p.text ?? '')
+      .join('')
+      .trim()
+    return text || null
+  } catch (e) {
+    console.error('[wa-media] gemini transcribe error', e)
     return null
   }
 }

@@ -63,7 +63,7 @@ export interface ClaudeResponse {
   }
 }
 
-interface CallOpts {
+export interface CallOpts {
   system: string            // static system prompt — cached across all customers
   customerContext?: string  // per-customer data — cached as a 2nd block (reused within a convo)
   messages: ClaudeMessage[]

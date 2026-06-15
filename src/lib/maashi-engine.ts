@@ -310,13 +310,14 @@ export async function runMaashiTurn(
   const file = await loadCustomerFile(conv.customer_phone, conv.id, sb)
   const contextBlock = buildCustomerContext(file)
 
-  // 2. History (last 8 messages only — more than enough context, far fewer tokens)
+  // 2. History (last 5 messages only — enough context for aftercare, fewer tokens
+  //    re-sent on every loop round)
   const { data: rows } = await sb
     .from('support_messages')
     .select('sender, message, type, transcript, created_at')
     .eq('conversation_id', conv.id)
     .order('created_at', { ascending: false })
-    .limit(8)
+    .limit(5)
   const history = mapHistory((rows ?? []).reverse() as DbMsg[])
 
   if (history.length === 0) {
@@ -345,14 +346,17 @@ export async function runMaashiTurn(
   let cacheCreated = 0
   let cacheRead = 0
 
-  // 4. Tool-use loop (max 4 rounds).
+  // 4. Tool-use loop (max 3 rounds).
+  //    3 covers the deepest real path: round0 calls a tool → round1 reads it and
+  //    maybe calls a 2nd tool → round2 reads it and replies. Lowering 4→3 drops one
+  //    full re-send of the ~2k prefix in the worst case.
   //    Images are stripped from the messages array after round 1 — a phone photo can be
   //    20k–140k tokens and there's no reason to re-send it on every subsequent round.
   const messages: ClaudeMessage[] = [...history]
   let finalText = ''
   let roundsRun = 0
 
-  for (let round = 0; round < 4; round++) {
+  for (let round = 0; round < 3; round++) {
     // After the first round, remove any image blocks from the messages array so we don't
     // re-send the full photo (20k–140k tokens) on every subsequent tool-loop call.
     if (round === 1) {

@@ -154,7 +154,7 @@ const TOOL_ESCALATE: ClaudeTool = {
 // - Known customer   → 2 tools (complaint + escalate only — lookup is irrelevant)
 // Adding cache_control to the last tool caches ALL tools up to that point.
 // This saves ~2,000–4,000 input tokens per call after the first within 5 minutes.
-function buildTools(customerFound: boolean): ClaudeTool[] {
+export function buildTools(customerFound: boolean): ClaudeTool[] {
   const list: ClaudeTool[] = customerFound
     ? [TOOL_COMPLAINT, TOOL_ESCALATE]
     : [TOOL_LOOKUP, TOOL_COMPLAINT, TOOL_ESCALATE]
@@ -350,6 +350,7 @@ export async function runMaashiTurn(
   //    20k–140k tokens and there's no reason to re-send it on every subsequent round.
   const messages: ClaudeMessage[] = [...history]
   let finalText = ''
+  let roundsRun = 0
 
   for (let round = 0; round < 4; round++) {
     // After the first round, remove any image blocks from the messages array so we don't
@@ -374,12 +375,20 @@ export async function runMaashiTurn(
       maxTokens: 400,
       temperature: 0.8,
     })
-    tokensIn    += res.usage?.input_tokens                ?? 0
-    tokensOut   += res.usage?.output_tokens               ?? 0
-    cacheCreated += res.usage?.cache_creation_input_tokens ?? 0
-    cacheRead    += res.usage?.cache_read_input_tokens     ?? 0
+    roundsRun++
+    const rIn    = res.usage?.input_tokens                ?? 0
+    const rOut   = res.usage?.output_tokens               ?? 0
+    const rCreat = res.usage?.cache_creation_input_tokens ?? 0
+    const rRead  = res.usage?.cache_read_input_tokens     ?? 0
+    tokensIn += rIn; tokensOut += rOut; cacheCreated += rCreat; cacheRead += rRead
 
     const toolUses = res.content.filter(b => b.type === 'tool_use') as ToolUseBlock[]
+
+    // Per-round breakdown: shows the prefix being re-billed each loop.
+    // total billed input this round = fresh input + cache_created + cache_read
+    console.log(
+      `[maashi] round ${round} (${provider}) — in:${rIn} cache_read:${rRead} cache_created:${rCreat} | out:${rOut} | total_in:${rIn + rRead + rCreat} | tools_called:${toolUses.length}`
+    )
     const textParts = res.content.filter(b => b.type === 'text') as { type: 'text'; text: string }[]
     if (textParts.length) finalText = textParts.map(t => t.text).join('\n').trim()
 
@@ -401,7 +410,11 @@ export async function runMaashiTurn(
     .map(s => s.trim())
     .filter(Boolean)
 
-  console.log('[maashi] tokens — in:', tokensIn, '| out:', tokensOut, '| cache_created:', cacheCreated, '| cache_read:', cacheRead)
+  const totalInput = tokensIn + cacheCreated + cacheRead
+  console.log(
+    `[maashi] DONE — rounds:${roundsRun} | total_input:${totalInput} (fresh:${tokensIn} + cache_read:${cacheRead} + cache_created:${cacheCreated}) | out:${tokensOut}` +
+    ` | note: cache_read is billed ~0.1x (Claude). If total_input is high but cache_read dominates, real cost is low.`
+  )
 
   return {
     messages: bubbles.length ? bubbles : ['🙏'],

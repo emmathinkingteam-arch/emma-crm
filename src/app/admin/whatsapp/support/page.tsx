@@ -106,7 +106,7 @@ export default function WhatsAppSupportPage() {
   const [actionLoading, setActionLoading] = useState(false)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
   const [showEmoji, setShowEmoji] = useState(false)
-  const [aiProvider, setAiProvider] = useState<'claude' | 'gemini'>('claude')
+  const [aiProvider, setAiProvider] = useState<'claude' | 'gemini' | 'gpt'>('claude')
   const [providerSaving, setProviderSaving] = useState(false)
 
   // Load the active AI provider once
@@ -117,7 +117,7 @@ export default function WhatsAppSupportPage() {
       .catch(() => {})
   }, [])
 
-  const switchProvider = async (next: 'claude' | 'gemini') => {
+  const switchProvider = async (next: 'claude' | 'gemini' | 'gpt') => {
     if (next === aiProvider || providerSaving) return
     setProviderSaving(true)
     const prev = aiProvider
@@ -288,13 +288,17 @@ export default function WhatsAppSupportPage() {
             {liveCount > 0 && <span style={{ background: WA.green, color: '#fff', borderRadius: 10, padding: '2px 8px', fontSize: 12, fontWeight: 700 }}>{liveCount} live</span>}
             {/* AI provider switch — flips the Maashi bot between Claude and Gemini */}
             <div title="Which AI model powers Maashi" style={{ display: 'flex', background: '#fff', border: `1px solid ${WA.border}`, borderRadius: 999, padding: 2, opacity: providerSaving ? 0.6 : 1 }}>
-              {(['claude', 'gemini'] as const).map(p => (
-                <button key={p} onClick={() => switchProvider(p)} disabled={providerSaving} style={{
+              {([
+                { id: 'claude', label: 'Claude', color: '#D97757' },
+                { id: 'gemini', label: 'Gemini', color: '#1A73E8' },
+                { id: 'gpt', label: 'GPT', color: '#10A37F' },
+              ] as const).map(p => (
+                <button key={p.id} onClick={() => switchProvider(p.id)} disabled={providerSaving} style={{
                   padding: '3px 10px', borderRadius: 999, border: 'none', cursor: providerSaving ? 'default' : 'pointer',
-                  fontSize: 11, fontWeight: 700, textTransform: 'capitalize',
-                  background: aiProvider === p ? (p === 'gemini' ? '#1A73E8' : '#D97757') : 'transparent',
-                  color: aiProvider === p ? '#fff' : WA.sub,
-                }}>{p}</button>
+                  fontSize: 11, fontWeight: 700,
+                  background: aiProvider === p.id ? p.color : 'transparent',
+                  color: aiProvider === p.id ? '#fff' : WA.sub,
+                }}>{p.label}</button>
               ))}
             </div>
           </div>

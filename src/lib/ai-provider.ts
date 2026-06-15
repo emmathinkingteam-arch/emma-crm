@@ -12,15 +12,16 @@
 
 import { callClaude, MAASHI_MODEL, CallOpts, ClaudeResponse } from './anthropic'
 import { callGemini, GEMINI_MODEL } from './gemini'
+import { callOpenAI, OPENAI_MODEL } from './openai'
 import { supabaseAdmin } from './supabase-admin'
 
-export type AiProvider = 'claude' | 'gemini'
+export type AiProvider = 'claude' | 'gemini' | 'gpt'
 
 type SB = ReturnType<typeof supabaseAdmin>
 
 function normalise(v: unknown): AiProvider | null {
   const s = typeof v === 'string' ? v.replace(/"/g, '').toLowerCase() : null
-  return s === 'gemini' || s === 'claude' ? s : null
+  return s === 'gemini' || s === 'claude' || s === 'gpt' ? s : null
 }
 
 // Read the active provider (DB → env → default).
@@ -41,10 +42,12 @@ export async function getAiProvider(sb: SB): Promise<AiProvider> {
 
 // The model id reported for logging / cost rows.
 export function modelFor(provider: AiProvider): string {
-  return provider === 'gemini' ? GEMINI_MODEL : MAASHI_MODEL
+  return provider === 'gemini' ? GEMINI_MODEL : provider === 'gpt' ? OPENAI_MODEL : MAASHI_MODEL
 }
 
 // Dispatch a single completion to the chosen provider.
 export function callAI(provider: AiProvider, opts: CallOpts): Promise<ClaudeResponse> {
-  return provider === 'gemini' ? callGemini(opts) : callClaude(opts)
+  if (provider === 'gemini') return callGemini(opts)
+  if (provider === 'gpt') return callOpenAI(opts)
+  return callClaude(opts)
 }

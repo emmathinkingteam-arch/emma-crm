@@ -52,7 +52,7 @@ export async function downloadMedia(mediaId: string): Promise<DownloadedMedia | 
 //   claude → OpenAI Whisper (Anthropic has no STT)
 export async function transcribeAudio(
   media: DownloadedMedia,
-  provider: 'claude' | 'gemini' = 'claude',
+  provider: 'claude' | 'gemini' | 'gpt' = 'claude',
 ): Promise<string | null> {
   if (provider === 'gemini' && process.env.GEMINI_API_KEY) {
     const out = await transcribeWithGemini(media)

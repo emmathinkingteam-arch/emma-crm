@@ -32,7 +32,7 @@ export async function GET() {
   const raw = typeof map.ai_provider === 'string' ? map.ai_provider.replace(/"/g, '') : map.ai_provider
   return NextResponse.json({
     ok: true,
-    ai_provider: raw === 'gemini' ? 'gemini' : 'claude',
+    ai_provider: raw === 'gemini' || raw === 'gpt' ? raw : 'claude',
     bot_enabled: map.bot_enabled === true || map.bot_enabled === 'true',
   })
 }
@@ -42,9 +42,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, reason: 'unauthenticated' }, { status: 401 })
   }
   const body = await req.json().catch(() => ({})) as { ai_provider?: string }
-  const provider = body.ai_provider === 'gemini' ? 'gemini' : body.ai_provider === 'claude' ? 'claude' : null
+  const provider = ['claude', 'gemini', 'gpt'].includes(body.ai_provider ?? '') ? body.ai_provider : null
   if (!provider) {
-    return NextResponse.json({ ok: false, reason: 'ai_provider must be claude|gemini' }, { status: 400 })
+    return NextResponse.json({ ok: false, reason: 'ai_provider must be claude|gemini|gpt' }, { status: 400 })
   }
 
   const { error } = await supabaseAdmin()

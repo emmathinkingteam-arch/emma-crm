@@ -8,9 +8,10 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
-import { ROLE_LABELS } from '@/lib/utils'
+import { ROLE_LABELS, fmtDuration } from '@/lib/utils'
 import { type User } from '@/types'
 import {
     Eye,
@@ -18,6 +19,8 @@ import {
     Search,
     UserCircle2,
     Wifi,
+    Clock,
+    BarChart3,
 } from 'lucide-react'
 
 const ROLE_ORDER: Record<string, number> = {
@@ -42,6 +45,8 @@ export default function InspectorPage() {
     const [workers, setWorkers] = useState<User[]>([])
     const [loading, setLoading] = useState(true)
     const [search, setSearch] = useState('')
+    // user_id → active seconds in the system today
+    const [secondsToday, setSecondsToday] = useState<Record<string, number>>({})
 
     useEffect(() => {
         supabase
@@ -57,6 +62,20 @@ export default function InspectorPage() {
                 )
                 setWorkers(sorted)
                 setLoading(false)
+            })
+
+        // Today's total time-in-system per worker (sum of session seconds).
+        const today = new Date().toISOString().split('T')[0]
+        supabase
+            .from('work_sessions')
+            .select('user_id, seconds')
+            .eq('day', today)
+            .then(({ data }) => {
+                const map: Record<string, number> = {}
+                for (const r of (data as { user_id: string; seconds: number }[]) || []) {
+                    map[r.user_id] = (map[r.user_id] || 0) + Number(r.seconds || 0)
+                }
+                setSecondsToday(map)
             })
     }, [])
 
@@ -123,41 +142,57 @@ export default function InspectorPage() {
                         const roleLabel = ROLE_LABELS[worker.role] ?? worker.role
                         const roleColor = ROLE_COLORS[worker.role] ?? 'bg-gray-100 text-gray-500'
 
-                        return (
-                            <button
-                                key={worker.id}
-                                onClick={() => handleInspect(worker)}
-                                className="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm hover:shadow-md hover:border-amber-200 active:scale-95 transition-all text-left group"
-                            >
-                                {/* Avatar */}
-                                <div className="flex items-center justify-between mb-3">
-                                    {worker.profile_photo_url ? (
-                                        <img
-                                            src={worker.profile_photo_url}
-                                            alt={worker.full_name}
-                                            className="w-11 h-11 rounded-xl object-cover border border-gray-100"
-                                        />
-                                    ) : (
-                                        <div className="w-11 h-11 rounded-xl bg-gray-100 flex items-center justify-center">
-                                            <UserCircle2 size={24} className="text-gray-300" />
-                                        </div>
-                                    )}
-                                    <div className="w-7 h-7 rounded-full bg-gray-50 group-hover:bg-amber-500 flex items-center justify-center transition-colors">
-                                        <Eye size={13} className="text-gray-300 group-hover:text-white transition-colors" />
-                                    </div>
-                                </div>
+                        const secs = secondsToday[worker.id] || 0
 
-                                {/* Name + role */}
-                                <p className="text-sm font-bold text-gray-800 truncate">
-                                    {worker.full_name}
-                                </p>
-                                <p className="text-[10px] text-gray-400 font-medium truncate mb-2">
-                                    {worker.username}
-                                </p>
-                                <span className={`text-[9px] font-bold px-2 py-1 rounded-full ${roleColor}`}>
-                                    {roleLabel}
-                                </span>
-                            </button>
+                        return (
+                            <div
+                                key={worker.id}
+                                className="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm hover:shadow-md hover:border-amber-200 transition-all text-left group"
+                            >
+                                <button onClick={() => handleInspect(worker)} className="w-full text-left active:scale-[0.98] transition-transform">
+                                    {/* Avatar */}
+                                    <div className="flex items-center justify-between mb-3">
+                                        {worker.profile_photo_url ? (
+                                            <img
+                                                src={worker.profile_photo_url}
+                                                alt={worker.full_name}
+                                                className="w-11 h-11 rounded-xl object-cover border border-gray-100"
+                                            />
+                                        ) : (
+                                            <div className="w-11 h-11 rounded-xl bg-gray-100 flex items-center justify-center">
+                                                <UserCircle2 size={24} className="text-gray-300" />
+                                            </div>
+                                        )}
+                                        <div className="w-7 h-7 rounded-full bg-gray-50 group-hover:bg-amber-500 flex items-center justify-center transition-colors">
+                                            <Eye size={13} className="text-gray-300 group-hover:text-white transition-colors" />
+                                        </div>
+                                    </div>
+
+                                    {/* Name + role */}
+                                    <p className="text-sm font-bold text-gray-800 truncate">
+                                        {worker.full_name}
+                                    </p>
+                                    <p className="text-[10px] text-gray-400 font-medium truncate mb-2">
+                                        {worker.username}
+                                    </p>
+                                    <span className={`text-[9px] font-bold px-2 py-1 rounded-full ${roleColor}`}>
+                                        {roleLabel}
+                                    </span>
+                                </button>
+
+                                {/* Time in system today + See more */}
+                                <div className="mt-3 pt-3 border-t border-gray-50 flex items-center justify-between gap-2">
+                                    <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full ${secs > 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-gray-50 text-gray-400'}`}>
+                                        <Clock size={10} /> {fmtDuration(secs)} today
+                                    </span>
+                                    <Link
+                                        href={`/admin/inspector/sessions/${worker.id}`}
+                                        className="inline-flex items-center gap-1 text-[10px] font-bold text-pink-600 bg-pink-50 hover:bg-pink-100 px-2 py-1 rounded-full transition-colors"
+                                    >
+                                        <BarChart3 size={10} /> See more
+                                    </Link>
+                                </div>
+                            </div>
                         )
                     })}
                 </div>

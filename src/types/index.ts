@@ -44,6 +44,7 @@ export interface User {
   casual_leaves_remaining: number
   work_start_time: string
   is_active: boolean
+  is_supervisor?: boolean
   created_at: string
 }
 
@@ -140,6 +141,8 @@ export interface Attendance {
   punch_out_lat?: number
   punch_out_lng?: number
   hours_worked?: number
+  lunch_start?: string
+  lunch_end?: string
   status: AttendanceStatus
   note?: string
   user?: User

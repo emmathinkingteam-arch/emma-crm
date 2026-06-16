@@ -7,7 +7,8 @@ import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import { Order, OrderStep } from '@/types'
-import { Bell, ChevronRight, CheckCircle2, Sparkles, Clock, Phone, TrendingUp } from 'lucide-react'
+import { Bell, ChevronRight, CheckCircle2, Sparkles, Clock, Phone, TrendingUp, Users } from 'lucide-react'
+import CrmLeaderboard from '@/components/shared/CrmLeaderboard'
 import Link from 'next/link'
 import { type Lead, leadCountdown, leadPenaltySoFar } from '@/lib/leads'
 
@@ -228,6 +229,24 @@ export default function DashboardPage() {
             <p className="text-[10px] text-gray-400 font-semibold mt-0.5">{overdueCount > 0 ? 'Need attention' : 'All on track'}</p>
           </div>
         </div>
+
+        {/* Supervisor — link to the team overview (Hansi) */}
+        {user?.is_supervisor && (
+          <Link href="/dashboard/team"
+            className="flex items-center gap-3 bg-gradient-to-br from-pink-600 to-pink-500 text-white rounded-2xl p-4 shadow-md shadow-pink-200 active:scale-[0.98] transition-all">
+            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+              <Users size={18} className="text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold">Team Overview</p>
+              <p className="text-[10px] font-medium opacity-80">Punch in/out · CRM time · leave & OT · orders</p>
+            </div>
+            <ChevronRight size={18} className="text-white/80" />
+          </Link>
+        )}
+
+        {/* CRM order-amount leaderboard — everyone sees the monthly race */}
+        {role === 'crm_agent' && <CrmLeaderboard meId={user?.id} />}
 
         {/* Leads to call — assigned numbers, drip-fed, count down to overdue */}
         {leads.length > 0 && (

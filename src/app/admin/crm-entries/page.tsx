@@ -23,10 +23,13 @@ interface CustomerRow {
   phone: string
   name?: string
   is_priority: boolean
+  willing_to_buy_date?: string | null
   created_at: string
   created_by_user?: { full_name: string }
   orders?: { id: string }[]
 }
+
+const TODAY_STR = new Date().toISOString().split('T')[0]
 
 const TYPE_CONFIG = {
   message: { icon: MessageCircle, bg: 'bg-blue-50', text: 'text-blue-600', badge: 'bg-blue-50 text-blue-500', label: 'Message' },
@@ -104,6 +107,7 @@ export default function CRMEntriesPage() {
     if (filterHasOrder === 'yes') filtered = filtered.filter(e => (e.orders?.length || 0) > 0)
     if (filterHasOrder === 'no') filtered = filtered.filter(e => (e.orders?.length || 0) === 0)
     if (filterHasOrder === 'priority') filtered = filtered.filter(e => e.is_priority)
+    if (filterHasOrder === 'willing_today') filtered = filtered.filter(e => e.willing_to_buy_date === TODAY_STR)
 
     setEntries(filtered)
     setLoading(false)
@@ -251,6 +255,7 @@ export default function CRMEntriesPage() {
           <option value="yes">Has order</option>
           <option value="no">No order</option>
           <option value="priority">Priority only</option>
+          <option value="willing_today">🔥 Willing to buy today</option>
         </select>
 
         <button onClick={fetchEntries}
@@ -362,10 +367,13 @@ export default function CRMEntriesPage() {
                     <div className="px-4 py-3.5 flex items-center">
                       <span className="text-xs text-gray-400">{fmtDate(entry.created_at)}</span>
                     </div>
-                    <div className="px-4 py-3.5 flex items-center">
+                    <div className="px-4 py-3.5 flex items-center gap-1 flex-wrap">
                       <span className={`text-[9px] font-bold px-2 py-1 rounded-full ${hasOrder ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
                         {hasOrder ? 'Has order' : 'No order'}
                       </span>
+                      {entry.willing_to_buy_date === TODAY_STR && (
+                        <span className="text-[9px] font-bold px-2 py-1 rounded-full bg-red-50 text-red-600">🔥 Buys today</span>
+                      )}
                     </div>
                     <div className="px-4 py-3.5 flex items-center">
                       {entry.is_priority

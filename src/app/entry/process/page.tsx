@@ -18,6 +18,7 @@ function ProcessContent() {
   const [interactionType, setInteractionType] = useState<'message' | 'call' | 'feedback'>('message')
   const [notes, setNotes] = useState('')
   const [customerName, setCustomerName] = useState('')
+  const [title, setTitle] = useState('')   // honorific: 'Mr.' | 'Miss.'
   const [existingId, setExistingId] = useState<string | null>(null)
   const [isPriority, setIsPriority] = useState(false)
   const [buyDate, setBuyDate] = useState('')
@@ -32,6 +33,7 @@ function ProcessContent() {
         if (data) {
           setExistingId(data.id)
           setCustomerName(data.name || '')
+          setTitle(data.title || '')
           setIsPriority(data.is_priority)
           if (data.willing_to_buy_date === todayStr) setWillingToday(true)
         }
@@ -67,12 +69,13 @@ function ProcessContent() {
     if (!customerId) {
       const { data } = await supabase
         .from('customers')
-        .insert({ phone, name: customerName || null, created_by: user.id, is_priority: isPriority, willing_to_buy_date: willingDate })
+        .insert({ phone, name: customerName || null, title: title || null, created_by: user.id, is_priority: isPriority, willing_to_buy_date: willingDate })
         .select('id').single()
       customerId = data?.id
     } else {
       const updates: any = {}
       if (customerName) updates.name = customerName
+      updates.title = title || null
       updates.is_priority = isPriority
       updates.willing_to_buy_date = willingDate
       await supabase.from('customers').update(updates).eq('id', customerId)
@@ -116,6 +119,19 @@ function ProcessContent() {
             {/* Customer name */}
             <div>
               <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Customer name (optional)</label>
+              {/* Title: Mr. / Miss. */}
+              <div className="flex gap-2 mb-2">
+                {(['Mr.', 'Miss.'] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setTitle(title === t ? '' : t)}
+                    className={`px-4 py-2 rounded-full text-xs font-semibold transition-all ${title === t ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-500'}`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
               <input
                 type="text"
                 value={customerName}

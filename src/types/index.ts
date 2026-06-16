@@ -65,6 +65,7 @@ export interface Customer {
   id: string
   phone: string
   name?: string
+  title?: string        // honorific: 'Mr.' | 'Miss.' — used to address the customer in the confirmation SMS
   is_priority: boolean
   notes?: string
   created_by: string

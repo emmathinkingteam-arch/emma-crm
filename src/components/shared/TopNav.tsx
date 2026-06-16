@@ -30,7 +30,6 @@ export default function TopNav() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [notifOpen, setNotifOpen] = useState(false)
   const [walletOpen, setWalletOpen] = useState(false)
-  const [imgTs, setImgTs] = useState(Date.now())
 
   // wallet drawer data
   const [payments, setPayments] = useState<Payment[]>([])
@@ -50,8 +49,6 @@ export default function TopNav() {
       .order('deadline', { ascending: true })
       .then(({ data }) => { if (data) setTasks(data as Task[]) })
   }, [user])
-
-  useEffect(() => { setImgTs(Date.now()) }, [user?.profile_photo_url])
 
   useEffect(() => {
     if (!user) return
@@ -136,7 +133,7 @@ export default function TopNav() {
             className="w-8 h-8 rounded-full bg-pink-600 flex items-center justify-center overflow-hidden border-2 border-white shadow-sm flex-shrink-0 active:scale-95 transition-transform"
           >
             {user?.profile_photo_url ? (
-              <img src={`${user.profile_photo_url}?t=${imgTs}`} alt={user.full_name} className="w-full h-full object-cover" />
+              <img src={user.profile_photo_url} alt={user.full_name} className="w-full h-full object-cover" />
             ) : (
               <span className="text-white text-xs font-bold">{user?.full_name?.[0] ?? 'U'}</span>
             )}

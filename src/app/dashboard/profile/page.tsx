@@ -39,7 +39,6 @@ export default function ProfilePage() {
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const [punchLoading, setPunchLoading] = useState(false)
-  const [photoTs, setPhotoTs] = useState(Date.now())
   const [punchOutInfo, setPunchOutInfo] = useState({ canPunch: false, minsLeft: 0 })
   const [showLeaveForm, setShowLeaveForm] = useState(false)
   const [leaveType, setLeaveType] = useState<'annual' | 'casual' | 'sick'>('annual')
@@ -224,17 +223,12 @@ export default function ProfilePage() {
     try {
       if (!file.type.startsWith('image/')) throw new Error('Please choose an image file (JPG, PNG, etc.)')
       if (file.size > 5 * 1024 * 1024) throw new Error('Image is larger than 5 MB — please pick a smaller one')
-      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase()
-      const path = `${user.id}/photo-${Date.now()}.${ext}`
-      const { error: upErr } = await supabase.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type })
-      if (upErr) throw upErr
-      const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(path)
-      const publicUrl = urlData?.publicUrl
-      if (!publicUrl) throw new Error('Could not get public URL for the photo')
-      const { error: dbErr } = await supabase.from('users').update({ profile_photo_url: publicUrl }).eq('id', user.id)
-      if (dbErr) throw dbErr
-      setUser({ ...user, profile_photo_url: publicUrl })
-      setPhotoTs(Date.now())
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch('/api/avatar/upload', { method: 'POST', body: fd })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j?.error || 'Upload failed — please try again')
+      setUser({ ...user, profile_photo_url: j.url })
     } catch (err: any) {
       const msg = err?.message || 'Upload failed — please try again'
       setUploadError(msg)
@@ -354,7 +348,7 @@ export default function ProfilePage() {
           <div className="relative inline-block">
             <div className="w-20 h-20 rounded-[24px] bg-pink-100 border-4 border-white shadow-lg flex items-center justify-center overflow-hidden mx-auto">
               {user.profile_photo_url ? (
-                <img src={`${user.profile_photo_url}?t=${photoTs}`} alt="Profile" className="w-full h-full object-cover" />
+                <img src={user.profile_photo_url} alt="Profile" className="w-full h-full object-cover" />
               ) : (
                 <span className="text-pink-600 font-bold text-3xl">{user.full_name[0]}</span>
               )}

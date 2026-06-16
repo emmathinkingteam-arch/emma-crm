@@ -20,7 +20,9 @@ export async function POST(req: Request) {
   const ct = file.type || 'image/png'
 
   try {
-    const up = await uploadFile(key, buf, ct)
+    // Letterheads are embedded in documents shown to EXTERNAL signers, so they
+    // must stay publicly fetchable — keep on Supabase, not the private B2 proxy.
+    const up = await uploadFile(key, buf, ct, { provider: 'supabase' })
     const sb = supabaseAdmin()
     if (scope === 'default') {
       await sb.from('esign_settings').update({ letterhead_url: up.url, updated_at: new Date().toISOString() }).eq('id', 1)

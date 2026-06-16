@@ -111,6 +111,7 @@ export default function CustomerDetailPage() {
   // Order creation
   const [showOrderForm, setShowOrderForm] = useState(false)
   const [orderCustomerName, setOrderCustomerName] = useState('')   // shown on invoice
+  const [orderTitle, setOrderTitle] = useState('')                 // honorific: 'Mr.' | 'Miss.' — used on the confirmation SMS
   const [selectedPkg, setSelectedPkg] = useState('')
   const [discount, setDiscount] = useState(0)
   const [customDiscount, setCustomDiscount] = useState('')         // free-text % input
@@ -249,6 +250,7 @@ export default function CustomerDetailPage() {
     setInstallmentType('full'); setInstallment1Amount('')
     // Pre-fill customer name field with stored customer name (editable, will appear on invoice)
     setOrderCustomerName(customer?.name || '')
+    setOrderTitle((customer as any)?.title || '')
   }
 
   const fmtTimer = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
@@ -296,21 +298,19 @@ export default function CustomerDetailPage() {
   const handleSlipUpload = async (file: File): Promise<string> => {
     setSlipUploading(true)
     try {
-      const ext = file.name.split('.').pop()
-      const path = `slips/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-      const { error: upErr } = await supabase.storage
-        .from('invoices')
-        .upload(path, file, { upsert: true, contentType: file.type })
-      if (upErr) {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch('/api/slip/upload', { method: 'POST', body: fd })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok || !j?.url) {
         // Surface the real reason instead of silently returning a dead URL.
-        alert('Payment slip upload FAILED: ' + upErr.message + '\n\nThe slip was NOT saved. Please try again or tell admin.')
+        alert('Payment slip upload FAILED: ' + (j?.error || 'unknown') + '\n\nThe slip was NOT saved. Please try again or tell admin.')
         setSlipUploading(false)
         return ''
       }
-      const { data: { publicUrl } } = supabase.storage.from('invoices').getPublicUrl(path)
-      setSlipUrl(publicUrl)
+      setSlipUrl(j.url)
       setSlipUploading(false)
-      return publicUrl
+      return j.url
     } catch (e: any) {
       alert('Payment slip upload error: ' + (e?.message || 'unknown') + '\n\nThe slip was NOT saved.')
       setSlipUploading(false)
@@ -321,20 +321,18 @@ export default function CustomerDetailPage() {
   const handleSlip2Upload = async (file: File): Promise<string> => {
     setSlip2Uploading(true)
     try {
-      const ext = file.name.split('.').pop()
-      const path = `slips/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-      const { error: upErr } = await supabase.storage
-        .from('invoices')
-        .upload(path, file, { upsert: true, contentType: file.type })
-      if (upErr) {
-        alert('2nd slip upload FAILED: ' + upErr.message + '\n\nThe slip was NOT saved.')
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch('/api/slip/upload', { method: 'POST', body: fd })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok || !j?.url) {
+        alert('2nd slip upload FAILED: ' + (j?.error || 'unknown') + '\n\nThe slip was NOT saved.')
         setSlip2Uploading(false)
         return ''
       }
-      const { data: { publicUrl } } = supabase.storage.from('invoices').getPublicUrl(path)
-      setSlip2Url(publicUrl)
+      setSlip2Url(j.url)
       setSlip2Uploading(false)
-      return publicUrl
+      return j.url
     } catch (e: any) {
       alert('2nd slip upload error: ' + (e?.message || 'unknown') + '\n\nThe slip was NOT saved.')
       setSlip2Uploading(false)
@@ -721,11 +719,15 @@ export default function CustomerDetailPage() {
     const kokoNote = paymentType === 'koko' && kokoId ? ` | KOKO ID: ${kokoId}` : ''
     const bankNote = paymentType === 'bank_transfer' && bankName ? ` | Bank: ${bankName}` : ''
 
-    // Update customer name if user typed one (and it differs)
+    // Update customer name / title if changed. Title (Mr./Miss.) is used to
+    // address the customer in the confirmation SMS fired below.
     const trimmedCustomerName = orderCustomerName.trim()
-    if (trimmedCustomerName && trimmedCustomerName !== customer.name) {
-      await supabase.from('customers').update({ name: trimmedCustomerName }).eq('id', customer.id)
-      setCustomer(c => c ? { ...c, name: trimmedCustomerName } : c)
+    const custUpdates: any = {}
+    if (trimmedCustomerName && trimmedCustomerName !== customer.name) custUpdates.name = trimmedCustomerName
+    if (orderTitle !== ((customer as any).title || '')) custUpdates.title = orderTitle || null
+    if (Object.keys(custUpdates).length > 0) {
+      await supabase.from('customers').update(custUpdates).eq('id', customer.id)
+      setCustomer(c => c ? { ...c, ...custUpdates } : c)
     }
 
     const { data: order, error: orderErr } = await supabase.from('orders').insert({
@@ -773,6 +775,15 @@ export default function CustomerDetailPage() {
         }),
       }).catch(() => { })
     }
+
+    // 📲 Fire the order-confirmation SMS to the CUSTOMER (Text.lk) and record
+    // it in their history. Customer title/name were saved above so the route
+    // can address them correctly.
+    fetch('/api/customer/order-confirm-sms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderId: order.id }),
+    }).then(() => fetchAll()).catch(() => { })
 
     // ── Generate 1st (or only) invoice ─────────────────────
     // For KOKO: pass package amount X (template adds 12.36% line)
@@ -2033,11 +2044,24 @@ export default function CustomerDetailPage() {
                   </div>
                   <div className="p-4 space-y-3">
 
-                    {/* ── CUSTOMER NAME (shown on invoice) ── */}
+                    {/* ── CUSTOMER NAME (shown on invoice + confirmation SMS) ── */}
                     <div>
                       <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
-                        Customer name <span className="text-gray-300 font-normal">(optional — appears on invoice)</span>
+                        Customer name <span className="text-gray-300 font-normal">(title used in confirmation SMS)</span>
                       </label>
+                      {/* Title: Mr. / Miss. — addresses the customer in the SMS */}
+                      <div className="flex gap-1.5 mb-1.5">
+                        {(['Mr.', 'Miss.'] as const).map(t => (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => setOrderTitle(orderTitle === t ? '' : t)}
+                            className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all ${orderTitle === t ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-500'}`}
+                          >
+                            {t}
+                          </button>
+                        ))}
+                      </div>
                       <input
                         type="text"
                         value={orderCustomerName}
@@ -2424,7 +2448,7 @@ export default function CustomerDetailPage() {
                         </div>
                         <span className="text-[11px] text-gray-500 font-semibold">{fmtDate(interaction.created_at)} {fmtTime(interaction.created_at)}</span>
                       </div>
-                      <p className="text-[13px] text-gray-700 font-medium leading-relaxed">{cleanDescription}</p>
+                      <p className="text-[13px] text-gray-700 font-medium leading-relaxed whitespace-pre-wrap">{cleanDescription}</p>
                       {(invoiceLink || slipLink) && (
                         <div className="flex flex-wrap gap-1.5 mt-2">
                           {invoiceLink && (

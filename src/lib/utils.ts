@@ -154,6 +154,14 @@ export function fmtTime(ts: string): string {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
+// seconds → "2h 14m" / "37m" / "0m" — used by session-time displays.
+export function fmtDuration(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  return h > 0 ? `${h}h ${m}m` : `${m}m`
+}
+
 // ── Punch-out 5-hour rule ─────────────────────────────────────
 export function canPunchOut(punchInTime: string): { canPunch: boolean; minsLeft: number } {
   const punchIn = new Date(punchInTime).getTime()

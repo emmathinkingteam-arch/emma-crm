@@ -202,6 +202,19 @@ export default function ProfilePage() {
     setPunchLoading(false)
   }
 
+  // ── Lunch break — start / end. Recorded on today's attendance row so it
+  //    shows on the attendance sheet and the supervisor team view.
+  const handleLunch = async (which: 'start' | 'end') => {
+    if (!user || !attendance) return
+    setPunchLoading(true)
+    const now = new Date().toISOString()
+    await supabase.from('attendance')
+      .update(which === 'start' ? { lunch_start: now } : { lunch_end: now })
+      .eq('id', attendance.id)
+    await fetchAll()
+    setPunchLoading(false)
+  }
+
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file || !user) return
@@ -413,6 +426,27 @@ export default function ProfilePage() {
                 {punchLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Punch in'}
               </button>
             </>
+          )}
+
+          {/* Lunch break — only while punched in and not yet out */}
+          {hasPunchedIn && !hasPunchedOut && (
+            <div className="mt-3 pt-3 border-t border-gray-100">
+              {!attendance?.lunch_start ? (
+                <button onClick={() => handleLunch('start')} disabled={punchLoading}
+                  className="w-full bg-amber-50 border border-amber-200 text-amber-700 rounded-full py-2.5 text-xs font-bold active:scale-95 transition-all disabled:opacity-50">
+                  🍽️ Start lunch
+                </button>
+              ) : !attendance?.lunch_end ? (
+                <button onClick={() => handleLunch('end')} disabled={punchLoading}
+                  className="w-full bg-amber-500 text-white rounded-full py-2.5 text-xs font-bold active:scale-95 transition-all disabled:opacity-50">
+                  End lunch · started {new Date(attendance.lunch_start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </button>
+              ) : (
+                <p className="text-[10px] text-gray-400 font-semibold text-center">
+                  🍽️ Lunch {new Date(attendance.lunch_start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – {new Date(attendance.lunch_end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </p>
+              )}
+            </div>
           )}
         </div>
 

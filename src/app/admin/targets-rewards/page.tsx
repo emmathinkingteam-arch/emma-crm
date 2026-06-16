@@ -6,6 +6,7 @@ import Link from 'next/link'
 export default function TargetsRewardsPage() {
   const [workers, setWorkers] = useState<any[]>([])
   const [targets, setTargets] = useState<Record<string,number>>({})
+  const [orderTargets, setOrderTargets] = useState<Record<string,number>>({})
   const [milestones, setMilestones] = useState<Record<string,any[]>>({})
   const [userCommissions, setUserCommissions] = useState<Record<string,number>>({})
   const month = `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`
@@ -18,7 +19,10 @@ export default function TargetsRewardsPage() {
       supabase.from('commissions').select('user_id,amount').eq('month_year',month),
     ]).then(([w,t,m,c]) => {
       if(w.data) setWorkers(w.data)
-      if(t.data) { const r:Record<string,number>={};t.data.forEach((x:any)=>r[x.user_id]=x.target_amount);setTargets(r) }
+      if(t.data) {
+        const r:Record<string,number>={};t.data.forEach((x:any)=>r[x.user_id]=x.target_amount);setTargets(r)
+        const o:Record<string,number>={};t.data.forEach((x:any)=>o[x.user_id]=x.order_target_amount||0);setOrderTargets(o)
+      }
       if(m.data) { const r:Record<string,any[]>={};m.data.forEach((x:any)=>{ if(!r[x.user_id])r[x.user_id]=[];r[x.user_id].push(x) });setMilestones(r) }
       if(c.data) { const r:Record<string,number>={};c.data.forEach((x:any)=>r[x.user_id]=(r[x.user_id]||0)+x.amount);setUserCommissions(r) }
     })
@@ -27,8 +31,15 @@ export default function TargetsRewardsPage() {
   const setTarget = async (userId:string, amount:number) => {
     const { data: { user } } = await supabase.auth.getUser()
     const { data: profile } = await supabase.from('users').select('id').eq('auth_user_id',user!.id).single()
-    await supabase.from('monthly_targets').upsert({ user_id:userId, month_year:month, target_amount:amount, set_by:profile!.id },{ onConflict:'user_id,month_year' })
+    await supabase.from('monthly_targets').upsert({ user_id:userId, month_year:month, target_amount:amount, order_target_amount:orderTargets[userId]||0, set_by:profile!.id },{ onConflict:'user_id,month_year' })
     setTargets(prev=>({...prev,[userId]:amount}))
+  }
+
+  const setOrderTarget = async (userId:string, amount:number) => {
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data: profile } = await supabase.from('users').select('id').eq('auth_user_id',user!.id).single()
+    await supabase.from('monthly_targets').upsert({ user_id:userId, month_year:month, target_amount:targets[userId]||0, order_target_amount:amount, set_by:profile!.id },{ onConflict:'user_id,month_year' })
+    setOrderTargets(prev=>({...prev,[userId]:amount}))
   }
 
   return (
@@ -48,10 +59,17 @@ export default function TargetsRewardsPage() {
                   <Link href={`/admin/workers/${w.id}`} className="text-sm font-bold text-gray-800 hover:text-pink-600">{w.full_name}</Link>
                   <p className="text-[9px] text-gray-400 font-medium">{w.role.replace('_',' ')}</p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[9px] text-gray-400 font-medium">Monthly target (LKR)</span>
-                  <input type="number" defaultValue={target||''} placeholder="0" onBlur={e=>setTarget(w.id,Number(e.target.value))}
-                    className="w-28 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs font-bold outline-none"/>
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center gap-2 justify-end">
+                    <span className="text-[9px] text-gray-400 font-medium">Commission target (LKR)</span>
+                    <input type="number" defaultValue={target||''} placeholder="0" onBlur={e=>setTarget(w.id,Number(e.target.value))}
+                      className="w-28 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs font-bold outline-none"/>
+                  </div>
+                  <div className="flex items-center gap-2 justify-end">
+                    <span className="text-[9px] text-pink-400 font-medium">Order amount target (LKR)</span>
+                    <input type="number" defaultValue={orderTargets[w.id]||''} placeholder="0" onBlur={e=>setOrderTarget(w.id,Number(e.target.value))}
+                      className="w-28 bg-pink-50 border border-pink-200 rounded-xl px-3 py-2 text-xs font-bold outline-none"/>
+                  </div>
                 </div>
               </div>
               {/* Commission bar */}

@@ -4,7 +4,7 @@ import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
-import { Loader2, ArrowLeft, Package, Landmark, CalendarClock } from 'lucide-react'
+import { Loader2, ArrowLeft, Package, Landmark, CalendarClock, Flame } from 'lucide-react'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import { recordPing } from '@/lib/location'
@@ -22,6 +22,8 @@ function ProcessContent() {
   const [isPriority, setIsPriority] = useState(false)
   const [buyDate, setBuyDate] = useState('')
   const [showBuyDate, setShowBuyDate] = useState(false)
+  const [willingToday, setWillingToday] = useState(false)
+  const todayStr = new Date().toISOString().split('T')[0]
 
   useEffect(() => {
     if (!phone) { router.replace('/entry'); return }
@@ -31,6 +33,7 @@ function ProcessContent() {
           setExistingId(data.id)
           setCustomerName(data.name || '')
           setIsPriority(data.is_priority)
+          if (data.willing_to_buy_date === todayStr) setWillingToday(true)
         }
       })
   }, [phone])
@@ -48,22 +51,30 @@ function ProcessContent() {
     setShowBuyDate(false)
     setBuyDate('')
   }
+  const toggleWillingToday = () => {
+    const next = !willingToday
+    setWillingToday(next)
+    if (next) { appendNote(`🔥 Willing to BUY TODAY (${todayStr})`); setIsPriority(true) }
+  }
 
   const handleSave = async () => {
     if (!user) return
     setLoading(true)
     let customerId = existingId
 
+    const willingDate = willingToday ? todayStr : null
+
     if (!customerId) {
       const { data } = await supabase
         .from('customers')
-        .insert({ phone, name: customerName || null, created_by: user.id, is_priority: isPriority })
+        .insert({ phone, name: customerName || null, created_by: user.id, is_priority: isPriority, willing_to_buy_date: willingDate })
         .select('id').single()
       customerId = data?.id
     } else {
       const updates: any = {}
       if (customerName) updates.name = customerName
       updates.is_priority = isPriority
+      updates.willing_to_buy_date = willingDate
       await supabase.from('customers').update(updates).eq('id', customerId)
     }
 
@@ -153,6 +164,12 @@ function ProcessContent() {
                   className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-bold active:scale-95 transition-all border ${showBuyDate ? 'bg-amber-600 text-white border-amber-600' : 'bg-amber-50 border-amber-100 text-amber-600'}`}
                 >
                   <CalendarClock size={11} /> Will Buy On...
+                </button>
+                <button
+                  onClick={toggleWillingToday}
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-bold active:scale-95 transition-all border ${willingToday ? 'bg-red-600 text-white border-red-600' : 'bg-red-50 border-red-100 text-red-600'}`}
+                >
+                  <Flame size={11} /> Willing to Buy Today
                 </button>
               </div>
 

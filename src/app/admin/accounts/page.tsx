@@ -97,7 +97,9 @@ export default function AccountsOverviewPage() {
                         }
                     }
                     if (entryExpense > 0) {
-                        const cname = e.category?.name || 'Uncategorised'
+                        const raw = e.category?.name || 'Uncategorised'
+                        // Advance is paid against salary — roll it into Staff Salary
+                        const cname = raw === 'Advance' ? 'Staff Salary' : raw
                         const bucket = (catMap[cname] ||= { amount: 0, items: [] })
                         bucket.amount += entryExpense
                         bucket.items.push({

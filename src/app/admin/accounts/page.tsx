@@ -31,11 +31,19 @@ import {
     CalendarClock,
     PiggyBank,
     Receipt,
+    ChevronRight,
 } from 'lucide-react'
+
+interface CatItem {
+    date: string
+    description: string
+    amount: number
+}
 
 interface CatCost {
     name: string
     amount: number
+    items: CatItem[]
 }
 
 export default function AccountsOverviewPage() {
@@ -48,6 +56,7 @@ export default function AccountsOverviewPage() {
         { ledger: LedgerRow; balance: number }[]
     >([])
     const [catCosts, setCatCosts] = useState<CatCost[]>([])
+    const [openCat, setOpenCat] = useState<string | null>(null)
 
     const month = monthYear()
 
@@ -71,12 +80,12 @@ export default function AccountsOverviewPage() {
                 // ── All posted lines this month (for expenses + category split) ─
                 const { data: entries } = await supabase
                     .from('acc_entries')
-                    .select('id, period_month, lines:acc_lines(debit, credit, ledger_id), category:acc_categories(name)')
+                    .select('id, period_month, entry_date, description, lines:acc_lines(debit, credit, ledger_id), category:acc_categories(name)')
                     .eq('period_month', month)
                     .eq('status', 'posted')
 
                 let exp = 0
-                const catMap: Record<string, number> = {}
+                const catMap: Record<string, { amount: number; items: CatItem[] }> = {}
                 for (const e of (entries || []) as any[]) {
                     let entryExpense = 0
                     for (const ln of e.lines || []) {
@@ -89,13 +98,23 @@ export default function AccountsOverviewPage() {
                     }
                     if (entryExpense > 0) {
                         const cname = e.category?.name || 'Uncategorised'
-                        catMap[cname] = (catMap[cname] || 0) + entryExpense
+                        const bucket = (catMap[cname] ||= { amount: 0, items: [] })
+                        bucket.amount += entryExpense
+                        bucket.items.push({
+                            date: e.entry_date,
+                            description: e.description || '—',
+                            amount: entryExpense,
+                        })
                     }
                 }
                 setExpenses(exp)
                 setCatCosts(
                     Object.entries(catMap)
-                        .map(([name, amount]) => ({ name, amount }))
+                        .map(([name, { amount, items }]) => ({
+                            name,
+                            amount,
+                            items: items.sort((a, b) => b.amount - a.amount),
+                        }))
                         .sort((a, b) => b.amount - a.amount)
                         .slice(0, 8)
                 )
@@ -203,25 +222,58 @@ export default function AccountsOverviewPage() {
                     </p>
                 ) : (
                     <div className="space-y-2.5">
-                        {catCosts.map((c) => (
-                            <div key={c.name} className="flex items-center gap-3">
-                                <div className="w-40 text-xs font-semibold text-gray-600 truncate">
-                                    {c.name}
+                        {catCosts.map((c) => {
+                            const open = openCat === c.name
+                            return (
+                                <div key={c.name}>
+                                    <button
+                                        type="button"
+                                        onClick={() => setOpenCat(open ? null : c.name)}
+                                        className="w-full flex items-center gap-3 text-left group"
+                                    >
+                                        <ChevronRight
+                                            size={13}
+                                            className={`shrink-0 text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`}
+                                        />
+                                        <div className="w-36 text-xs font-semibold text-gray-600 truncate group-hover:text-gray-900">
+                                            {c.name}
+                                        </div>
+                                        <div className="flex-1 h-3 bg-gray-100 rounded-full overflow-hidden">
+                                            <div
+                                                className="h-full rounded-full"
+                                                style={{
+                                                    width: `${(c.amount / maxCat) * 100}%`,
+                                                    background: `hsl(${330 - (catCosts.indexOf(c) / Math.max(catCosts.length - 1, 1)) * 120}, 70%, 55%)`,
+                                                }}
+                                            />
+                                        </div>
+                                        <div className="w-28 text-right text-xs font-bold text-gray-700 tabular-nums">
+                                            {lkr0(c.amount)}
+                                        </div>
+                                    </button>
+                                    {open && (
+                                        <div className="ml-7 mt-1.5 mb-1 rounded-xl border border-gray-100 bg-gray-50/60 divide-y divide-gray-100">
+                                            {c.items.map((it, i) => (
+                                                <div
+                                                    key={i}
+                                                    className="flex items-center gap-3 px-3 py-1.5"
+                                                >
+                                                    <span className="w-20 shrink-0 text-[11px] text-gray-400 tabular-nums">
+                                                        {it.date}
+                                                    </span>
+                                                    <span className="flex-1 text-[11px] text-gray-600 truncate">
+                                                        {it.description}
+                                                    </span>
+                                                    <span className="text-[11px] font-semibold text-gray-700 tabular-nums">
+                                                        {lkr0(it.amount)}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
-                                <div className="flex-1 h-3 bg-gray-100 rounded-full overflow-hidden">
-                                    <div
-                                        className="h-full rounded-full"
-                                        style={{
-                                            width: `${(c.amount / maxCat) * 100}%`,
-                                            background: `hsl(${330 - (catCosts.indexOf(c) / Math.max(catCosts.length - 1, 1)) * 120}, 70%, 55%)`,
-                                        }}
-                                    />
-                                </div>
-                                <div className="w-28 text-right text-xs font-bold text-gray-700 tabular-nums">
-                                    {lkr0(c.amount)}
-                                </div>
-                            </div>
-                        ))}
+                            )
+                        })}
                     </div>
                 )}
             </div>

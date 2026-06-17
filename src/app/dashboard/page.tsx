@@ -29,6 +29,7 @@ export default function DashboardPage() {
   const [newWorks, setNewWorks] = useState<StepWithOrder[]>([])
   const [inProgress, setInProgress] = useState<StepWithOrder[]>([])
   const [completed, setCompleted] = useState<StepWithOrder[]>([])
+  const [completedCount, setCompletedCount] = useState(0)
   const [activeTab, setActiveTab] = useState<WorkTab>('new')
   const [secondPosts, setSecondPosts] = useState<any[]>([])
   const [leads, setLeads] = useState<Lead[]>([])
@@ -105,10 +106,10 @@ export default function DashboardPage() {
       .in('status', ['pending', 'in_progress', 'overdue'])
       .order('deadline', { ascending: true })
 
-    // ── Completed steps (last 50) ──────────────────────────────
-    const { data: doneSteps } = await supabase
+    // ── Completed steps: list shows the latest 50, but count is exact ──
+    const { data: doneSteps, count: doneCount } = await supabase
       .from('order_steps')
-      .select(`*, order:orders(*, customer:customers(*), package:packages(*))`)
+      .select(`*, order:orders(*, customer:customers(*), package:packages(*))`, { count: 'exact' })
       .eq('assigned_to', user.id)
       .eq('status', 'done')
       .order('completed_at', { ascending: false })
@@ -130,6 +131,7 @@ export default function DashboardPage() {
     setNewWorks(news)
     setInProgress(inProg)
     setCompleted(dones)
+    setCompletedCount(doneCount ?? dones.length)
     setLoading(false)
   }
 
@@ -149,7 +151,7 @@ export default function DashboardPage() {
   const tabList: { key: WorkTab; label: string; count: number }[] = [
     { key: 'new', label: 'New', count: newWorks.length },
     { key: 'in_progress', label: 'In Progress', count: inProgress.length },
-    { key: 'completed', label: 'Completed', count: completed.length },
+    { key: 'completed', label: 'Completed', count: completedCount },
   ]
 
   const visible: StepWithOrder[] =

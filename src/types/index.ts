@@ -88,6 +88,7 @@ export interface Order {
   invoice_html?: string
   validity_expires_at?: string
   planned_post_date?: string
+  post_image_url?: string
   published_at?: string
   created_by: string
   created_at: string

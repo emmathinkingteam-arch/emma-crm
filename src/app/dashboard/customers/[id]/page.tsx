@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { supportsFolderAccess, getPostsFolder, pickPostsFolder, hasPostsFolder, findDesignFile } from '@/lib/posts-folder'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
@@ -2496,6 +2497,8 @@ export default function CustomerDetailPage() {
           role={role || ''}
           initialDesc={postBuilderPrefill}
           defaultProfileUrl={savedProfileLink}
+          orderId={activeOrder?.id || ''}
+          initialImageUrl={activeOrder?.post_image_url || ''}
         />
       )}
 
@@ -2780,12 +2783,65 @@ interface PostBuilderModalProps {
   role: string
   initialDesc?: string
   defaultProfileUrl?: string
+  orderId?: string
+  initialImageUrl?: string
 }
 
-function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultProfileUrl = '' }: PostBuilderModalProps) {
+function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultProfileUrl = '', orderId = '', initialImageUrl = '' }: PostBuilderModalProps) {
   const [desc, setDesc] = useState(initialDesc)
   const [profileUrl, setProfileUrl] = useState(defaultProfileUrl || 'https://www.emmathinking.com/profile/')
   const [copiedId, setCopiedId] = useState<string | null>(null)
+
+  // ── Design artwork (the "AI" image grab) ───────────────────────────────────
+  // The designer saves the Illustrator export named exactly as `saveAsName`,
+  // then we read it from the local "Posts Api" folder and upload to B2.
+  const saveAsName = (postCode || orderId || 'post').replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'post'
+  const [imageUrl, setImageUrl] = useState(initialImageUrl)
+  const [imgBusy, setImgBusy] = useState(false)
+  const [imgMsg, setImgMsg] = useState<string | null>(null)
+  const [folderReady, setFolderReady] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const canFolder = supportsFolderAccess()
+
+  useEffect(() => { hasPostsFolder().then(setFolderReady) }, [])
+
+  const uploadDesign = async (file: File) => {
+    if (!orderId) { setImgMsg('Open this from an active order first.'); return }
+    setImgBusy(true); setImgMsg(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('orderId', orderId)
+      fd.append('code', saveAsName)
+      const res = await fetch('/api/post-image/upload', { method: 'POST', body: fd })
+      const j = await res.json()
+      if (!res.ok) throw new Error(j.error || 'Upload failed')
+      setImageUrl(j.url)
+      setImgMsg('✓ Uploaded — review the preview below.')
+    } catch (e: any) {
+      setImgMsg(e?.message || 'Upload failed')
+    } finally {
+      setImgBusy(false)
+    }
+  }
+
+  const findAndUpload = async () => {
+    setImgMsg(null)
+    try {
+      let handle = await getPostsFolder()
+      if (!handle) {
+        handle = await pickPostsFolder().then(ok => ok ? getPostsFolder() : null)
+        setFolderReady(true)
+      }
+      if (!handle) { setImgMsg('Folder access was not granted.'); return }
+      const file = await findDesignFile(handle, saveAsName)
+      if (!file) { setImgMsg(`No image named "${saveAsName}" found in the Posts Api folder. Save your export with that exact name, then try again.`); return }
+      await uploadDesign(file)
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return // user cancelled the picker
+      setImgMsg(e?.message || 'Could not read the folder.')
+    }
+  }
 
   const d = pbParse(desc)
 
@@ -2844,6 +2900,84 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
           {initialDesc && (
             <div className="bg-violet-50 border border-violet-200 rounded-xl px-3 py-2 text-[10px] text-violet-700 font-semibold flex items-center gap-2">
               <span>✦</span> Brief auto-filled from this order — review and copy below.
+            </div>
+          )}
+
+          {/* Design artwork — designer / admin: grab the Illustrator export */}
+          {(role === 'designer' || role === 'admin') && (
+            <div className="bg-white border border-pink-100 rounded-2xl p-4 space-y-3">
+              <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">
+                ✦ Post design <span className="text-pink-500">← AI grabs it from your folder</span>
+              </p>
+
+              {/* Save-as code */}
+              <div className="bg-pink-50 border border-pink-100 rounded-xl px-3 py-2.5 space-y-1">
+                <p className="text-[9px] font-semibold text-pink-600 uppercase tracking-wide">Save your Illustrator export as</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-[11px] font-bold text-gray-800 font-mono truncate">{saveAsName}</code>
+                  <button
+                    onClick={() => copy(saveAsName, 'saveas')}
+                    className="text-[9px] font-bold text-pink-600 bg-white border border-pink-200 rounded-lg px-2 py-1 flex-shrink-0"
+                  >
+                    {copiedId === 'saveas' ? '✓' : 'Copy'}
+                  </button>
+                </div>
+                <p className="text-[8px] text-pink-500 font-medium leading-snug">
+                  Export into your “Posts Api” folder with this exact name (any image type), then tap below.
+                </p>
+              </div>
+
+              {/* Hidden picker for Safari / Firefox fallback */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) uploadDesign(f); e.currentTarget.value = '' }}
+              />
+
+              {canFolder ? (
+                <div className="flex gap-2">
+                  <button
+                    onClick={findAndUpload}
+                    disabled={imgBusy}
+                    className="flex-1 bg-pink-600 text-white rounded-xl py-2.5 text-[11px] font-bold flex items-center justify-center gap-2 disabled:opacity-40 active:scale-95 transition-all"
+                  >
+                    {imgBusy ? <Loader2 size={13} className="animate-spin" /> : <span>✦</span>}
+                    {folderReady ? 'Find my design & upload' : 'Connect folder & upload'}
+                  </button>
+                  {folderReady && (
+                    <button
+                      onClick={async () => { await pickPostsFolder(); setFolderReady(true) }}
+                      disabled={imgBusy}
+                      title="Choose a different folder"
+                      className="flex-none border border-gray-200 text-gray-500 rounded-xl px-3 py-2.5 text-[10px] font-bold disabled:opacity-40"
+                    >
+                      Folder
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={imgBusy}
+                  className="w-full bg-pink-600 text-white rounded-xl py-2.5 text-[11px] font-bold flex items-center justify-center gap-2 disabled:opacity-40 active:scale-95 transition-all"
+                >
+                  {imgBusy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                  Choose design & upload
+                </button>
+              )}
+
+              {imgMsg && (
+                <p className={`text-[9px] font-semibold leading-snug ${imgMsg.startsWith('✓') ? 'text-green-600' : 'text-red-500'}`}>{imgMsg}</p>
+              )}
+
+              {imageUrl && (
+                <div className="rounded-xl overflow-hidden border border-gray-100 bg-gray-50">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={imageUrl} alt="Post design" className="w-full object-contain max-h-72" />
+                </div>
+              )}
             </div>
           )}
 

@@ -25,7 +25,7 @@ async function requireAdmin() {
   const sa = supabaseAdmin()
   const { data: me } = await sa.from('users').select('id, role').eq('auth_user_id', user.id).single()
   if (!me) return { error: 'No profile', status: 404 as const }
-  if (me.role !== 'admin') return { error: 'Only an admin can connect Facebook.', status: 403 as const }
+  if (me.role !== 'admin' && me.role !== 'ceo') return { error: 'Only an admin or the CEO can connect Facebook.', status: 403 as const }
   return { me, sa }
 }
 

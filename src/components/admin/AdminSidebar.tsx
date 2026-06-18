@@ -84,10 +84,13 @@ export default function AdminSidebar() {
   const pathname = usePathname()
   const { clear, role } = useAuthStore()
 
-  const visibleTabs =
-    role === 'accountant' || role === 'ceo'
-      ? TABS.filter((t) => t.href.startsWith('/admin/accounts'))
-      : TABS
+  // accountant/ceo are restricted to Accounts. The CEO additionally gets the
+  // one-time "Connect Facebook" setup screen.
+  const restricted = role === 'accountant' || role === 'ceo'
+  const restrictedAllows = (href: string) =>
+    href.startsWith('/admin/accounts') || (role === 'ceo' && href === '/admin/facebook')
+
+  const visibleTabs = restricted ? TABS.filter((t) => restrictedAllows(t.href)) : TABS
 
   const handleLogout = async () => {
     clear()
@@ -112,12 +115,12 @@ export default function AdminSidebar() {
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-2 py-3">
-        {(role === 'accountant' || role === 'ceo'
-          ? SECTIONS.filter(s => s.items.some(t => t.href.startsWith('/admin/accounts')))
+        {(restricted
+          ? SECTIONS.filter(s => s.items.some(t => restrictedAllows(t.href)))
           : SECTIONS
         ).map((section, si) => {
-          const items = role === 'accountant' || role === 'ceo'
-            ? section.items.filter(t => t.href.startsWith('/admin/accounts'))
+          const items = restricted
+            ? section.items.filter(t => restrictedAllows(t.href))
             : section.items
           if (items.length === 0) return null
           return (

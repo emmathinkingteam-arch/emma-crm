@@ -311,6 +311,25 @@ export function getSlotLabel(slot: TimeSlot | string, date?: string | Date | nul
 export const TIME_SLOT_LABELS: Record<TimeSlot, string> = {
   W: WEEKDAY_SLOT_TIMES[0], X: WEEKDAY_SLOT_TIMES[1], Y: WEEKDAY_SLOT_TIMES[2], Z: WEEKDAY_SLOT_TIMES[3]
 }
+
+// Absolute instant (ISO string) for a slot on a given 'YYYY-MM-DD' date, using
+// the slot's clock time in Sri Lanka time (UTC+5:30, no DST). Used to schedule
+// Facebook posts at the real slot time instead of midnight. Returns null if the
+// date or slot can't be resolved.
+export function slotInstantISO(slot: TimeSlot | string, date?: string | null): string | null {
+  if (!date) return null
+  const [y, mo, d] = date.split('-').map(Number)
+  if (!y || !mo || !d) return null
+  const label = getSlotLabel(slot, date) // e.g. '7:00pm'
+  const m = label.match(/^(\d{1,2}):(\d{2})(am|pm)$/i)
+  if (!m) return null
+  let hh = Number(m[1]) % 12
+  if (m[3].toLowerCase() === 'pm') hh += 12
+  const mm = Number(m[2])
+  // Sri Lanka = UTC+5:30 → subtract to get the UTC instant for that local time.
+  const utcMs = Date.UTC(y, mo - 1, d, hh, mm) - (5 * 60 + 30) * 60 * 1000
+  return new Date(utcMs).toISOString()
+}
 // ── Legacy Invoices (from old Kalpani Back Office) ──
 
 export interface LegacyInvoice {

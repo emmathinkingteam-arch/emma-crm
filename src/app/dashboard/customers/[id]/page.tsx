@@ -12,7 +12,7 @@ import {
   ThumbsUp, ShoppingCart, Lock, Upload, CheckCircle, ExternalLink, Filter,
   CreditCard, AlertCircle, Pencil, Receipt, Building2
 } from 'lucide-react'
-import { Customer, Order, OrderStep, Interaction, Package as Pkg, MONTH_CODES, getSlotLabel } from '@/types'
+import { Customer, Order, OrderStep, Interaction, Package as Pkg, MONTH_CODES, getSlotLabel, slotInstantISO } from '@/types'
 import { fmtDate, fmtTime, buildWaLink, openWaLink, WA, KOKO_SERVICE_CHARGE_RATE, getCounselorAvailability } from '@/lib/utils'
 import { formatPhoneDisplay } from '@/lib/country-codes'
 import InterestStatsCard from '@/components/shared/InterestStatsCard'
@@ -2499,7 +2499,11 @@ export default function CustomerDetailPage() {
           defaultProfileUrl={savedProfileLink}
           orderId={activeOrder?.id || ''}
           initialImageUrl={activeOrder?.post_image_url || ''}
-          plannedDate={plannedSlot?.slot_date || activeOrder?.planned_post_date || null}
+          plannedDate={
+            (plannedSlot ? slotInstantISO(plannedSlot.slot_time, plannedSlot.slot_date) : null)
+            || activeOrder?.planned_post_date
+            || null
+          }
         />
       )}
 

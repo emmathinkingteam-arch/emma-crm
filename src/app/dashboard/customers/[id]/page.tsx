@@ -2499,6 +2499,7 @@ export default function CustomerDetailPage() {
           defaultProfileUrl={savedProfileLink}
           orderId={activeOrder?.id || ''}
           initialImageUrl={activeOrder?.post_image_url || ''}
+          plannedDate={plannedSlot?.slot_date || activeOrder?.planned_post_date || null}
         />
       )}
 
@@ -2785,9 +2786,10 @@ interface PostBuilderModalProps {
   defaultProfileUrl?: string
   orderId?: string
   initialImageUrl?: string
+  plannedDate?: string | null
 }
 
-function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultProfileUrl = '', orderId = '', initialImageUrl = '' }: PostBuilderModalProps) {
+function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultProfileUrl = '', orderId = '', initialImageUrl = '', plannedDate = null }: PostBuilderModalProps) {
   const [desc, setDesc] = useState(initialDesc)
   const [profileUrl, setProfileUrl] = useState(defaultProfileUrl || 'https://www.emmathinking.com/profile/')
   const [copiedId, setCopiedId] = useState<string | null>(null)
@@ -2860,6 +2862,38 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
 
   const isBackOffice = role === 'back_office' || role === 'admin'
   const isCounselor = role === 'counselor' || role === 'admin'
+
+  // ── Facebook publish/schedule ───────────────────────────────────────────────
+  const [fbBusy, setFbBusy] = useState(false)
+  const [fbMsg, setFbMsg] = useState<string | null>(null)
+  const [fbDone, setFbDone] = useState(false)
+  const [fbConfirm, setFbConfirm] = useState(false)
+  const willSchedule = (() => {
+    if (!plannedDate) return false
+    const t = new Date(plannedDate).getTime()
+    return !Number.isNaN(t) && t - Date.now() >= 10 * 60 * 1000
+  })()
+
+  const publishToFacebook = async () => {
+    setFbBusy(true); setFbMsg(null)
+    try {
+      const res = await fetch('/api/facebook/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId, text: buildPart1(), scheduledTime: plannedDate || undefined }),
+      })
+      const j = await res.json()
+      if (!res.ok) throw new Error(j.error || 'Publish failed')
+      setFbDone(true)
+      setFbMsg(j.scheduled
+        ? `✓ Scheduled on Facebook for ${new Date(j.scheduledTime).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+        : '✓ Published to Facebook now')
+    } catch (e: any) {
+      setFbMsg(e?.message || 'Publish failed')
+    } finally {
+      setFbBusy(false); setFbConfirm(false)
+    }
+  }
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex flex-col">
@@ -3099,6 +3133,51 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
                 >
                   {copiedId === 'part1' ? '✓ Copied Part 1' : 'Copy Part 1'}
                 </button>
+
+                {/* Publish to Facebook — admin / back office */}
+                {isBackOffice && (
+                  <div className="border-t border-gray-100 pt-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="#1877F2"><path d="M24 12c0-6.627-5.373-12-12-12S0 5.373 0 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874V12h3.328l-.532 3.469h-2.796v8.385C19.612 22.954 24 17.99 24 12z"/></svg>
+                      <p className="text-[10px] font-bold text-gray-700">
+                        {willSchedule ? 'Schedule this post on Facebook' : 'Publish this post on Facebook now'}
+                      </p>
+                    </div>
+                    <p className="text-[9px] text-gray-400 font-medium leading-snug">
+                      Sends the design image + this Part 1 text{willSchedule && plannedDate ? ` — auto-scheduled for ${new Date(plannedDate).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}. Note: Facebook's API can't attach the WhatsApp button to an organic post — the profile link in the text covers it.
+                    </p>
+                    {!imageUrl && (
+                      <p className="text-[9px] text-amber-600 font-semibold">Upload the design above first.</p>
+                    )}
+                    {fbMsg && (
+                      <p className={`text-[9px] font-semibold leading-snug ${fbMsg.startsWith('✓') ? 'text-green-600' : 'text-red-500'}`}>{fbMsg}</p>
+                    )}
+                    {!fbConfirm ? (
+                      <button
+                        onClick={() => setFbConfirm(true)}
+                        disabled={!imageUrl || !d || fbBusy || fbDone}
+                        className="w-full rounded-xl py-2.5 text-xs font-bold flex items-center justify-center gap-2 bg-[#1877F2] text-white disabled:opacity-40 active:scale-95 transition-all"
+                      >
+                        {fbDone ? '✓ Done' : (willSchedule ? '📅 Schedule on Facebook' : '🚀 Publish to Facebook')}
+                      </button>
+                    ) : (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={publishToFacebook}
+                          disabled={fbBusy}
+                          className="flex-1 rounded-xl py-2.5 text-xs font-bold flex items-center justify-center gap-2 bg-[#1877F2] text-white disabled:opacity-60"
+                        >
+                          {fbBusy ? <Loader2 size={13} className="animate-spin" /> : null}
+                          {willSchedule ? 'Yes, schedule it' : 'Yes, publish now'}
+                        </button>
+                        <button onClick={() => setFbConfirm(false)} disabled={fbBusy}
+                          className="flex-none rounded-xl px-4 py-2.5 text-xs font-bold border border-gray-200 text-gray-500">
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Part 2 — short desc FM */}

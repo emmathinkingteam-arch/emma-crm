@@ -12,7 +12,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { b2Download } from '@/lib/backblaze'
-import { publishPhotoPost, facebookConfigured } from '@/lib/facebook'
+import { publishPhotoPost, getFacebookCredentials } from '@/lib/facebook'
 
 export const runtime = 'nodejs'
 
@@ -29,8 +29,9 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  if (!facebookConfigured()) {
-    return NextResponse.json({ error: 'Facebook is not connected yet. Add FB_PAGE_ID and FB_PAGE_ACCESS_TOKEN.' }, { status: 400 })
+  const creds = await getFacebookCredentials()
+  if (!creds) {
+    return NextResponse.json({ error: 'Facebook is not connected yet. Open Admin → Connect Facebook first.' }, { status: 400 })
   }
 
   const sa = supabaseAdmin()
@@ -81,7 +82,7 @@ export async function POST(req: NextRequest) {
 
   let result
   try {
-    result = await publishPhotoPost(bytes, contentType, text, when)
+    result = await publishPhotoPost(creds, bytes, contentType, text, when)
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Facebook publish failed' }, { status: 500 })
   }

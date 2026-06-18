@@ -6,26 +6,50 @@
 // the Graph API. Used by /api/facebook/publish so the team can post straight
 // from the CRM's Post Builder instead of Meta Business Suite.
 //
-// Required env vars (set in Vercel + .env.local):
-//   FB_PAGE_ID             = the Facebook Page's numeric id (e.g. 108411837744318)
-//   FB_PAGE_ACCESS_TOKEN   = a long-lived / permanent PAGE access token with
-//                            pages_manage_posts + pages_read_engagement
-//   FB_GRAPH_VERSION       = optional, defaults to v21.0
+// Credentials (page id + permanent page access token) are stored in the
+// `facebook_settings` DB row, written by /api/facebook/connect. If that row is
+// empty we fall back to env vars (FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN) so an
+// advanced setup still works.
 //
 // The image lives in the PRIVATE B2 bucket, so Facebook can't fetch it by URL.
 // We upload the raw bytes as the multipart `source` field instead.
 // ============================================================================
 
-const FB_PAGE_ID = process.env.FB_PAGE_ID
-const FB_PAGE_ACCESS_TOKEN = process.env.FB_PAGE_ACCESS_TOKEN
-const FB_GRAPH_VERSION = process.env.FB_GRAPH_VERSION || 'v21.0'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+export const FB_GRAPH_VERSION = process.env.FB_GRAPH_VERSION || 'v21.0'
 
 // Facebook requires scheduled posts to be 10 min – 6 months in the future.
 const MIN_LEAD_MS = 10 * 60 * 1000
 const MAX_LEAD_MS = 180 * 24 * 60 * 60 * 1000
 
-export function facebookConfigured(): boolean {
-  return Boolean(FB_PAGE_ID && FB_PAGE_ACCESS_TOKEN)
+export interface FacebookCredentials {
+  pageId: string
+  pageName: string | null
+  token: string
+}
+
+/**
+ * Load the connected Page id + token. Prefers the DB row (set via the in-app
+ * "Connect Facebook" flow), falls back to env vars. Returns null if neither.
+ */
+export async function getFacebookCredentials(): Promise<FacebookCredentials | null> {
+  try {
+    const { data } = await supabaseAdmin()
+      .from('facebook_settings')
+      .select('page_id, page_name, page_access_token')
+      .eq('id', 1)
+      .single()
+    if (data?.page_id && data?.page_access_token) {
+      return { pageId: data.page_id, pageName: data.page_name ?? null, token: data.page_access_token }
+    }
+  } catch {
+    // table/row missing — fall through to env
+  }
+  if (process.env.FB_PAGE_ID && process.env.FB_PAGE_ACCESS_TOKEN) {
+    return { pageId: process.env.FB_PAGE_ID, pageName: null, token: process.env.FB_PAGE_ACCESS_TOKEN }
+  }
+  return null
 }
 
 export interface PublishResult {
@@ -37,6 +61,7 @@ export interface PublishResult {
 /**
  * Publish or schedule a single-photo post on the Page.
  *
+ * @param creds       page id + access token from getFacebookCredentials()
  * @param imageBytes  the artwork bytes
  * @param contentType e.g. "image/png"
  * @param caption     the full post text (Part 1)
@@ -44,15 +69,12 @@ export interface PublishResult {
  *                    the post goes out immediately.
  */
 export async function publishPhotoPost(
+  creds: FacebookCredentials,
   imageBytes: Buffer,
   contentType: string,
   caption: string,
   when: string | null,
 ): Promise<PublishResult> {
-  if (!facebookConfigured()) {
-    throw new Error('Facebook is not configured (FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN missing).')
-  }
-
   // Decide schedule vs publish-now.
   let scheduledUnix: number | null = null
   if (when) {
@@ -68,7 +90,7 @@ export async function publishPhotoPost(
   }
 
   const form = new FormData()
-  form.append('access_token', FB_PAGE_ACCESS_TOKEN!)
+  form.append('access_token', creds.token)
   form.append('caption', caption)
   if (scheduledUnix) {
     form.append('published', 'false')
@@ -78,7 +100,7 @@ export async function publishPhotoPost(
   }
   form.append('source', new Blob([new Uint8Array(imageBytes)], { type: contentType || 'image/png' }), 'post.png')
 
-  const url = `https://graph.facebook.com/${FB_GRAPH_VERSION}/${FB_PAGE_ID}/photos`
+  const url = `https://graph.facebook.com/${FB_GRAPH_VERSION}/${creds.pageId}/photos`
   const res = await fetch(url, { method: 'POST', body: form })
   const json = await res.json().catch(() => ({}))
 

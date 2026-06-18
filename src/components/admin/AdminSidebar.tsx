@@ -7,7 +7,7 @@ import {
   MapPin, Briefcase, UserPlus, BarChart2,
   CalendarRange, ShieldCheck, Settings, LogOut,
   Bell, DollarSign, Target, Archive, MessageSquare, MessageCircle, AlertOctagon,
-  Wallet, Megaphone, Eye, Headphones, FileSignature,
+  Wallet, Megaphone, Eye, Headphones, FileSignature, Facebook,
 } from 'lucide-react'
 
 import { supabase } from '@/lib/supabase'
@@ -66,6 +66,7 @@ const SECTIONS: Section[] = [
     title: 'Config',
     items: [
       { href: '/admin/packages', icon: Briefcase, label: 'Packages' },
+      { href: '/admin/facebook', icon: Facebook, label: 'Connect Facebook' },
       { href: '/admin/whatsapp', icon: MessageCircle, label: 'WhatsApp' },
       { href: '/admin/whatsapp/delivery', icon: BarChart2, label: 'WA Delivery' },
       { href: '/admin/whatsapp/support', icon: Headphones, label: 'WA Support' },

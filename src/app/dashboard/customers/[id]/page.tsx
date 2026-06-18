@@ -1028,6 +1028,17 @@ export default function CustomerDetailPage() {
     historyFilter === 'all' ? true : i.type === historyFilter
   )
 
+  // Profile link the back office pasted when assigning the counselor. It was
+  // stored inside the interaction description ("... | Profile link: <url>").
+  // We recover it here so the designer's Post Builder auto-fills the URL.
+  const savedProfileLink = (() => {
+    for (const i of interactions) {
+      const m = i.description?.match(/Profile link:\s*(\S+)/i)
+      if (m && m[1]) return m[1]
+    }
+    return ''
+  })()
+
   if (loading) return <div className="h-screen flex items-center justify-center bg-white"><Loader2 className="animate-spin text-pink-600" size={28} /></div>
   if (!customer) return <div className="h-screen flex items-center justify-center bg-white"><p className="text-gray-400 text-sm">Customer not found</p></div>
 
@@ -2484,6 +2495,7 @@ export default function CustomerDetailPage() {
           onClose={() => setShowPostBuilder(false)}
           role={role || ''}
           initialDesc={postBuilderPrefill}
+          defaultProfileUrl={savedProfileLink}
         />
       )}
 
@@ -2767,11 +2779,12 @@ interface PostBuilderModalProps {
   onClose: () => void
   role: string
   initialDesc?: string
+  defaultProfileUrl?: string
 }
 
-function PostBuilderModal({ postCode, onClose, role, initialDesc = '' }: PostBuilderModalProps) {
+function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultProfileUrl = '' }: PostBuilderModalProps) {
   const [desc, setDesc] = useState(initialDesc)
-  const [profileUrl, setProfileUrl] = useState('https://www.emmathinking.com/profile/')
+  const [profileUrl, setProfileUrl] = useState(defaultProfileUrl || 'https://www.emmathinking.com/profile/')
   const [copiedId, setCopiedId] = useState<string | null>(null)
 
   const d = pbParse(desc)

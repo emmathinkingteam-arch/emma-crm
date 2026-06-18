@@ -37,8 +37,8 @@ export async function POST(req: NextRequest) {
   const sa = supabaseAdmin()
   const { data: me } = await sa.from('users').select('id, role').eq('auth_user_id', user.id).single()
   if (!me) return NextResponse.json({ error: 'No profile' }, { status: 404 })
-  if (me.role !== 'admin' && me.role !== 'back_office') {
-    return NextResponse.json({ error: 'Only admin / back office can publish to Facebook.' }, { status: 403 })
+  if (me.role !== 'admin' && me.role !== 'back_office' && me.role !== 'designer') {
+    return NextResponse.json({ error: 'Only designer / back office / admin can publish to Facebook.' }, { status: 403 })
   }
 
   const body = await req.json().catch(() => ({})) as { orderId?: string; text?: string; scheduledTime?: string }

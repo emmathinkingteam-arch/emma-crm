@@ -2862,6 +2862,9 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
 
   const isBackOffice = role === 'back_office' || role === 'admin'
   const isCounselor = role === 'counselor' || role === 'admin'
+  // Designer owns the final Facebook schedule step (they set the calendar slot
+  // + grab the design), alongside back office / admin.
+  const isPublisher = role === 'designer' || role === 'back_office' || role === 'admin'
 
   // ── Facebook publish/schedule ───────────────────────────────────────────────
   const [fbBusy, setFbBusy] = useState(false)
@@ -3134,8 +3137,8 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
                   {copiedId === 'part1' ? '✓ Copied Part 1' : 'Copy Part 1'}
                 </button>
 
-                {/* Publish to Facebook — admin / back office */}
-                {isBackOffice && (
+                {/* Publish to Facebook — designer / back office / admin */}
+                {isPublisher && (
                   <div className="border-t border-gray-100 pt-3 space-y-2">
                     <div className="flex items-center gap-2">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="#1877F2"><path d="M24 12c0-6.627-5.373-12-12-12S0 5.373 0 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874V12h3.328l-.532 3.469h-2.796v8.385C19.612 22.954 24 17.99 24 12z"/></svg>

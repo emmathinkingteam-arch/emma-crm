@@ -14,7 +14,7 @@
 
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
-import { createSupabaseServerClient } from '@/lib/supabase-server'
+import { currentProfile } from '@/lib/api-auth'
 import { findStatusColumn, writeLeadStatus } from '@/lib/google-sheets'
 import {
     META_STATUS_SHEET,
@@ -28,29 +28,20 @@ export const revalidate = 0
 const VALID = new Set(Object.keys(META_STATUS_SHEET))
 
 export async function POST(req: Request) {
-    let sessionUserId = ''
-    try {
-        const sb = createSupabaseServerClient()
-        const { data: { user } } = await sb.auth.getUser()
-        if (!user) return NextResponse.json({ ok: false, error: 'unauthenticated' }, { status: 401 })
-        sessionUserId = user.id
-    } catch {
-        return NextResponse.json({ ok: false, error: 'auth_check_failed' }, { status: 500 })
-    }
+    const me = await currentProfile()
+    if (!me) return NextResponse.json({ ok: false, error: 'unauthenticated' }, { status: 401 })
+    const userId = me.id // the caller's own profile id
 
-    let body: { leadId: string; userId: string; status: MetaLeadStatus; note?: string }
+    let body: { leadId: string; status: MetaLeadStatus; note?: string }
     try {
         body = await req.json()
     } catch {
         return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 })
     }
 
-    const { leadId, userId, status, note } = body
-    if (!leadId || !userId || !status) {
+    const { leadId, status, note } = body
+    if (!leadId || !status) {
         return NextResponse.json({ ok: false, error: 'missing_fields' }, { status: 400 })
-    }
-    if (userId !== sessionUserId) {
-        return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 })
     }
     if (!VALID.has(status)) {
         return NextResponse.json({ ok: false, error: 'invalid_status' }, { status: 400 })

@@ -6,7 +6,7 @@
 // ============================================================================
 
 import { NextResponse } from 'next/server'
-import { createSupabaseServerClient } from '@/lib/supabase-server'
+import { currentProfile, isAdminRole } from '@/lib/api-auth'
 import {
     listTabs,
     extractSpreadsheetId,
@@ -16,18 +16,10 @@ import {
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-async function requireAdmin() {
-    const sb = createSupabaseServerClient()
-    const { data: { user } } = await sb.auth.getUser()
-    if (!user) return 'unauthenticated'
-    const { data: profile } = await sb.from('users').select('role').eq('id', user.id).single()
-    if (!profile || (profile.role !== 'admin' && profile.role !== 'ceo')) return 'forbidden'
-    return null
-}
-
 export async function POST(req: Request) {
-    const err = await requireAdmin()
-    if (err) return NextResponse.json({ ok: false, error: err }, { status: err === 'forbidden' ? 403 : 401 })
+    const me = await currentProfile()
+    if (!me) return NextResponse.json({ ok: false, error: 'unauthenticated' }, { status: 401 })
+    if (!isAdminRole(me.role)) return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 })
 
     let spreadsheet = ''
     try {

@@ -7,24 +7,16 @@
 
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
-import { createSupabaseServerClient } from '@/lib/supabase-server'
+import { currentProfile, isAdminRole } from '@/lib/api-auth'
 import { syncSource, syncAllActiveSources } from '@/lib/meta-leads-engine'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 export async function POST(req: Request) {
-    try {
-        const sb = createSupabaseServerClient()
-        const { data: { user } } = await sb.auth.getUser()
-        if (!user) return NextResponse.json({ ok: false, error: 'unauthenticated' }, { status: 401 })
-        const { data: profile } = await sb.from('users').select('role').eq('id', user.id).single()
-        if (!profile || (profile.role !== 'admin' && profile.role !== 'ceo')) {
-            return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 })
-        }
-    } catch {
-        return NextResponse.json({ ok: false, error: 'auth_check_failed' }, { status: 500 })
-    }
+    const me = await currentProfile()
+    if (!me) return NextResponse.json({ ok: false, error: 'unauthenticated' }, { status: 401 })
+    if (!isAdminRole(me.role)) return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 })
 
     let sourceId: string | undefined
     try {

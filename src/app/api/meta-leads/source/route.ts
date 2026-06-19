@@ -9,29 +9,17 @@
 
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
-import { createSupabaseServerClient } from '@/lib/supabase-server'
+import { currentProfile, isAdminRole } from '@/lib/api-auth'
 import { extractSpreadsheetId } from '@/lib/google-sheets'
 import type { RatioEntry } from '@/lib/meta-leads'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-async function requireAdmin(): Promise<{ userId: string } | { error: string; code: number }> {
-    try {
-        const sb = createSupabaseServerClient()
-        const { data: { user } } = await sb.auth.getUser()
-        if (!user) return { error: 'unauthenticated', code: 401 }
-        const { data: profile } = await sb.from('users').select('role').eq('id', user.id).single()
-        if (!profile || (profile.role !== 'admin' && profile.role !== 'ceo')) return { error: 'forbidden', code: 403 }
-        return { userId: user.id }
-    } catch {
-        return { error: 'auth_check_failed', code: 500 }
-    }
-}
-
 export async function POST(req: Request) {
-    const auth = await requireAdmin()
-    if ('error' in auth) return NextResponse.json({ ok: false, error: auth.error }, { status: auth.code })
+    const me = await currentProfile()
+    if (!me) return NextResponse.json({ ok: false, error: 'unauthenticated' }, { status: 401 })
+    if (!isAdminRole(me.role)) return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 })
 
     let body: {
         id?: string
@@ -78,7 +66,7 @@ export async function POST(req: Request) {
 
     const { data, error } = await sb
         .from('meta_lead_sources')
-        .insert({ ...row, created_by: auth.userId })
+        .insert({ ...row, created_by: me.id })
         .select('id')
         .single()
     if (error || !data) return NextResponse.json({ ok: false, error: error?.message || 'insert_failed' }, { status: 500 })
@@ -86,8 +74,9 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-    const auth = await requireAdmin()
-    if ('error' in auth) return NextResponse.json({ ok: false, error: auth.error }, { status: auth.code })
+    const me = await currentProfile()
+    if (!me) return NextResponse.json({ ok: false, error: 'unauthenticated' }, { status: 401 })
+    if (!isAdminRole(me.role)) return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 })
 
     let id = ''
     try {

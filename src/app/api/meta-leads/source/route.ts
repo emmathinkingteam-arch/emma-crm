@@ -22,7 +22,7 @@ async function requireAdmin(): Promise<{ userId: string } | { error: string; cod
         const { data: { user } } = await sb.auth.getUser()
         if (!user) return { error: 'unauthenticated', code: 401 }
         const { data: profile } = await sb.from('users').select('role').eq('id', user.id).single()
-        if (!profile || profile.role !== 'admin') return { error: 'forbidden', code: 403 }
+        if (!profile || (profile.role !== 'admin' && profile.role !== 'ceo')) return { error: 'forbidden', code: 403 }
         return { userId: user.id }
     } catch {
         return { error: 'auth_check_failed', code: 500 }

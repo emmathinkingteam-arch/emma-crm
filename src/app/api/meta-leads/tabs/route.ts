@@ -21,7 +21,7 @@ async function requireAdmin() {
     const { data: { user } } = await sb.auth.getUser()
     if (!user) return 'unauthenticated'
     const { data: profile } = await sb.from('users').select('role').eq('id', user.id).single()
-    if (!profile || profile.role !== 'admin') return 'forbidden'
+    if (!profile || (profile.role !== 'admin' && profile.role !== 'ceo')) return 'forbidden'
     return null
 }
 

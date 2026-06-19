@@ -19,7 +19,7 @@ export async function POST(req: Request) {
         const { data: { user } } = await sb.auth.getUser()
         if (!user) return NextResponse.json({ ok: false, error: 'unauthenticated' }, { status: 401 })
         const { data: profile } = await sb.from('users').select('role').eq('id', user.id).single()
-        if (!profile || profile.role !== 'admin') {
+        if (!profile || (profile.role !== 'admin' && profile.role !== 'ceo')) {
             return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 })
         }
     } catch {

@@ -24,8 +24,6 @@ import {
     Save,
     Trash2,
     Users,
-    Timer,
-    Coins,
     CheckCircle2,
     AlertTriangle,
     Facebook,
@@ -339,39 +337,6 @@ export default function MetaAdsPage() {
                         </p>
                     )}
                 </div>
-
-                {/* TTL + penalty */}
-                <div className="grid grid-cols-2 gap-3 mt-4">
-                    <div>
-                        <label className="flex items-center gap-1 text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1">
-                            <Timer size={11} /> Timer (min)
-                        </label>
-                        <input
-                            type="number"
-                            min={1}
-                            value={ttl}
-                            onChange={(e) => setTtl(Math.max(1, +e.target.value || 1))}
-                            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:border-pink-300"
-                        />
-                    </div>
-                    <div>
-                        <label className="flex items-center gap-1 text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1">
-                            <Coins size={11} /> Penalty / hr (LKR)
-                        </label>
-                        <input
-                            type="number"
-                            min={0}
-                            value={penalty}
-                            onChange={(e) => setPenalty(Math.max(0, +e.target.value || 0))}
-                            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:border-pink-300"
-                        />
-                    </div>
-                </div>
-
-                <label className="flex items-center gap-2 mt-4 cursor-pointer">
-                    <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} className="accent-pink-600" />
-                    <span className="text-xs font-semibold text-gray-600">Active — auto-import new rows on every sync</span>
-                </label>
 
                 <button
                     onClick={save}

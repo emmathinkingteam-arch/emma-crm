@@ -47,6 +47,8 @@ export type SmsTemplateKey =
     | 'handoff_designer'
     | 'overdue_debit'
     | 'lead_overdue'
+    | 'meta_lead_new'
+    | 'meta_lead_overdue'
 
 export type SmsResult =
     | { ok: true; messageBody: string }

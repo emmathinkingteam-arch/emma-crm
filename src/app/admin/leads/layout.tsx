@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Send, History, Megaphone } from 'lucide-react'
+import { Send, History, Megaphone, Facebook } from 'lucide-react'
 
 const SUB_TABS = [
     {
@@ -14,6 +14,11 @@ const SUB_TABS = [
         href: '/admin/leads/history',
         icon: History,
         label: 'History',
+    },
+    {
+        href: '/admin/leads/meta',
+        icon: Facebook,
+        label: 'Meta Ads',
     },
 ]
 

@@ -7,10 +7,11 @@ import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import { Order, OrderStep } from '@/types'
-import { Bell, ChevronRight, CheckCircle2, Sparkles, Clock, Phone, TrendingUp, Users } from 'lucide-react'
+import { Bell, ChevronRight, CheckCircle2, Sparkles, Clock, Phone, TrendingUp, Users, UserPlus, Briefcase } from 'lucide-react'
 import CrmLeaderboard from '@/components/shared/CrmLeaderboard'
 import Link from 'next/link'
 import { type Lead, leadCountdown, leadPenaltySoFar } from '@/lib/leads'
+import { type MetaLead, metaCountdown } from '@/lib/meta-leads'
 
 // A step joined with its order + customer + package (what fetchMyWork returns).
 type StepWithOrder = OrderStep & {
@@ -33,6 +34,7 @@ export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<WorkTab>('new')
   const [secondPosts, setSecondPosts] = useState<any[]>([])
   const [leads, setLeads] = useState<Lead[]>([])
+  const [metaLeads, setMetaLeads] = useState<MetaLead[]>([])
 
   useEffect(() => {
     if (!user) { router.replace('/auth/login'); return }
@@ -80,6 +82,25 @@ export default function DashboardPage() {
       .eq('status', 'active')
       .order('due_at', { ascending: true })
     setLeads((data as Lead[]) || [])
+
+    // Same idea for Meta-Ads leads: ask the server to start any 1h timers
+    // (punch-gated), then read what's still open for this agent.
+    try {
+      await fetch('/api/meta-leads/release', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id }),
+      })
+    } catch {
+      // non-fatal
+    }
+    const { data: meta } = await supabase
+      .from('meta_leads')
+      .select('*')
+      .eq('assigned_to', user.id)
+      .in('stage', ['new', 'active'])
+      .order('due_at', { ascending: true, nullsFirst: false })
+    setMetaLeads((meta as MetaLead[]) || [])
   }
 
   const fetchSecondPosts = async () => {
@@ -284,6 +305,46 @@ export default function DashboardPage() {
                         </span>
                         <ChevronRight size={14} className="text-pink-300" />
                       </div>
+                    </div>
+                  </Link>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* New customers — Meta-ad leads. Pallet: Job · Age · Name · Number */}
+        {metaLeads.length > 0 && (
+          <div className="border-2 border-teal-200 rounded-2xl overflow-hidden">
+            <div className="px-4 py-2.5 bg-teal-600 flex items-center gap-2">
+              <UserPlus size={14} className="text-white" />
+              <p className="text-xs font-bold text-white uppercase tracking-wide">New customers</p>
+              <span className="ml-auto text-[9px] font-bold bg-white/25 text-white px-2 py-0.5 rounded-full">{metaLeads.length}</span>
+            </div>
+            <div className="p-2 space-y-2">
+              {metaLeads.map((ml) => {
+                const cd = metaCountdown(ml.due_at)
+                return (
+                  <Link
+                    key={ml.id}
+                    href={`/dashboard/meta-leads/${ml.id}`}
+                    className={`block rounded-xl p-3 border active:scale-[0.98] transition-all ${cd.overdue ? 'bg-red-50 border-red-100' : 'bg-teal-50 border-teal-100'}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-gray-800 truncate">
+                          {ml.full_name || ml.phone_display || ml.phone}
+                          {ml.age != null && <span className="text-gray-400 font-semibold"> · {ml.age}</span>}
+                        </p>
+                        <p className="text-[10px] font-semibold text-gray-500 truncate flex items-center gap-1">
+                          <Briefcase size={9} /> {ml.job_title || '—'}
+                          <span className="font-mono text-gray-400">· {ml.phone_display || ml.phone}</span>
+                        </p>
+                        <p className="text-[10px] font-semibold">
+                          <span className={cd.overdue ? 'text-red-500' : 'text-gray-400'}>{cd.label}</span>
+                        </p>
+                      </div>
+                      <ChevronRight size={14} className="text-teal-300 flex-shrink-0 ml-2" />
                     </div>
                   </Link>
                 )

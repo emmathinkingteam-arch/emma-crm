@@ -14,7 +14,7 @@
 
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
-import { currentProfile } from '@/lib/api-auth'
+import { currentProfile, isAdminRole } from '@/lib/api-auth'
 import { findStatusColumn, writeLeadStatus } from '@/lib/google-sheets'
 import {
     META_STATUS_SHEET,
@@ -57,7 +57,8 @@ export async function POST(req: Request) {
     if (leadErr || !lead) {
         return NextResponse.json({ ok: false, error: 'lead_not_found' }, { status: 404 })
     }
-    if (lead.assigned_to !== userId) {
+    // The assigned agent can update their own lead; admins/CEO can update any.
+    if (lead.assigned_to !== userId && !isAdminRole(me.role)) {
         return NextResponse.json({ ok: false, error: 'not_your_lead' }, { status: 403 })
     }
 
@@ -79,7 +80,7 @@ export async function POST(req: Request) {
                     name: lead.full_name || null,
                     title: lead.job_title || null,
                     notes: lead.age != null ? `Age ${lead.age}${lead.job_title ? ` · ${lead.job_title}` : ''}` : null,
-                    created_by: userId,
+                    created_by: lead.assigned_to || userId,
                 })
                 .select('id')
                 .single()

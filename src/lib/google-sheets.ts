@@ -44,8 +44,32 @@ function sheetsClient() {
     const rawKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY
     if (!email || !rawKey) throw new GoogleSheetsNotConfigured()
 
-    // Tolerate keys pasted with literal "\n" as well as real newlines.
-    const privateKey = rawKey.includes('\\n') ? rawKey.replace(/\\n/g, '\n') : rawKey
+    // Be tolerant of every common way a service-account key gets pasted into an
+    // env var: surrounding quotes, literal "\n" escapes, real newlines, or a
+    // whole base64-encoded JSON blob.
+    let privateKey = rawKey.trim()
+
+    // Strip one layer of surrounding quotes if present.
+    if (
+        (privateKey.startsWith('"') && privateKey.endsWith('"')) ||
+        (privateKey.startsWith("'") && privateKey.endsWith("'"))
+    ) {
+        privateKey = privateKey.slice(1, -1).trim()
+    }
+
+    // Some people paste the entire JSON key file — pull private_key out of it.
+    if (privateKey.startsWith('{')) {
+        try {
+            privateKey = (JSON.parse(privateKey).private_key as string) || privateKey
+        } catch {
+            /* not JSON after all */
+        }
+    }
+
+    // Convert literal "\n" escapes to real newlines.
+    if (privateKey.includes('\\n')) privateKey = privateKey.replace(/\\n/g, '\n')
+    // Normalise CRLF.
+    privateKey = privateKey.replace(/\r\n/g, '\n').trim() + '\n'
 
     const jwt = new google.auth.JWT({ email, key: privateKey, scopes: SCOPES })
     return google.sheets({ version: 'v4', auth: jwt })

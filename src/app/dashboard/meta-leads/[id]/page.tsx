@@ -40,7 +40,8 @@ export default function MetaLeadPage() {
 
     const [lead, setLead] = useState<MetaLead | null>(null)
     const [loading, setLoading] = useState(true)
-    const [saving, setSaving] = useState<MetaLeadStatus | null>(null)
+    const [selected, setSelected] = useState<MetaLeadStatus | null>(null)
+    const [saving, setSaving] = useState(false)
     const [notes, setNotes] = useState('')
     const [err, setErr] = useState<string | null>(null)
 
@@ -57,28 +58,29 @@ export default function MetaLeadPage() {
             })
     }, [leadId])
 
-    async function setStatus(status: MetaLeadStatus) {
-        if (!user || !lead || saving) return
-        setSaving(status)
+    async function commit() {
+        if (!user || !lead || saving || !selected) return
+        setSaving(true)
         setErr(null)
         try {
             const res = await fetch('/api/meta-leads/update', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ leadId: lead.id, userId: user.id, status, note: notes.trim() || undefined }),
+                body: JSON.stringify({ leadId: lead.id, status: selected, note: notes.trim() || undefined }),
             })
             const j = await res.json()
             if (!j.ok) {
                 setErr(j.error || 'Could not save.')
-                setSaving(null)
+                setSaving(false)
                 return
             }
-            // Opens as a customer in CRM entries (as requested).
+            // Done: sheet updated, timer stopped, now opens as a CRM customer
+            // entry where she can make an order etc.
             if (j.customerId) router.push(`/dashboard/customers/${j.customerId}`)
             else router.push('/dashboard')
         } catch {
             setErr('Network error — please try again.')
-            setSaving(null)
+            setSaving(false)
         }
     }
 
@@ -163,25 +165,45 @@ export default function MetaLeadPage() {
                         className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3 text-sm font-medium outline-none focus:border-teal-300 resize-none leading-relaxed mb-4"
                     />
 
-                    {/* Status buttons — push to the sheet */}
-                    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Update status</label>
+                    {/* Step 1 — pick a status */}
+                    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">1. Pick status</label>
                     <div className="grid grid-cols-2 gap-2">
                         {META_STATUS_BUTTONS.map((s) => {
                             const meta = META_STATUS_META[s]
-                            const isSaving = saving === s
-                            const isCurrent = lead.status === s
+                            const isSelected = selected === s
                             return (
                                 <button
                                     key={s}
-                                    onClick={() => setStatus(s)}
-                                    disabled={!!saving}
-                                    className={`flex items-center justify-center gap-1.5 py-3 rounded-xl text-xs font-bold border transition-all active:scale-95 disabled:opacity-60 ${meta.btn} ${isCurrent ? 'ring-2 ring-offset-1 ring-teal-400' : ''}`}
+                                    onClick={() => setSelected(s)}
+                                    disabled={saving}
+                                    className={`flex items-center justify-center gap-1.5 py-3 rounded-xl text-xs font-bold border transition-all active:scale-95 disabled:opacity-60 ${meta.btn} ${isSelected ? 'ring-2 ring-offset-1 ring-teal-500 scale-[1.02]' : 'opacity-80'}`}
                                 >
-                                    {isSaving ? <Loader2 size={13} className="animate-spin" /> : meta.label}
+                                    {meta.label}
                                 </button>
                             )
                         })}
                     </div>
+
+                    {/* Step 2 — one button: update the sheet + open as CRM entry */}
+                    <button
+                        onClick={commit}
+                        disabled={saving || !selected}
+                        className={`w-full mt-4 py-4 rounded-full font-bold text-sm flex items-center justify-center gap-2 transition-all ${selected && !saving
+                            ? 'bg-teal-600 text-white shadow-lg shadow-teal-200 active:scale-95'
+                            : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                            }`}
+                    >
+                        {saving ? (
+                            <Loader2 size={16} className="animate-spin" />
+                        ) : selected ? (
+                            <>Update → {META_STATUS_META[selected].label}</>
+                        ) : (
+                            'Pick a status first'
+                        )}
+                    </button>
+                    <p className="text-[10px] text-gray-400 text-center mt-2">
+                        Updates the sheet, stops the timer, and opens this as a customer you can add an order to.
+                    </p>
 
                     {err && (
                         <div className="mt-3 bg-red-50 border border-red-100 rounded-xl px-3 py-2.5 text-xs font-bold text-red-600 flex items-center gap-2">

@@ -84,6 +84,17 @@ export default function MetaAdsPage() {
 
     useEffect(() => {
         load()
+        // Auto-sync + refresh every 60s while this page is open, so new leads
+        // flow in on their own (no need to click "Sync now").
+        const id = setInterval(async () => {
+            try {
+                await fetch('/api/meta-leads/auto-sync', { method: 'POST' })
+            } catch {
+                // non-fatal
+            }
+            load()
+        }, 60_000)
+        return () => clearInterval(id)
     }, [load])
 
     function resetForm() {

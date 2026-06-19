@@ -83,14 +83,16 @@ export default function DashboardPage() {
       .order('due_at', { ascending: true })
     setLeads((data as Lead[]) || [])
 
-    // Same idea for Meta-Ads leads: ask the server to start any 1h timers
-    // (punch-gated), then read what's still open for this agent.
+    // Pull any brand-new Facebook leads from the sheet (throttled server-side so
+    // many agents polling = one cheap import), then start this agent's 1h timers
+    // (punch-gated), then read what's still open for them.
     try {
-      await fetch('/api/meta-leads/release', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id }),
-      })
+      await fetch('/api/meta-leads/auto-sync', { method: 'POST' })
+    } catch {
+      // non-fatal
+    }
+    try {
+      await fetch('/api/meta-leads/release', { method: 'POST' })
     } catch {
       // non-fatal
     }

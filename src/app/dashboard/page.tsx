@@ -7,7 +7,7 @@ import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import { Order, OrderStep } from '@/types'
-import { Bell, ChevronRight, CheckCircle2, Sparkles, Clock, Phone, TrendingUp, Users, UserPlus, Briefcase } from 'lucide-react'
+import { Bell, ChevronRight, ChevronLeft, CheckCircle2, Sparkles, Clock, Phone, TrendingUp, Users, UserPlus, Briefcase } from 'lucide-react'
 import CrmLeaderboard from '@/components/shared/CrmLeaderboard'
 import Link from 'next/link'
 import { type Lead, leadCountdown, leadPenaltySoFar } from '@/lib/leads'
@@ -23,6 +23,12 @@ type StepWithOrder = OrderStep & {
 
 type WorkTab = 'new' | 'in_progress' | 'completed'
 
+// True when the given month (1st-of-month date) is the running calendar month.
+function isCurrentMonth(d: Date) {
+  const now = new Date()
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
+}
+
 export default function DashboardPage() {
   const router = useRouter()
   const { user, role } = useAuthStore()
@@ -30,7 +36,14 @@ export default function DashboardPage() {
   const [newWorks, setNewWorks] = useState<StepWithOrder[]>([])
   const [inProgress, setInProgress] = useState<StepWithOrder[]>([])
   const [completed, setCompleted] = useState<StepWithOrder[]>([])
-  const [completedCount, setCompletedCount] = useState(0)
+  // Tab number = THIS month's completed count. The inner Completed view lets you
+  // step back through previous months and see each month's total separately.
+  const [thisMonthCount, setThisMonthCount] = useState(0)
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const d = new Date()
+    return new Date(d.getFullYear(), d.getMonth(), 1)
+  })
+  const [selectedMonthCount, setSelectedMonthCount] = useState(0)
   const [activeTab, setActiveTab] = useState<WorkTab>('new')
   const [secondPosts, setSecondPosts] = useState<any[]>([])
   const [leads, setLeads] = useState<Lead[]>([])
@@ -62,6 +75,11 @@ export default function DashboardPage() {
     const id = setInterval(refreshLeads, 60_000)
     return () => clearInterval(id)
   }, [user])
+
+  // Re-read the Completed list whenever the chosen month changes.
+  useEffect(() => {
+    if (user) fetchCompleted(selectedMonth)
+  }, [user, selectedMonth])
 
   // Trigger a server-side release tick for this worker, then load active leads.
   const refreshLeads = async () => {
@@ -129,15 +147,6 @@ export default function DashboardPage() {
       .in('status', ['pending', 'in_progress', 'overdue'])
       .order('deadline', { ascending: true })
 
-    // ── Completed steps: list shows the latest 50, but count is exact ──
-    const { data: doneSteps, count: doneCount } = await supabase
-      .from('order_steps')
-      .select(`*, order:orders(*, customer:customers(*), package:packages(*))`, { count: 'exact' })
-      .eq('assigned_to', user.id)
-      .eq('status', 'done')
-      .order('completed_at', { ascending: false })
-      .limit(50)
-
     const news: StepWithOrder[] = []
     const inProg: StepWithOrder[] = []
 
@@ -149,13 +158,34 @@ export default function DashboardPage() {
       })
     }
 
-    const dones: StepWithOrder[] = (doneSteps as any[] || []).filter(s => !!s.order)
-
     setNewWorks(news)
     setInProgress(inProg)
-    setCompleted(dones)
-    setCompletedCount(doneCount ?? dones.length)
     setLoading(false)
+  }
+
+  // ── Completed steps for a single calendar month ──────────────────────
+  // List shows up to 100 for the month; the count is exact. When the month
+  // being read is the current month, also refresh the tab number.
+  const fetchCompleted = async (month: Date) => {
+    if (!user) return
+    const start = new Date(month.getFullYear(), month.getMonth(), 1)
+    const end = new Date(month.getFullYear(), month.getMonth() + 1, 1)
+
+    const { data: doneSteps, count: doneCount } = await supabase
+      .from('order_steps')
+      .select(`*, order:orders(*, customer:customers(*), package:packages(*))`, { count: 'exact' })
+      .eq('assigned_to', user.id)
+      .eq('status', 'done')
+      .gte('completed_at', start.toISOString())
+      .lt('completed_at', end.toISOString())
+      .order('completed_at', { ascending: false })
+      .limit(100)
+
+    const dones: StepWithOrder[] = (doneSteps as any[] || []).filter(s => !!s.order)
+    const n = doneCount ?? dones.length
+    setCompleted(dones)
+    setSelectedMonthCount(n)
+    if (isCurrentMonth(month)) setThisMonthCount(n)
   }
 
   const stepColor: Record<number, string> = {
@@ -171,10 +201,16 @@ export default function DashboardPage() {
     [inProgress]
   )
 
+  const changeMonth = (delta: number) =>
+    setSelectedMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + delta, 1))
+
+  const monthLabel = selectedMonth.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+  const atCurrentMonth = isCurrentMonth(selectedMonth)
+
   const tabList: { key: WorkTab; label: string; count: number }[] = [
     { key: 'new', label: 'New', count: newWorks.length },
     { key: 'in_progress', label: 'In Progress', count: inProgress.length },
-    { key: 'completed', label: 'Completed', count: completedCount },
+    { key: 'completed', label: 'Completed', count: thisMonthCount },
   ]
 
   const visible: StepWithOrder[] =
@@ -423,6 +459,34 @@ export default function DashboardPage() {
             {activeTab === 'completed' && 'Completed works — read only'}
           </p>
 
+          {/* Month picker — only on the Completed tab. Defaults to this month;
+              step back to see how many were completed in earlier months. */}
+          {activeTab === 'completed' && (
+            <div className="flex items-center justify-between bg-pink-50 border border-pink-100 rounded-2xl p-2.5 mb-3">
+              <button
+                onClick={() => changeMonth(-1)}
+                className="p-1.5 rounded-xl text-pink-600 active:scale-90 transition-transform"
+                aria-label="Previous month"
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <div className="text-center">
+                <p className="text-sm font-bold text-gray-800">{monthLabel}</p>
+                <p className="text-[10px] font-bold text-pink-600 uppercase tracking-wide">
+                  {selectedMonthCount} completed
+                </p>
+              </div>
+              <button
+                onClick={() => changeMonth(1)}
+                disabled={atCurrentMonth}
+                className="p-1.5 rounded-xl text-pink-600 active:scale-90 transition-transform disabled:opacity-25 disabled:active:scale-100"
+                aria-label="Next month"
+              >
+                <ChevronRight size={18} />
+              </button>
+            </div>
+          )}
+
           {visible.length === 0 ? (
             <div className="bg-gray-50 rounded-2xl p-10 text-center">
               {activeTab === 'completed'
@@ -431,12 +495,12 @@ export default function DashboardPage() {
               <p className="text-xs font-bold text-gray-400">
                 {activeTab === 'new' && 'No new assignments'}
                 {activeTab === 'in_progress' && 'Nothing in progress'}
-                {activeTab === 'completed' && 'No completed work yet'}
+                {activeTab === 'completed' && `Nothing completed in ${monthLabel}`}
               </p>
               <p className="text-[9px] text-gray-300 font-medium mt-1 uppercase tracking-wide">
                 {activeTab === 'new' && 'New customers will appear here when assigned to you'}
                 {activeTab === 'in_progress' && 'Accept a new work to start'}
-                {activeTab === 'completed' && 'Steps you finish will be archived here'}
+                {activeTab === 'completed' && 'Use the arrows to check other months'}
               </p>
             </div>
           ) : (

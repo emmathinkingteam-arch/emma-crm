@@ -16,12 +16,14 @@
     "googleapis": "^173.0.0",
     "lucide-react": "^0.383.0",
     "next": "14.2.5",
+    "pg": "^8.22.0",
     "react": "^18",
     "react-dom": "^18",
     "zustand": "^4.5.0"
   },
   "devDependencies": {
     "@types/node": "^20",
+    "@types/pg": "^8.20.0",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "autoprefixer": "^10.0.1",

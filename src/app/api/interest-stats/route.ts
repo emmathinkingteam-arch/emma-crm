@@ -1,53 +1,61 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { websitePool } from '@/lib/website-db'
+import { websiteSupabase } from '@/lib/website-supabase'
 
-export const runtime = 'nodejs'
-export const dynamic = 'force-dynamic'
-
-// Interest stats for a customer, read STRAIGHT from the website's Postgres
-// (no Supabase Data API / PostgREST → no schema-cache step → fast + reliable).
 export async function GET(req: NextRequest) {
-  if (!websitePool) return NextResponse.json({ found: false, reason: 'not configured' })
+  if (!websiteSupabase) return NextResponse.json({ found: false, reason: 'not configured' })
 
   const phone = req.nextUrl.searchParams.get('phone')
   if (!phone) return NextResponse.json({ error: 'phone required' }, { status: 400 })
 
-  // Normalise: strip non-digits, keep last 9 digits for loose matching.
-  const suffix = phone.replace(/\D/g, '').slice(-9)
+  // Normalise: strip non-digits, keep last 9 digits for loose matching
+  const digits = phone.replace(/\D/g, '')
+  const suffix = digits.slice(-9)
 
-  try {
-    // Find the website user by phone number (suffix match).
-    const userRes = await websitePool.query<{ id: string }>(
-      `SELECT id FROM "user" WHERE phone_number LIKE '%' || $1 LIMIT 1`,
-      [suffix]
-    )
-    if (userRes.rowCount === 0) return NextResponse.json({ found: false })
-    const userId = userRes.rows[0].id
+  // Find the website user by phone number
+  const { data: users, error: userErr } = await websiteSupabase
+    .from('user')
+    .select('id')
+    .ilike('phone_number', `%${suffix}`)
+    .limit(1)
 
-    // One pass over this user's interests, grouped by direction + status.
-    const rows = await websitePool.query<{ direction: 'sent' | 'received'; status: string; n: number }>(
-      `SELECT
-         CASE WHEN from_user_id = $1 THEN 'sent' ELSE 'received' END AS direction,
-         status,
-         COUNT(*)::int AS n
-       FROM "interest"
-       WHERE from_user_id = $1 OR to_user_id = $1
-       GROUP BY 1, 2`,
-      [userId]
-    )
+  if (userErr) return NextResponse.json({ error: userErr.message }, { status: 500 })
+  if (!users || users.length === 0) return NextResponse.json({ found: false })
 
-    const blank = () => ({ total: 0, pending: 0, accepted: 0, connected: 0, declined: 0, withdrawn: 0 })
-    const sent = blank()
-    const received = blank()
+  const userId = users[0].id
 
-    for (const r of rows.rows) {
-      const bucket = r.direction === 'sent' ? sent : received
-      bucket.total += r.n
-      if (r.status in bucket) (bucket as any)[r.status] += r.n
-    }
+  // Fetch all interests where user is sender or receiver
+  const [sentRes, receivedRes] = await Promise.all([
+    websiteSupabase.from('interest').select('id, status').eq('from_user_id', userId),
+    websiteSupabase.from('interest').select('id, status').eq('to_user_id', userId),
+  ])
 
-    return NextResponse.json({ found: true, userId, sent, received })
-  } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'query failed' }, { status: 500 })
-  }
+  if (sentRes.error) return NextResponse.json({ error: sentRes.error.message }, { status: 500 })
+  if (receivedRes.error) return NextResponse.json({ error: receivedRes.error.message }, { status: 500 })
+
+  const sent = sentRes.data ?? []
+  const received = receivedRes.data ?? []
+
+  const countByStatus = (rows: { status: string }[], status: string) =>
+    rows.filter(r => r.status === status).length
+
+  return NextResponse.json({
+    found: true,
+    userId,
+    sent: {
+      total: sent.length,
+      pending: countByStatus(sent, 'pending'),
+      accepted: countByStatus(sent, 'accepted'),
+      connected: countByStatus(sent, 'connected'),
+      declined: countByStatus(sent, 'declined'),
+      withdrawn: countByStatus(sent, 'withdrawn'),
+    },
+    received: {
+      total: received.length,
+      pending: countByStatus(received, 'pending'),
+      accepted: countByStatus(received, 'accepted'),
+      connected: countByStatus(received, 'connected'),
+      declined: countByStatus(received, 'declined'),
+      withdrawn: countByStatus(received, 'withdrawn'),
+    },
+  })
 }

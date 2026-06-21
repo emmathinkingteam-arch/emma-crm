@@ -9,6 +9,7 @@ import BottomNav from '@/components/shared/BottomNav'
 import { Order, OrderStep } from '@/types'
 import { Bell, ChevronRight, ChevronLeft, CheckCircle2, Sparkles, Clock, Phone, TrendingUp, Users, UserPlus, Briefcase } from 'lucide-react'
 import CrmLeaderboard from '@/components/shared/CrmLeaderboard'
+import CountUp from '@/components/shared/CountUp'
 import Link from 'next/link'
 import { type Lead, leadCountdown, leadPenaltySoFar } from '@/lib/leads'
 import { type MetaLead, metaCountdown } from '@/lib/meta-leads'
@@ -443,9 +444,10 @@ export default function DashboardPage() {
                   : 'bg-gray-50 border border-gray-100 text-gray-400'
               }`}
             >
-              <span className={`text-lg font-extrabold mb-0.5 ${activeTab === t.key ? 'text-white' : t.key === 'in_progress' && overdueCount > 0 ? 'text-red-500' : 'text-gray-700'}`}>
-                {t.count}
-              </span>
+              <CountUp
+                value={t.count}
+                className={`text-lg font-extrabold mb-0.5 ${activeTab === t.key ? 'text-white' : t.key === 'in_progress' && overdueCount > 0 ? 'text-red-500' : 'text-gray-700'}`}
+              />
               {t.label}
             </button>
           ))}

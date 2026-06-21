@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Trophy } from 'lucide-react'
+import CountUp from '@/components/shared/CountUp'
 
 interface Row {
   user_id: string
@@ -29,6 +30,9 @@ function rankColor(rank: number) {
 export default function CrmLeaderboard({ meId }: { meId?: string }) {
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
+  // Drives the bar fill: starts at 0 width, flips on after first paint so the
+  // CSS width transition runs and every bar "loads" up to its level.
+  const [filled, setFilled] = useState(false)
 
   const month = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`
 
@@ -43,6 +47,14 @@ export default function CrmLeaderboard({ meId }: { meId?: string }) {
       setLoading(false)
     })
   }, [month])
+
+  // Once rows are in, wait one frame then let the bars grow from zero.
+  useEffect(() => {
+    if (loading || rows.length === 0) return
+    setFilled(false)
+    const id = requestAnimationFrame(() => setFilled(true))
+    return () => cancelAnimationFrame(id)
+  }, [loading, rows])
 
   if (loading || rows.length === 0) return null
 
@@ -74,12 +86,15 @@ export default function CrmLeaderboard({ meId }: { meId?: string }) {
                   </span>
                 </div>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${c.chip}`}>
-                  LKR {r.order_amount.toLocaleString()}
+                  LKR <CountUp value={r.order_amount} duration={1000} />
                   {r.target > 0 && <span className="opacity-70"> / {r.target.toLocaleString()}</span>}
                 </span>
               </div>
               <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
-                <div className={`h-full rounded-full transition-all ${c.bar}`} style={{ width: `${Math.max(3, pct)}%` }} />
+                <div
+                  className={`h-full rounded-full transition-[width] duration-1000 ease-out ${c.bar}`}
+                  style={{ width: filled ? `${Math.max(3, pct)}%` : '0%' }}
+                />
               </div>
               <p className="text-[8px] text-gray-400 font-semibold mt-0.5 text-right">
                 {r.order_count} order{r.order_count === 1 ? '' : 's'}

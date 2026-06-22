@@ -31,6 +31,8 @@ import {
     Play,
     Pause,
     Table2,
+    ArrowLeftRight,
+    X,
 } from 'lucide-react'
 
 interface Agent {
@@ -64,6 +66,11 @@ export default function MetaAdsPage() {
     const [saving, setSaving] = useState(false)
     const [syncing, setSyncing] = useState<string | null>(null)
     const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+
+    // Recent-leads tabs + per-lead reassignment
+    const [leadTab, setLeadTab] = useState<'created' | 'completed'>('created')
+    const [reassigningId, setReassigningId] = useState<string | null>(null)
+    const [reassignBusy, setReassignBusy] = useState<string | null>(null)
 
     const load = useCallback(async () => {
         const [aRes, sRes, lRes] = await Promise.all([
@@ -253,7 +260,42 @@ export default function MetaAdsPage() {
         load()
     }
 
+    async function reassign(leadId: string, toUserId: string) {
+        setReassignBusy(leadId)
+        setMsg(null)
+        try {
+            const res = await fetch('/api/meta-leads/reassign', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ leadId, toUserId }),
+            })
+            const j = await res.json()
+            if (j.ok) {
+                setMsg({
+                    kind: 'ok',
+                    text: `Moved to ${j.agentName} — fresh lead, timer reset.${j.smsSent ? ' SMS sent.' : ''}`,
+                })
+            } else {
+                const reasons: Record<string, string> = {
+                    already_reviewed: 'That lead was just actioned by the agent — it can no longer be moved.',
+                    same_agent: 'It is already with that agent.',
+                    invalid_agent: 'Pick an active CRM agent.',
+                    forbidden: 'Only admins can reassign leads.',
+                }
+                setMsg({ kind: 'err', text: reasons[j.error] || j.error || 'Reassign failed.' })
+            }
+            setReassigningId(null)
+            load()
+        } catch {
+            setMsg({ kind: 'err', text: 'Network error reassigning.' })
+        }
+        setReassignBusy(null)
+    }
+
     const agentName = (id: string | null) => agents.find((a) => a.id === id)?.full_name || '—'
+
+    const createdLeads = useMemo(() => leads.filter((l) => l.status === 'created'), [leads])
+    const completedLeads = useMemo(() => leads.filter((l) => l.status !== 'created'), [leads])
 
     return (
         <div className="space-y-6">
@@ -432,22 +474,89 @@ export default function MetaAdsPage() {
             {/* ── Recent leads ───────────────────────────────────────────── */}
             {leads.length > 0 && (
                 <div>
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">Recent leads</p>
+                    <div className="flex items-center gap-2 mb-3">
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Recent leads</p>
+                        <div className="ml-auto flex items-center gap-1 bg-gray-100 rounded-full p-0.5">
+                            <button
+                                onClick={() => { setLeadTab('created'); setReassigningId(null) }}
+                                className={`px-3 py-1 rounded-full text-[10px] font-bold transition-colors ${leadTab === 'created' ? 'bg-white text-pink-600 shadow-sm' : 'text-gray-400'}`}
+                            >
+                                Created {createdLeads.length}
+                            </button>
+                            <button
+                                onClick={() => { setLeadTab('completed'); setReassigningId(null) }}
+                                className={`px-3 py-1 rounded-full text-[10px] font-bold transition-colors ${leadTab === 'completed' ? 'bg-white text-green-600 shadow-sm' : 'text-gray-400'}`}
+                            >
+                                Completed {completedLeads.length}
+                            </button>
+                        </div>
+                    </div>
+
+                    {leadTab === 'created' && (
+                        <p className="text-[10px] text-gray-400 font-medium mb-2">
+                            These haven&apos;t been actioned yet — move any to another agent&apos;s dashboard. It restarts as a fresh lead (timer resets).
+                        </p>
+                    )}
+
                     <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden divide-y divide-gray-50">
-                        {leads.slice(0, 40).map((l) => {
-                            const st = META_STATUS_META[(l.status as MetaLeadStatus) || 'created']
-                            return (
-                                <div key={l.id} className="flex items-center gap-3 px-4 py-2.5">
-                                    <div className="min-w-0 flex-1">
-                                        <p className="text-xs font-bold text-gray-800 truncate">{l.full_name || l.phone_display || l.phone}</p>
-                                        <p className="text-[10px] text-gray-400 font-medium truncate">
-                                            {l.job_title || '—'}{l.age != null ? ` · ${l.age}` : ''} · {agentName(l.assigned_to)}
-                                        </p>
+                        {(leadTab === 'created' ? createdLeads : completedLeads).length === 0 ? (
+                            <div className="px-4 py-8 text-center text-xs font-semibold text-gray-400">
+                                {leadTab === 'created' ? 'No leads waiting to be actioned.' : 'No completed leads yet.'}
+                            </div>
+                        ) : (
+                            (leadTab === 'created' ? createdLeads : completedLeads).slice(0, 60).map((l) => {
+                                const st = META_STATUS_META[(l.status as MetaLeadStatus) || 'created']
+                                const isCreated = l.status === 'created'
+                                const picking = reassigningId === l.id
+                                const others = agents.filter((a) => a.id !== l.assigned_to)
+                                return (
+                                    <div key={l.id} className="px-4 py-2.5">
+                                        <div className="flex items-center gap-3">
+                                            <div className="min-w-0 flex-1">
+                                                <p className="text-xs font-bold text-gray-800 truncate">{l.full_name || l.phone_display || l.phone}</p>
+                                                <p className="text-[10px] text-gray-400 font-medium truncate">
+                                                    {l.job_title || '—'}{l.age != null ? ` · ${l.age}` : ''} · {agentName(l.assigned_to)}
+                                                </p>
+                                            </div>
+                                            {isCreated && !picking && (
+                                                <button
+                                                    onClick={() => { setReassigningId(l.id); setMsg(null) }}
+                                                    disabled={others.length === 0}
+                                                    className="flex items-center gap-1 text-[10px] font-bold text-pink-600 bg-pink-50 border border-pink-100 px-2 py-1 rounded-full active:scale-95 disabled:opacity-40 flex-shrink-0"
+                                                >
+                                                    <ArrowLeftRight size={11} /> Change
+                                                </button>
+                                            )}
+                                            <span className={`text-[8px] font-bold px-2 py-1 rounded-full flex-shrink-0 ${st.cls}`}>{st.label}</span>
+                                        </div>
+
+                                        {picking && (
+                                            <div className="mt-2 flex items-center gap-2">
+                                                <span className="text-[10px] font-bold text-gray-400">Move to</span>
+                                                <select
+                                                    defaultValue=""
+                                                    disabled={reassignBusy === l.id}
+                                                    onChange={(e) => { if (e.target.value) reassign(l.id, e.target.value) }}
+                                                    className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1.5 text-xs font-semibold outline-none focus:border-pink-300 disabled:opacity-50"
+                                                >
+                                                    <option value="" disabled>Pick an agent…</option>
+                                                    {others.map((a) => (
+                                                        <option key={a.id} value={a.id}>{a.full_name}</option>
+                                                    ))}
+                                                </select>
+                                                {reassignBusy === l.id ? (
+                                                    <Loader2 size={14} className="animate-spin text-pink-600" />
+                                                ) : (
+                                                    <button onClick={() => setReassigningId(null)} className="text-gray-300 hover:text-gray-500 p-1">
+                                                        <X size={14} />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
-                                    <span className={`text-[8px] font-bold px-2 py-1 rounded-full flex-shrink-0 ${st.cls}`}>{st.label}</span>
-                                </div>
-                            )
-                        })}
+                                )
+                            })
+                        )}
                     </div>
                 </div>
             )}

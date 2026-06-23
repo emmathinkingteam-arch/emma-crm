@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabase'
 import { fmtDate } from '@/lib/utils'
 import Link from 'next/link'
 import { Search, X, Upload, Loader2, CheckCircle2, AlertTriangle, ExternalLink, ReceiptText } from 'lucide-react'
+import { slipExempt, hasValidSlip, needsSecondSlip, slipComplete } from '@/lib/slips'
 
 type Row = {
   id: string
@@ -28,10 +29,11 @@ type Row = {
   created_by_user?: { full_name: string | null }
 }
 
-const isKoko = (r: Row) => (r.payment_type || '').toLowerCase() === 'koko'
-const hasSlip = (url: string | null | undefined) => !!(url && url.trim())
+const isKoko = (r: Row) => slipExempt(r.payment_type)
+// A slip counts as on-file only when present AND not a dead old-Supabase link.
+const hasSlip = (url: string | null | undefined) => hasValidSlip(url)
 // A "partial" installment order still owes a 2nd slip.
-const needsInst2 = (r: Row) => r.installment_status === 'partial'
+const needsInst2 = (r: Row) => needsSecondSlip(r.installment_status)
 
 export default function SlipAuditPage() {
   const [orders, setOrders] = useState<Row[]>([])
@@ -58,12 +60,7 @@ export default function SlipAuditPage() {
   useEffect(load, [])
 
   // ── Is this order fully covered (all required slips present)? ──────────────
-  const isComplete = (r: Row) => {
-    if (isKoko(r)) return true
-    if (!hasSlip(r.payment_slip_url)) return false
-    if (needsInst2(r) && !hasSlip(r.installment_2_slip_url)) return false
-    return true
-  }
+  const isComplete = (r: Row) => slipComplete(r)
 
   // ── Summary (koko excluded from the "needs slip" universe) ─────────────────
   const stats = useMemo(() => {

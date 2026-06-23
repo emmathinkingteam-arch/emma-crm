@@ -60,43 +60,57 @@ function ProcessContent() {
   }
 
   const handleSave = async () => {
-    if (!user) return
+    if (!user) { alert('Your session expired. Please log in again.'); return }
+    if (loading) return
     setLoading(true)
-    let customerId = existingId
 
-    const willingDate = willingToday ? todayStr : null
+    try {
+      let customerId = existingId
+      const willingDate = willingToday ? todayStr : null
 
-    if (!customerId) {
-      const { data } = await supabase
-        .from('customers')
-        .insert({ phone, name: customerName || null, title: title || null, created_by: user.id, is_priority: isPriority, willing_to_buy_date: willingDate })
-        .select('id').single()
-      customerId = data?.id
-    } else {
-      const updates: any = {}
-      if (customerName) updates.name = customerName
-      updates.title = title || null
-      updates.is_priority = isPriority
-      updates.willing_to_buy_date = willingDate
-      await supabase.from('customers').update(updates).eq('id', customerId)
+      // ── Critical step: save the customer. If this fails, tell the agent
+      //    exactly why instead of silently doing nothing. ──────────────────
+      if (!customerId) {
+        const { data, error } = await supabase
+          .from('customers')
+          .insert({ phone, name: customerName || null, title: title || null, created_by: user.id, is_priority: isPriority, willing_to_buy_date: willingDate })
+          .select('id').single()
+        if (error) throw error
+        customerId = data?.id
+      } else {
+        const updates: any = {}
+        if (customerName) updates.name = customerName
+        updates.title = title || null
+        updates.is_priority = isPriority
+        updates.willing_to_buy_date = willingDate
+        const { error } = await supabase.from('customers').update(updates).eq('id', customerId)
+        if (error) throw error
+      }
+
+      if (!customerId) throw new Error('Could not save the customer. Please try again.')
+
+      // ── Non-critical steps: never let these block opening the customer. ──
+      // GPS ping for entry history (already swallows its own errors).
+      await recordPing(user.id, 'new_entry', customerId).catch(() => {})
+
+      // Log the note as an interaction. If this hiccups, we still navigate —
+      // the customer is saved, which is what matters.
+      if (notes) {
+        const { error: noteError } = await supabase.from('interactions').insert({
+          customer_id: customerId,
+          type: interactionType,
+          description: notes,
+          created_by: user.id,
+        })
+        if (noteError) console.error('Failed to log interaction note:', noteError)
+      }
+
+      router.push(`/dashboard/customers/${customerId}`)
+    } catch (err: any) {
+      console.error('Save & Open Customer failed:', err)
+      alert(`Could not save: ${err?.message || 'Something went wrong. Please try again.'}`)
+      setLoading(false)
     }
-
-    if (!customerId) { setLoading(false); return }
-
-    // Capture where this CRM entry was made (fresh GPS).
-    await recordPing(user.id, 'new_entry', customerId)
-
-    if (notes) {
-      await supabase.from('interactions').insert({
-        customer_id: customerId,
-        type: interactionType,
-        description: notes,
-        created_by: user.id,
-      })
-    }
-
-    router.push(`/dashboard/customers/${customerId}`)
-    setLoading(false)
   }
 
   return (

@@ -7,7 +7,7 @@ import {
   MapPin, Briefcase, UserPlus, BarChart2,
   CalendarRange, ShieldCheck, Settings, LogOut,
   Bell, DollarSign, Target, Archive, MessageSquare, MessageCircle, AlertOctagon,
-  Wallet, Megaphone, Eye, Headphones, FileSignature, Facebook,
+  Wallet, Megaphone, Eye, Headphones, FileSignature, Facebook, ReceiptText,
 } from 'lucide-react'
 
 import { supabase } from '@/lib/supabase'
@@ -32,6 +32,7 @@ const SECTIONS: Section[] = [
       { href: '/admin/crm-entries', icon: History, label: 'CRM Entries' },
       { href: '/admin/leads', icon: Megaphone, label: 'Lead Distribution' },
       { href: '/admin/orders', icon: ClipboardList, label: 'Orders' },
+      { href: '/admin/orders/slips', icon: ReceiptText, label: 'Slip Audit' },
       { href: '/dashboard/legacy-history', icon: Archive, label: 'Legacy History' },
       { href: '/admin/approvals', icon: ShieldCheck, label: 'Approvals', badge: true },
       { href: '/admin/complaints', icon: AlertOctagon, label: 'Complaints', badge: true },

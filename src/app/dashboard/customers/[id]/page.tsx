@@ -2856,6 +2856,42 @@ function pbParse(raw: string) {
 
 function pbEsc(s: string) { return (s || '').replace(/[&<>]/g, (c: string) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] || c)) }
 
+// Illustrator post exports are 2048px PNGs that can run 5–25 MB. Vercel
+// serverless functions reject request bodies over ~4.5 MB (413), so we resize
+// + re-encode the image in the browser before upload. Posts are square social
+// images — 1600px JPEG keeps them crisp while landing well under the limit.
+// If anything can't be decoded, the original file is returned unchanged.
+async function compressForUpload(file: File): Promise<File> {
+  const attempts: { maxDim: number; quality: number }[] = [
+    { maxDim: 1600, quality: 0.9 },
+    { maxDim: 1280, quality: 0.82 },
+    { maxDim: 1080, quality: 0.72 },
+  ]
+  let best: File | null = null
+  for (const { maxDim, quality } of attempts) {
+    try {
+      const bitmap = await createImageBitmap(file)
+      const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height))
+      const w = Math.max(1, Math.round(bitmap.width * scale))
+      const h = Math.max(1, Math.round(bitmap.height * scale))
+      const canvas = document.createElement('canvas')
+      canvas.width = w; canvas.height = h
+      const ctx = canvas.getContext('2d')
+      if (!ctx) break
+      ctx.drawImage(bitmap, 0, 0, w, h)
+      bitmap.close?.()
+      const blob: Blob | null = await new Promise(r => canvas.toBlob(r, 'image/jpeg', quality))
+      if (!blob) break
+      const out = new File([blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' })
+      best = out
+      if (out.size <= 4 * 1024 * 1024) return out   // under the Vercel limit
+    } catch {
+      break   // can't decode (e.g. HEIC) — fall back to the original
+    }
+  }
+  return best || file
+}
+
 interface PostBuilderModalProps {
   postCode: string
   onClose: () => void
@@ -2889,13 +2925,23 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
     if (!orderId) { setImgMsg('Open this from an active order first.'); return }
     setImgBusy(true); setImgMsg(null)
     try {
+      // Shrink large exports so we never trip Vercel's request size limit.
+      const ready = await compressForUpload(file)
       const fd = new FormData()
-      fd.append('file', file)
+      fd.append('file', ready)
       fd.append('orderId', orderId)
       fd.append('code', saveAsName)
       const res = await fetch('/api/post-image/upload', { method: 'POST', body: fd })
-      const j = await res.json()
-      if (!res.ok) throw new Error(j.error || 'Upload failed')
+
+      // The body can be JSON (our route) OR plain text (a platform-level error
+      // like 413). Read it safely so we never blow up on "not valid JSON".
+      const raw = await res.text()
+      let j: any = null
+      try { j = raw ? JSON.parse(raw) : null } catch { /* non-JSON error body */ }
+      if (!res.ok) {
+        if (res.status === 413) throw new Error('Image is too large even after resizing — please export a smaller file.')
+        throw new Error(j?.error || raw || `Upload failed (${res.status})`)
+      }
       setImageUrl(j.url)
       setImgMsg('✓ Uploaded — review the preview below.')
     } catch (e: any) {

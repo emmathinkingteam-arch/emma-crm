@@ -86,10 +86,12 @@ export default function AdminSidebar() {
   const { clear, role } = useAuthStore()
 
   // accountant/ceo are restricted to Accounts. The CEO additionally gets the
-  // one-time "Connect Facebook" setup screen.
-  const restricted = role === 'accountant' || role === 'ceo'
+  // one-time "Connect Facebook" setup screen. Back office only sees Orders.
+  const restricted = role === 'accountant' || role === 'ceo' || role === 'back_office'
   const restrictedAllows = (href: string) =>
-    href.startsWith('/admin/accounts') || (role === 'ceo' && href === '/admin/facebook')
+    role === 'back_office'
+      ? href === '/admin/orders'
+      : href.startsWith('/admin/accounts') || (role === 'ceo' && href === '/admin/facebook')
 
   const visibleTabs = restricted ? TABS.filter((t) => restrictedAllows(t.href)) : TABS
 
@@ -108,8 +110,8 @@ export default function AdminSidebar() {
             <span className="text-white font-bold text-xs">E</span>
           </div>
           <div>
-            <p className="text-pink-600 font-bold text-sm tracking-tight italic">{role === 'accountant' ? 'Emma Accounts' : role === 'ceo' ? 'Emma CEO' : 'Emma Admin'}</p>
-            <p className="text-gray-400 text-[9px] font-medium">{role === 'accountant' ? 'Accounting panel' : role === 'ceo' ? 'CEO panel' : 'Management panel'}</p>
+            <p className="text-pink-600 font-bold text-sm tracking-tight italic">{role === 'accountant' ? 'Emma Accounts' : role === 'ceo' ? 'Emma CEO' : role === 'back_office' ? 'Emma Orders' : 'Emma Admin'}</p>
+            <p className="text-gray-400 text-[9px] font-medium">{role === 'accountant' ? 'Accounting panel' : role === 'ceo' ? 'CEO panel' : role === 'back_office' ? 'Orders panel' : 'Management panel'}</p>
           </div>
         </div>
       </div>

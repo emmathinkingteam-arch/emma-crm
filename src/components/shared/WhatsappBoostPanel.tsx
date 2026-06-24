@@ -27,6 +27,10 @@ import { parseBulkNumbers } from '@/lib/whatsapp'
 const BUCKET = 'whatsapp-broadcasts'
 const COST_PER_NUMBER = 25.28
 
+// Same closing lines the Post Builder appends to "Part 1 — Caption post".
+const WA_LINE = 'මෙම Profile Link එක හරහා අදාළ පුද්ගලයා සමඟ ඍජුව සම්බන්ධ විය හැක.'
+const TAGS = '#EmmaThinking #MatchmakingSriLanka #VerifiedMatchmaking #DateArrangement #DatingCounselling'
+
 const lkr = (n: number) =>
     'LKR ' + n.toLocaleString('en-LK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -53,25 +57,47 @@ interface Props {
     brief: string
     /** Formatted calendar plan date, appended to the bold headline. */
     planDate?: string
+    /** Post code (e.g. L/26/S/E22/Y) — appended to the bold headline if set. */
+    postCode?: string
+    /**
+     * Pre-uploaded post artwork (the designer's Backblaze upload, served from
+     * /api/media/...). When set, it is fetched in the browser — which carries
+     * the staff session — and used as the Profile Image, so back office does
+     * not have to re-upload. Falls back to manual upload if the fetch fails.
+     */
+    imageUrl?: string
     /** Pre-fill for the profile URL field (back office completes it). */
     defaultProfileUrl?: string
     /** Optional context note shown in the green confirmation banner. */
     contextLabel?: string
+    /** Collapsed-state button label. Defaults to "WhatsApp Boost". */
+    triggerLabel?: string
 }
 
 export default function WhatsappBoostPanel({
     brief,
     planDate = '',
+    postCode = '',
+    imageUrl = '',
     defaultProfileUrl = 'https://www.emmathinking.com/profile/',
     contextLabel,
+    triggerLabel = 'WhatsApp Boost',
 }: Props) {
     const [open, setOpen] = useState(false)
 
     const parsed = useMemo(() => parseBrief(brief), [brief])
+    // Bold Headline = caption + " | " + calendar slot code (or plan date).
     const autoHeadline = parsed.caption
-        ? `${parsed.caption}${planDate ? ` | ${planDate}` : ''}`
+        ? `${parsed.caption}${postCode ? ` | ${postCode}` : planDate ? ` | ${planDate}` : ''}`
+        : ''
+    // Description = "Part 1 — Caption post" WITHOUT the caption/code headline:
+    //   long description · profile URL · WhatsApp line · hashtags.
+    const seedUrl = defaultProfileUrl && !defaultProfileUrl.trim().endsWith('/profile/')
+        ? defaultProfileUrl.trim()
         : ''
     const autoDescription = parsed.longDesc
+        ? [parsed.longDesc, seedUrl, WA_LINE, TAGS].filter(Boolean).join('\n\n')
+        : ''
 
     const [image, setImage] = useState<File | null>(null)
     const [imagePreview, setImagePreview] = useState('')
@@ -108,6 +134,32 @@ export default function WhatsappBoostPanel({
         setImagePreview(url)
         return () => URL.revokeObjectURL(url)
     }, [image])
+
+    // Pull the designer's uploaded post (Backblaze, via /api/media) into the
+    // Profile Image automatically once the panel is opened. The fetch runs in
+    // the browser so it carries the staff session the media proxy requires; the
+    // bytes are then uploaded to the public broadcast bucket on send, exactly
+    // like a manual upload. If anything fails, back office can still upload.
+    useEffect(() => {
+        if (!open || !imageUrl || image) return
+        let cancelled = false
+        setProgress('Loading post image…')
+            ; (async () => {
+                try {
+                    const res = await fetch(imageUrl)
+                    if (!res.ok) throw new Error()
+                    const blob = await res.blob()
+                    if (cancelled) return
+                    const ext = (blob.type.split('/')[1] || 'jpg').replace(/[^a-z0-9]/gi, '') || 'jpg'
+                    setImage(new File([blob], `post.${ext}`, { type: blob.type || 'image/jpeg' }))
+                } catch {
+                    /* leave empty — manual upload still available */
+                } finally {
+                    if (!cancelled) setProgress('')
+                }
+            })()
+        return () => { cancelled = true }
+    }, [open, imageUrl, image])
 
     const handleSend = async () => {
         setError('')
@@ -173,7 +225,7 @@ export default function WhatsappBoostPanel({
                 onClick={() => setOpen(true)}
                 className="w-full border-2 border-green-200 text-green-700 rounded-2xl py-3 text-xs font-bold flex items-center justify-center gap-2 bg-green-50 active:scale-95 transition-all"
             >
-                <MessageCircle size={14} /> WhatsApp Boost
+                <MessageCircle size={14} /> {triggerLabel}
             </button>
         )
     }

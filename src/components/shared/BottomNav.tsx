@@ -33,6 +33,7 @@ const NAV_CONFIG = {
   back_office: [
     { href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
     { href: '/dashboard/customers', icon: Users, label: 'Clients' },
+    { href: '/admin/orders', icon: ListOrdered, label: 'Orders' },
     { href: '/dashboard/legacy-history', icon: Search, label: 'Search' },
     { href: '/dashboard/calendar', icon: CalendarRange, label: 'Plan' },
     { href: '/dashboard/profile', icon: Award, label: 'Profile' },

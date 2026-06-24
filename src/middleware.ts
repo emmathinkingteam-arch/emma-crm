@@ -54,7 +54,13 @@ export async function middleware(request: NextRequest) {
     if (pathname.startsWith('/admin') && role !== 'admin') {
       const accountantOk =
         role === 'accountant' && pathname.startsWith('/admin/accounts')
-      if (!accountantOk) {
+      // Back office may view the All Orders page (and order detail/fix), but
+      // nothing else under /admin.
+      const backOfficeOk =
+        role === 'back_office' &&
+        pathname.startsWith('/admin/orders') &&
+        !pathname.startsWith('/admin/orders/slips')
+      if (!accountantOk && !backOfficeOk) {
         return NextResponse.redirect(new URL('/dashboard', request.url))
       }
     }

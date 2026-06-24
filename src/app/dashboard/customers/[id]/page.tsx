@@ -102,6 +102,10 @@ export default function CustomerDetailPage() {
   // and plan summary in read-only mode AFTER the designer has locked the plan.
   const [completedBrief, setCompletedBrief] = useState<string | null>(null)
   const [plannedSlot, setPlannedSlot] = useState<{ slot_date: string; slot_time: string; post_id_code: string } | null>(null)
+  // Per-order post metadata (brief + planned slot) used by the in-history
+  // "Boosting" panels. Only loaded for back office / admin.
+  const [postBriefByOrder, setPostBriefByOrder] = useState<Record<string, string>>({})
+  const [postSlotByOrder, setPostSlotByOrder] = useState<Record<string, { code: string | null; date: string | null }>>({})
   const [orderCreator, setOrderCreator] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
@@ -182,7 +186,9 @@ export default function CustomerDetailPage() {
     return () => clearInterval(t)
   }, [])
 
-  useEffect(() => { fetchAll() }, [id])
+  // Re-run when role hydrates so the back-office / admin post-boosting data
+  // (per-order briefs + slots) loads even if role wasn't ready on first mount.
+  useEffect(() => { fetchAll() }, [id, role])
 
   // Safely read ?upgrade=true from URL (client only — avoids Next.js Suspense requirement)
   useEffect(() => {
@@ -955,6 +961,39 @@ export default function CustomerDetailPage() {
       // can look up payment_slip_url / installment_2_slip_url for each
       // "order" interaction (works for past orders without a migration).
       setAllOrders(ordersRes.data as any[])
+
+      // For back office / admin: load the brief + planned slot for EVERY order
+      // so each uploaded post can show an auto-filled "Boosting" panel in the
+      // history below (active + old orders alike).
+      if (role === 'back_office' || role === 'admin') {
+        const orderIds = (ordersRes.data as any[]).map((o: Order) => o.id)
+        if (orderIds.length) {
+          const [{ data: stepRows }, { data: slotRows }] = await Promise.all([
+            supabase
+              .from('order_steps')
+              .select('order_id, description, step_number')
+              .in('order_id', orderIds)
+              .not('description', 'is', null)
+              .order('step_number', { ascending: false }),
+            supabase
+              .from('calendar_slots')
+              .select('order_id, slot_date, post_id_code, planned_at')
+              .in('order_id', orderIds)
+              .order('planned_at', { ascending: false }),
+          ])
+          const briefMap: Record<string, string> = {}
+          for (const s of (stepRows as any[]) || []) {
+            if (!briefMap[s.order_id] && s.description) briefMap[s.order_id] = s.description
+          }
+          const slotMap: Record<string, { code: string | null; date: string | null }> = {}
+          for (const s of (slotRows as any[]) || []) {
+            if (!slotMap[s.order_id]) slotMap[s.order_id] = { code: s.post_id_code ?? null, date: s.slot_date ?? null }
+          }
+          setPostBriefByOrder(briefMap)
+          setPostSlotByOrder(slotMap)
+        }
+      }
+
       const active = (ordersRes.data as any[]).find((o: Order) => o.status === 'active')
       if (active) {
         setActiveOrder(active)
@@ -1039,6 +1078,11 @@ export default function CustomerDetailPage() {
     }
     return ''
   })()
+
+  // Uploaded posts (designer artwork on Backblaze) shown in history with an
+  // auto-filled "Boosting" panel. Back office / admin only.
+  const isBoss = role === 'back_office' || role === 'admin'
+  const orderPosts = isBoss ? allOrders.filter(o => (o as any).post_image_url) : []
 
   if (loading) return <div className="h-screen flex items-center justify-center bg-white"><Loader2 className="animate-spin text-pink-600" size={28} /></div>
   if (!customer) return <div className="h-screen flex items-center justify-center bg-white"><p className="text-gray-400 text-sm">Customer not found</p></div>
@@ -1981,18 +2025,8 @@ export default function CustomerDetailPage() {
             </div>
           )}
 
-          {/* ── WHATSAPP BOOST ───────────────────────────── */}
-          {/* Back office / admin: blast this profile to numbers via the same  */}
-          {/* Meta Cloud template as /admin/whatsapp. Auto-fills the bold       */}
-          {/* headline (caption | plan date) and description from the brief.    */}
-          {/* Works on both active and completed (old) orders.                  */}
-          {(role === 'back_office' || role === 'admin') && activeOrder && (
-            <WhatsappBoostPanel
-              brief={completedBrief || brief || ''}
-              planDate={fmtPlanDate(plannedSlot?.slot_date || activeOrder.planned_post_date)}
-              contextLabel={(completedBrief || brief) ? "Auto-filled from this profile's brief" : undefined}
-            />
-          )}
+          {/* WhatsApp Boost now lives inside the History section below, as a   */}
+          {/* per-post "Boosting" panel (back office / admin only).             */}
 
           {/* PARTNER LINK */}
           {(role === 'back_office' || role === 'admin') && activeOrder && (
@@ -2384,6 +2418,46 @@ export default function CustomerDetailPage() {
 
             {role === 'crm_agent' && (
               <LogInteractionForm customerId={id} userId={user!.id} onSaved={fetchAll} />
+            )}
+
+            {/* ── POSTS · WHATSAPP BOOSTING ─────────────────── */}
+            {/* Back office / admin only. Each uploaded post shows its artwork  */}
+            {/* and a "Boosting" button that opens the WhatsApp panel with the  */}
+            {/* photo, headline, description and profile URL already filled —   */}
+            {/* they just add the numbers and send.                            */}
+            {isBoss && orderPosts.length > 0 && (
+              <div className="mb-4 space-y-3">
+                <p className="text-[10px] font-bold text-green-500 uppercase tracking-wider">Posts · Boosting</p>
+                {orderPosts.map(o => {
+                  const slot = postSlotByOrder[o.id]
+                  const code = slot?.code || ''
+                  const planDate = fmtPlanDate(slot?.date || (o as any).planned_post_date)
+                  return (
+                    <div key={o.id} className="border border-green-100 rounded-2xl p-3 space-y-3 bg-green-50/30">
+                      <div className="flex gap-3">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={(o as any).post_image_url} alt="post" className="w-16 h-16 rounded-xl object-cover border border-gray-100 flex-shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          {code && <p className="text-[11px] font-mono font-bold text-purple-700 truncate">{code}</p>}
+                          <p className="text-[10px] font-semibold text-gray-500 truncate">
+                            {(o as any).package?.name || ''}
+                          </p>
+                          {planDate && <p className="text-[10px] text-gray-400 font-medium">{planDate}</p>}
+                        </div>
+                      </div>
+                      <WhatsappBoostPanel
+                        triggerLabel="Boosting"
+                        imageUrl={(o as any).post_image_url}
+                        brief={postBriefByOrder[o.id] || ''}
+                        postCode={code}
+                        planDate={planDate}
+                        defaultProfileUrl={savedProfileLink || undefined}
+                        contextLabel="Auto-filled from this post"
+                      />
+                    </div>
+                  )
+                })}
+              </div>
             )}
 
             <div className="border-l-2 border-pink-100 ml-3 pl-4 space-y-3 mt-3">

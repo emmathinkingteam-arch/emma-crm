@@ -304,7 +304,122 @@ html.dark .skeleton {
 }
 .btn-emma:active { transform: scale(0.96); }
 
-/* ── Respect users who prefer less motion (accessibility) ──────────── */
+/* ══════════════════════════════════════════════════════════════════════
+   Order tracking page — cinematic "Paramount intro" animations.
+   All class names are namespaced with trk- so nothing else is affected.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* Rise up from below + scale, settling with a punchy overshoot. */
+@keyframes trk-rise {
+  0%   { opacity: 0; transform: translateY(46px) scale(0.94); filter: blur(6px); }
+  60%  { opacity: 1; filter: blur(0); }
+  78%  { transform: translateY(-6px) scale(1.012); }
+  100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+.trk-rise {
+  opacity: 0;
+  animation: trk-rise 0.85s cubic-bezier(0.22, 1.2, 0.32, 1) both;
+}
+
+/* Zoom in from far away (the logo "hitting the place"). */
+@keyframes trk-zoom {
+  0%   { opacity: 0; transform: scale(0.2); filter: blur(8px); }
+  70%  { opacity: 1; filter: blur(0); }
+  85%  { transform: scale(1.08); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.trk-zoom {
+  opacity: 0;
+  animation: trk-zoom 0.9s cubic-bezier(0.18, 1.25, 0.4, 1) both;
+}
+
+/* Soft fade + slide for inner content. */
+@keyframes trk-fade {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.trk-fade { opacity: 0; animation: trk-fade 0.6s ease both; }
+
+/* Dot pop-in. */
+@keyframes trk-pop {
+  0%   { transform: scale(0); }
+  70%  { transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+.trk-pop { animation: trk-pop 0.5s cubic-bezier(0.2, 1.5, 0.4, 1) both; }
+
+/* Connector line drawing downward. */
+@keyframes trk-draw {
+  from { transform: scaleY(0); }
+  to   { transform: scaleY(1); }
+}
+.trk-line { transform-origin: top; animation: trk-draw 0.5s ease both; }
+
+/* LIVE badge — breathing glow + expanding ring. */
+@keyframes trk-livepulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55); }
+  50%      { box-shadow: 0 0 0 7px rgba(34, 197, 94, 0); }
+}
+.trk-live { animation: trk-livepulse 1.8s ease-out infinite; }
+
+@keyframes trk-blink {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.4; transform: scale(0.8); }
+}
+.trk-livedot { animation: trk-blink 1.2s ease-in-out infinite; }
+
+/* Active milestone dot — pulsing pink ring. */
+@keyframes trk-ring {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 146, 186, 0.7); }
+  70%  { box-shadow: 0 0 0 10px rgba(255, 146, 186, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 146, 186, 0); }
+}
+.trk-activedot { animation: trk-ring 1.8s ease-out infinite; }
+
+/* Waving character — gentle body bob + arm wave. */
+@keyframes trk-bob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-4px); }
+}
+.trk-bob { animation: trk-bob 2.4s ease-in-out infinite; }
+
+@keyframes trk-wave {
+  0%, 100% { transform: rotate(0deg); }
+  10%      { transform: rotate(-16deg); }
+  30%      { transform: rotate(20deg); }
+  50%      { transform: rotate(-12deg); }
+  70%      { transform: rotate(18deg); }
+  90%      { transform: rotate(-8deg); }
+}
+.trk-wave { transform-box: fill-box; transform-origin: bottom center; animation: trk-wave 2.2s ease-in-out infinite; }
+
+/* Shimmer placeholder while the design image loads. */
+@keyframes trk-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.trk-shimmer {
+  background: linear-gradient(100deg, #fbe9f1 30%, #fff6fa 50%, #fbe9f1 70%);
+  background-size: 200% 100%;
+  animation: trk-shimmer 1.4s linear infinite;
+}
+
+/* Accordion expand for brief / design panels. */
+@keyframes trk-expand {
+  from { opacity: 0; transform: translateY(-6px); max-height: 0; }
+  to   { opacity: 1; transform: translateY(0); max-height: 1400px; }
+}
+.trk-expand { overflow: hidden; animation: trk-expand 0.5s ease both; }
+
+/* Floating confetti hearts on the LIVE / celebration state. */
+@keyframes trk-float {
+  0%   { opacity: 0; transform: translateY(10px) scale(0.6) rotate(0deg); }
+  15%  { opacity: 0.9; }
+  100% { opacity: 0; transform: translateY(-90px) scale(1.1) rotate(40deg); }
+}
+.trk-float { animation: trk-float linear infinite; }
+
+/* Respect users who prefer less motion (accessibility) ──────────── */
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *,

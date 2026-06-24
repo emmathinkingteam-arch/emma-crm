@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import Tracker, { type Milestone, type ParsedBrief, type MState } from './Tracker'
 
 // Plain anon client (no cookies) so the page is open to any visitor with
 // the link. Data comes from the SECURITY DEFINER function get_order_tracking,
@@ -14,8 +15,6 @@ export const revalidate = 0
 
 interface Props { params: { token: string } }
 
-type MState = 'done' | 'active' | 'upcoming'
-
 const fmt = (d?: string | null) =>
     d ? new Date(d).toLocaleString('en-GB', {
         day: 'numeric', month: 'short', year: 'numeric',
@@ -26,6 +25,35 @@ const fmtDay = (d?: string | null) =>
     d ? new Date(d).toLocaleDateString('en-GB', {
         day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Colombo',
     }) : null
+
+// Parse the counselling brief into gender + chips + headline + body. The brief
+// is free-text the counsellor wrote, roughly:
+//   38 | Male
+//   Kollupitiya
+//   Muslim
+//   Pilot
+//
+//   The Modern Aviator   <- catchy headline
+//
+//   <descriptive paragraph...>
+function parseBrief(raw?: string | null): ParsedBrief | null {
+    if (!raw || !raw.trim()) return null
+    const blocks = raw.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean)
+    const headerLines = (blocks[0] || '').split('\n').map((s) => s.trim()).filter(Boolean)
+    const first = (headerLines[0] || '')
+    const gender: 'male' | 'female' | null =
+        /female|woman|girl|bride/i.test(first) ? 'female'
+            : /\bmale\b|\bman\b|groom/i.test(first) ? 'male'
+                : null
+    // Chips: split the first header line on "|" then add the remaining header lines.
+    const chips = [
+        ...first.split('|').map((s) => s.trim()).filter(Boolean),
+        ...headerLines.slice(1),
+    ].filter(Boolean).slice(0, 6)
+    const headline = blocks[1] || null
+    const body = blocks.length > 2 ? blocks.slice(2).join('\n\n') : null
+    return { gender, chips, headline, body }
+}
 
 export default async function TrackPage({ params }: Props) {
     const { data } = await publicSupabase.rpc('get_order_tracking', { p_token: params.token })
@@ -53,7 +81,7 @@ export default async function TrackPage({ params }: Props) {
     const stepMap = new Map<number, any>()
         ; (t.steps || []).forEach((s: any) => stepMap.set(s.step_number, s))
 
-    const milestones: { title: string; subtitle: string; at: string | null; state: MState }[] = []
+    const milestones: Milestone[] = []
 
     milestones.push({
         title: 'Order received',
@@ -62,21 +90,23 @@ export default async function TrackPage({ params }: Props) {
         state: 'done',
     })
 
-    const stepDefs = [
+    const stepDefs: { n: number; title: string; subtitle: string; extra?: 'brief' | 'design' }[] = [
         { n: 3, title: 'Onboarding', subtitle: 'Your profile journey began' },
-        { n: 4, title: 'Counselling session', subtitle: 'Your profile consultation' },
+        { n: 4, title: 'Counselling session', subtitle: 'Your profile consultation', extra: 'brief' },
         { n: 5, title: 'Profile review', subtitle: 'Content reviewed & approved' },
-        { n: 6, title: 'Design & production', subtitle: 'Your profile post was prepared' },
+        { n: 6, title: 'Design & production', subtitle: 'Your profile post was prepared', extra: 'design' },
     ]
     for (const d of stepDefs) {
         const s = stepMap.get(d.n)
         const done = !!s?.done
         const active = !done && t.current_step === d.n
+        const state: MState = done ? 'done' : active ? 'active' : 'upcoming'
         milestones.push({
             title: d.title,
             subtitle: d.subtitle,
             at: fmt(s?.completed_at || s?.started_at),
-            state: done ? 'done' : active ? 'active' : 'upcoming',
+            state,
+            extra: d.extra,
         })
     }
 
@@ -105,109 +135,23 @@ export default async function TrackPage({ params }: Props) {
             ? { label: 'Live', cls: 'bg-green-100 text-green-700' }
             : { label: 'In progress', cls: 'bg-pink-100 text-pink-700' }
 
+    const brief = parseBrief(t.brief)
+    const designReady = !!t.post_image_url
+
     return (
-        <div className="min-h-screen bg-gradient-to-b from-pink-50 via-white to-white">
-            <div className="max-w-md mx-auto px-4 pb-12">
-
-                {/* Brand header */}
-                <div className="pt-8 pb-6 text-center">
-                    <div
-                        className="inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-3 shadow-sm"
-                        style={{ background: '#EA1E63' }}
-                    >
-                        <span className="text-white text-xl font-extrabold">E</span>
-                    </div>
-                    <p className="text-sm font-extrabold tracking-wide" style={{ color: '#EA1E63' }}>EMMA THINKING</p>
-                    <p className="text-[11px] text-gray-400 font-medium mt-0.5">Order Tracking</p>
-                </div>
-
-                {/* Summary card */}
-                <div className="bg-white rounded-3xl shadow-sm border border-pink-50 overflow-hidden">
-                    <div className="px-5 pt-5 pb-4 flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                            <p className="text-lg font-bold text-gray-800 truncate">{t.customer_name || 'Valued Customer'}</p>
-                            <p className="text-sm text-gray-400 font-medium">{t.customer_phone || ''}</p>
-                        </div>
-                        <span className={`text-[10px] font-bold uppercase tracking-wide px-3 py-1.5 rounded-full flex-shrink-0 ${statusBadge.cls}`}>
-                            {statusBadge.label}
-                        </span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-px bg-gray-100">
-                        <div className="bg-white px-5 py-3">
-                            <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Package</p>
-                            <p className="text-sm font-bold text-gray-700 mt-0.5 truncate">{t.package_name || '—'}</p>
-                        </div>
-                        <div className="bg-white px-5 py-3">
-                            <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Invoice</p>
-                            <p className="text-sm font-bold text-gray-700 mt-0.5">{t.invoice_number || '—'}</p>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Expired banner */}
-                {isExpired && (
-                    <div className="mt-4 bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3 text-center">
-                        <p className="text-sm font-bold text-gray-600">This campaign has expired</p>
-                        {t.expires_at && (
-                            <p className="text-xs text-gray-400 font-medium mt-0.5">Expired on {fmtDay(t.expires_at)}</p>
-                        )}
-                    </div>
-                )}
-
-                {/* Timeline */}
-                <div className="mt-5 bg-white rounded-3xl shadow-sm border border-pink-50 p-5">
-                    <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-4">Progress</p>
-                    <div className="relative">
-                        {milestones.map((m, i) => {
-                            const last = i === milestones.length - 1
-                            const dotColor =
-                                m.state === 'done' ? '#EA1E63'
-                                    : m.state === 'active' ? '#FF92BA'
-                                        : '#E5E7EB'
-                            return (
-                                <div key={i} className="flex gap-3.5 relative">
-                                    {/* connector line */}
-                                    {!last && (
-                                        <span
-                                            className="absolute left-[11px] top-6 w-0.5 h-full"
-                                            style={{ background: m.state === 'done' ? '#FCD2E3' : '#F1F1F3' }}
-                                        />
-                                    )}
-                                    {/* dot */}
-                                    <div className="flex-shrink-0 mt-0.5">
-                                        <div
-                                            className="w-6 h-6 rounded-full flex items-center justify-center"
-                                            style={{ background: dotColor }}
-                                        >
-                                            {m.state === 'done'
-                                                ? <span className="text-white text-[12px] font-bold leading-none">✓</span>
-                                                : m.state === 'active'
-                                                    ? <span className="w-2 h-2 rounded-full bg-white" />
-                                                    : <span className="w-2 h-2 rounded-full bg-gray-300" />}
-                                        </div>
-                                    </div>
-                                    {/* content */}
-                                    <div className={`pb-6 ${last ? 'pb-0' : ''} flex-1 min-w-0`}>
-                                        <p className={`text-sm font-bold ${m.state === 'upcoming' ? 'text-gray-300' : 'text-gray-800'}`}>
-                                            {m.title}
-                                        </p>
-                                        <p className={`text-xs font-medium ${m.state === 'upcoming' ? 'text-gray-300' : 'text-gray-500'}`}>
-                                            {m.subtitle}
-                                        </p>
-                                        {m.at && m.state !== 'upcoming' && (
-                                            <p className="text-[11px] text-gray-400 font-medium mt-0.5">{m.at}</p>
-                                        )}
-                                    </div>
-                                </div>
-                            )
-                        })}
-                    </div>
-                </div>
-
-                <p className="text-center text-[11px] text-gray-300 font-medium mt-8">
-                    Emma Thinking (Pvt) Ltd · Need help? Message your relationship manager.
-                </p>
-            </div>
-        </div>
+        <Tracker
+            token={params.token}
+            customerName={t.customer_name || ''}
+            customerPhone={t.customer_phone || ''}
+            packageName={t.package_name || ''}
+            invoiceNumber={t.invoice_number || ''}
+            isLive={isLive}
+            isExpired={isExpired}
+            statusLabel={statusBadge.label}
+            statusCls={statusBadge.cls}
+            milestones={milestones}
+            brief={brief}
+            designReady={designReady}
+        />
     )
 }

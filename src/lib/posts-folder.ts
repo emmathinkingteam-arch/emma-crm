@@ -59,9 +59,22 @@ async function ensurePermission(handle: Handle): Promise<boolean> {
 
 /** Prompt the user to pick their "Posts Api" folder and remember it. */
 export async function pickPostsFolder(): Promise<boolean> {
-  const handle = await (window as any).showDirectoryPicker({ id: 'emma-posts-api', mode: 'read' })
+  const picker = (window as any).showDirectoryPicker
+  if (typeof picker !== 'function') throw new Error('This browser cannot open folders. Use Chrome or Edge.')
+
+  // NOTE: the picker `id` may only contain letters, numbers and underscores —
+  // a hyphen here makes Chromium throw "The string did not match the expected
+  // pattern." So we use an alphanumeric id, and still fall back to calling the
+  // picker with no options if any build rejects the options object.
+  let handle: Handle
+  try {
+    handle = await picker({ id: 'emmapostsapi', mode: 'read' })
+  } catch (e: any) {
+    if (e?.name === 'AbortError') throw e          // user cancelled — bubble up
+    handle = await picker()                         // retry without options
+  }
   if (!handle) return false
-  await idbSet(KEY, handle)
+  try { await idbSet(KEY, handle) } catch { /* remembering is best-effort */ }
   return ensurePermission(handle)
 }
 
@@ -85,15 +98,25 @@ function isImage(name: string): boolean {
   return IMAGE_EXT.includes(ext)
 }
 
+// Collapse a name to just its letters/digits so different separators or casing
+// (L/26/R, L-26-R, "L 26 R", l_26_r) all compare equal.
+function normalize(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
 /**
  * Find the image file in the folder whose name matches `code` (ignoring
- * extension and case). Returns the File, or null if not found.
+ * extension, case and separators). Prefers an exact base-name match, then
+ * falls back to a normalized match. Returns the File, or null if not found.
  */
 export async function findDesignFile(handle: Handle, code: string): Promise<File | null> {
-  const want = code.toLowerCase()
+  const wantExact = code.toLowerCase()
+  const wantNorm = normalize(code)
+  let fallback: any = null
   for await (const [name, entry] of handle.entries()) {
     if (entry.kind !== 'file' || !isImage(name)) continue
-    if (baseName(name) === want) return entry.getFile()
+    if (baseName(name) === wantExact) return entry.getFile()
+    if (!fallback && normalize(baseName(name)) === wantNorm) fallback = entry
   }
-  return null
+  return fallback ? fallback.getFile() : null
 }

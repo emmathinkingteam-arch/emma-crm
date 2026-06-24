@@ -11,6 +11,7 @@ import {
     ArrowDownToLine,
     ListOrdered,
     Landmark,
+    Building2,
     Users as UsersIcon,
     Receipt,
 } from 'lucide-react'
@@ -20,6 +21,7 @@ const SUB_TABS = [
     { href: '/admin/accounts/add-expense', icon: PlusCircle, label: 'Add Expense' },
     { href: '/admin/accounts/income', icon: ArrowDownToLine, label: 'Income' },
     { href: '/admin/accounts/transactions', icon: ListOrdered, label: 'Transactions' },
+    { href: '/admin/accounts/commercial', icon: Building2, label: 'Commercial Bank' },
     { href: '/admin/accounts/banks', icon: Landmark, label: 'Bank & Cash' },
     { href: '/admin/accounts/wallets', icon: Wallet, label: 'Wallets' },
     { href: '/admin/accounts/costing', icon: UsersIcon, label: 'Customer Costing' },

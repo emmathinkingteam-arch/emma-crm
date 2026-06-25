@@ -77,6 +77,27 @@ export default function EntryPage() {
     }
   }
 
+  // Paste directly INTO the number field (not via the big button). Without
+  // this, the onChange below just strips the "+" and spaces, the country
+  // dropdown stays on its default (94), and a pasted "+971 54 286 8729"
+  // gets saved as "9497154286729". Here we detect the country from the
+  // pasted text first, exactly like the smart-paste button.
+  const handleFieldPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const text = e.clipboardData.getData('text')
+    const detected = detectCountryFromPaste(text)
+    if (detected) {
+      e.preventDefault()
+      setCountryDial(detected.dial)
+      setPhone(detected.local)
+      const cc = COUNTRY_CODES.find(c => c.dial === detected.dial)
+      if (cc) setDetectedFlag(cc.flag)
+      setPasted(true)
+      setTimeout(() => { setPasted(false); setDetectedFlag('') }, 2500)
+    }
+    // No explicit +/00 prefix → let the default onChange strip non-digits and
+    // keep the dropdown's selected country (we never guess without that signal).
+  }
+
   const handleStart = async () => {
     if (phone.length < 7) return
     setLoading(true)
@@ -159,6 +180,7 @@ export default function EntryPage() {
                 type="tel"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
+                onPaste={handleFieldPaste}
                 placeholder="7X XXX XXXX"
                 className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3 text-base font-bold tracking-widest text-gray-800 placeholder:text-gray-300 pr-10 outline-none focus:border-pink-300"
               />

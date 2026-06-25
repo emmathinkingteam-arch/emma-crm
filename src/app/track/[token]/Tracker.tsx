@@ -41,54 +41,143 @@ export interface TrackerProps {
   designReady: boolean
 }
 
-// ── A friendly waving character, picked by gender ───────────────────────────
+// ── A polished 3D-style avatar, picked by gender. Pixar-ish soft shading via
+//    SVG gradients, with a graceful float/sway, blink and a soft wave. ────────
 function WavingCharacter({ gender }: { gender: 'male' | 'female' | null }) {
-  const skin = '#F4C9A8'
-  const isF = gender === 'female'
-  const hair = isF ? '#3A2A22' : '#2A2320'
-  const shirt = isF ? '#EA1E63' : '#2563EB'
-
-  return (
-    <svg viewBox="0 0 120 130" width="84" height="92" aria-hidden="true">
+  const female = (
+    <svg viewBox="0 0 200 210" width="94" height="99" aria-hidden="true">
       <defs>
-        <radialGradient id="trkGlow" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="#FFD9E7" />
-          <stop offset="100%" stopColor="#FFD9E7" stopOpacity="0" />
+        <radialGradient id="trkFaceF" cx="40%" cy="34%" r="78%">
+          <stop offset="0%" stopColor="#FDE0C8" />
+          <stop offset="62%" stopColor="#F3C2A1" />
+          <stop offset="100%" stopColor="#E29D7A" />
+        </radialGradient>
+        <linearGradient id="trkHairF" x1="0" y1="0" x2="0.3" y2="1">
+          <stop offset="0%" stopColor="#B07A45" />
+          <stop offset="100%" stopColor="#6E4322" />
+        </linearGradient>
+        <linearGradient id="trkJacketF" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#BCD7A0" />
+          <stop offset="100%" stopColor="#8CB76B" />
+        </linearGradient>
+        <radialGradient id="trkGlowF" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#FFE3EF" />
+          <stop offset="100%" stopColor="#FFE3EF" stopOpacity="0" />
         </radialGradient>
       </defs>
-      <ellipse cx="60" cy="118" rx="34" ry="7" fill="#000" opacity="0.06" />
-      <circle cx="60" cy="60" r="52" fill="url(#trkGlow)" opacity="0.7" />
-
-      <g className="trk-bob">
-        {/* body */}
-        <path d="M38 122 q22 14 44 0 v-22 q0 -26 -22 -26 t-22 26 z" fill={shirt} />
-        {/* female long hair behind */}
-        {isF && <path d="M34 58 q-6 26 4 44 h12 q-10 -22 -4 -44 z M86 58 q6 26 -4 44 h-12 q10 -22 4 -44 z" fill={hair} />}
+      <ellipse cx="100" cy="198" rx="48" ry="8" fill="#000" opacity="0.06" />
+      <circle cx="100" cy="96" r="94" fill="url(#trkGlowF)" opacity="0.6" />
+      <g className="trk-sway">
+        {/* jacket / shoulders */}
+        <path d="M44 206 v-20 q0 -36 56 -36 t56 36 v20 z" fill="url(#trkJacketF)" />
+        <path d="M86 150 L100 206 L114 150 q-14 -8 -28 0 z" fill="#F7F7F4" />
+        <path d="M100 152 V206" stroke="#7BA85C" strokeWidth="3" />
         {/* neck */}
-        <rect x="54" y="64" width="12" height="14" rx="6" fill={skin} />
-        {/* head */}
-        <circle cx="60" cy="48" r="24" fill={skin} />
-        {/* hair top */}
-        <path d="M36 46 q0 -30 24 -30 t24 30 q-6 -14 -24 -14 t-24 14 z" fill={hair} />
-        {isF && <circle cx="84" cy="44" r="6" fill={shirt} />}
+        <rect x="88" y="118" width="24" height="36" rx="12" fill="#EBAE89" />
+        {/* hair behind */}
+        <path d="M56 64 q-14 44 6 78 q-22 -34 -12 -80 z" fill="url(#trkHairF)" />
+        <path d="M144 64 q14 44 -6 78 q22 -34 12 -80 z" fill="url(#trkHairF)" />
+        {/* face */}
+        <ellipse cx="100" cy="92" rx="42" ry="46" fill="url(#trkFaceF)" />
+        {/* ears */}
+        <circle cx="60" cy="96" r="9" fill="#EBAE89" />
+        <circle cx="140" cy="96" r="9" fill="#EBAE89" />
+        {/* top hair + messy bun */}
+        <path d="M57 80 q-6 -58 43 -58 t43 58 q-10 -30 -43 -30 t-43 30 z" fill="url(#trkHairF)" />
+        <circle cx="100" cy="26" r="17" fill="url(#trkHairF)" />
+        <circle cx="89" cy="22" r="8" fill="url(#trkHairF)" />
+        <circle cx="112" cy="24" r="9" fill="url(#trkHairF)" />
+        {/* brows */}
+        <path d="M74 78 q9 -5 18 -0.5" stroke="#6E4322" strokeWidth="3.5" fill="none" strokeLinecap="round" />
+        <path d="M108 77.5 q9 -4.5 18 0.5" stroke="#6E4322" strokeWidth="3.5" fill="none" strokeLinecap="round" />
         {/* eyes */}
-        <circle cx="51" cy="48" r="3" fill="#2A2320" />
-        <circle cx="69" cy="48" r="3" fill="#2A2320" />
-        {/* smile */}
-        <path d="M51 57 q9 9 18 0" stroke="#A14A3A" strokeWidth="2.5" fill="none" strokeLinecap="round" />
-        {/* cheeks */}
-        <circle cx="46" cy="55" r="3.5" fill="#FF9FBE" opacity="0.6" />
-        <circle cx="74" cy="55" r="3.5" fill="#FF9FBE" opacity="0.6" />
-        {/* static left arm */}
-        <path d="M40 92 q-8 8 -8 20" stroke={shirt} strokeWidth="9" fill="none" strokeLinecap="round" />
-        {/* waving right arm */}
+        <ellipse cx="83" cy="92" rx="8" ry="9" fill="#fff" />
+        <ellipse cx="117" cy="92" rx="8" ry="9" fill="#fff" />
+        <circle cx="84" cy="93" r="5.2" fill="#6B4A2B" />
+        <circle cx="116" cy="93" r="5.2" fill="#6B4A2B" />
+        <circle cx="84" cy="93" r="2.4" fill="#2a1a0d" />
+        <circle cx="116" cy="93" r="2.4" fill="#2a1a0d" />
+        <circle cx="86" cy="90.5" r="1.6" fill="#fff" />
+        <circle cx="118" cy="90.5" r="1.6" fill="#fff" />
+        <rect className="trk-eyelid" x="74" y="83" width="18" height="10" rx="5" fill="#F3C2A1" />
+        <rect className="trk-eyelid" x="108" y="83" width="18" height="10" rx="5" fill="#F3C2A1" />
+        {/* nose + smile */}
+        <ellipse cx="100" cy="104" rx="4.5" ry="3.4" fill="#E89A77" />
+        <path d="M88 113 q12 11 24 0" stroke="#B5604A" strokeWidth="3" fill="none" strokeLinecap="round" />
+        {/* cheeks + freckles */}
+        <circle cx="75" cy="106" r="6.5" fill="#FF9FBE" opacity="0.45" />
+        <circle cx="125" cy="106" r="6.5" fill="#FF9FBE" opacity="0.45" />
+        {[[72, 102], [78, 106], [74, 110], [122, 102], [128, 106], [124, 110]].map(([x, y], i) => (
+          <circle key={i} cx={x} cy={y} r="1" fill="#C77B57" opacity="0.5" />
+        ))}
+        {/* soft waving hand */}
         <g className="trk-wave">
-          <path d="M80 92 q14 -6 16 -26" stroke={shirt} strokeWidth="9" fill="none" strokeLinecap="round" />
-          <circle cx="96" cy="64" r="6.5" fill={skin} />
+          <path d="M150 150 q24 -6 22 -36" stroke="url(#trkJacketF)" strokeWidth="15" fill="none" strokeLinecap="round" />
+          <circle cx="172" cy="112" r="10" fill="#EBAE89" />
         </g>
       </g>
     </svg>
   )
+
+  const male = (
+    <svg viewBox="0 0 200 210" width="94" height="99" aria-hidden="true">
+      <defs>
+        <radialGradient id="trkFaceM" cx="40%" cy="34%" r="78%">
+          <stop offset="0%" stopColor="#FDE0C8" />
+          <stop offset="62%" stopColor="#F3C2A1" />
+          <stop offset="100%" stopColor="#E29D7A" />
+        </radialGradient>
+        <linearGradient id="trkHairM" x1="0" y1="0" x2="0.3" y2="1">
+          <stop offset="0%" stopColor="#B5824C" />
+          <stop offset="100%" stopColor="#7A4E27" />
+        </linearGradient>
+        <linearGradient id="trkSweaterM" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#FFFFFF" />
+          <stop offset="100%" stopColor="#E7EAEE" />
+        </linearGradient>
+        <radialGradient id="trkGlowM" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#E3EEFF" />
+          <stop offset="100%" stopColor="#E3EEFF" stopOpacity="0" />
+        </radialGradient>
+      </defs>
+      <ellipse cx="100" cy="198" rx="48" ry="8" fill="#000" opacity="0.06" />
+      <circle cx="100" cy="96" r="94" fill="url(#trkGlowM)" opacity="0.6" />
+      <g className="trk-sway">
+        {/* sweater / shoulders */}
+        <path d="M42 206 v-18 q0 -38 58 -38 t58 38 v18 z" fill="url(#trkSweaterM)" />
+        <path d="M78 152 q22 14 44 0 q-2 12 -22 12 t-22 -12 z" fill="#D9DEE5" opacity="0.7" />
+        {/* neck */}
+        <rect x="88" y="118" width="24" height="36" rx="12" fill="#EBAE89" />
+        {/* face */}
+        <ellipse cx="100" cy="92" rx="42" ry="47" fill="url(#trkFaceM)" />
+        {/* ears */}
+        <circle cx="60" cy="94" r="9" fill="#EBAE89" />
+        <circle cx="140" cy="94" r="9" fill="#EBAE89" />
+        {/* tousled quiff hair */}
+        <path d="M58 76 q-2 -34 18 -46 q-6 12 0 18 q10 -22 28 -22 q-4 10 2 14 q12 -16 30 -8 q16 10 8 44 q-8 -26 -42 -26 t-42 26 z" fill="url(#trkHairM)" />
+        {/* brows */}
+        <path d="M74 80 q9 -4 18 0" stroke="#6E4322" strokeWidth="4" fill="none" strokeLinecap="round" />
+        <path d="M108 80 q9 -4 18 0" stroke="#6E4322" strokeWidth="4" fill="none" strokeLinecap="round" />
+        {/* happy closed eyes (^_^) */}
+        <path d="M75 92 q8 -8 16 0" stroke="#3A2A1C" strokeWidth="3.5" fill="none" strokeLinecap="round" />
+        <path d="M109 92 q8 -8 16 0" stroke="#3A2A1C" strokeWidth="3.5" fill="none" strokeLinecap="round" />
+        {/* nose */}
+        <ellipse cx="100" cy="104" rx="5" ry="4" fill="#E89A77" />
+        {/* big smile */}
+        <path d="M84 112 q16 16 32 0" stroke="#B5604A" strokeWidth="3.2" fill="none" strokeLinecap="round" />
+        {/* cheeks */}
+        <circle cx="74" cy="106" r="7" fill="#FF9FBE" opacity="0.4" />
+        <circle cx="126" cy="106" r="7" fill="#FF9FBE" opacity="0.4" />
+        {/* soft waving hand */}
+        <g className="trk-wave">
+          <path d="M150 152 q24 -6 22 -36" stroke="url(#trkSweaterM)" strokeWidth="15" fill="none" strokeLinecap="round" />
+          <circle cx="172" cy="114" r="10" fill="#EBAE89" />
+        </g>
+      </g>
+    </svg>
+  )
+
+  return gender === 'male' ? male : female
 }
 
 function FloatingHearts() {
@@ -242,9 +331,9 @@ export default function Tracker(props: TrackerProps) {
         <div className="trk-rise flex items-center justify-center gap-2 pb-5" style={{ animationDelay: '0.26s' }}>
           <WavingCharacter gender={gender} />
           <div className="text-left">
-            <p className="text-lg font-extrabold text-gray-800 leading-tight">Hi, {firstName} 👋</p>
+            <p className="text-lg font-extrabold text-gray-800 leading-tight">Hi, {firstName}</p>
             <p className="text-[12px] text-gray-500 font-medium">
-              {isLive ? "You're live — congratulations! 🎉" : "Here's how your profile is coming along."}
+              {isLive ? "You're live — congratulations!" : "Here's how your profile is coming along."}
             </p>
           </div>
         </div>
@@ -345,7 +434,16 @@ export default function Tracker(props: TrackerProps) {
         </div>
 
         <p className="trk-fade text-center text-[11px] text-gray-300 font-medium mt-8" style={{ animationDelay: '1.4s' }}>
-          Emma Thinking (Pvt) Ltd · Need help? Message your relationship manager.
+          Emma Thinking (Pvt) Ltd · Need help?{' '}
+          <a
+            href="https://wa.me/94744120715"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-bold text-pink-500 underline underline-offset-2"
+          >
+            Message your relationship manager
+          </a>
+          .
         </p>
       </div>
     </div>

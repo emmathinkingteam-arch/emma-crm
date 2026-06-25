@@ -383,6 +383,20 @@ html.dark .skeleton {
 }
 .trk-bob { animation: trk-bob 2.4s ease-in-out infinite; }
 
+/* Graceful float + soft sway for the 3D avatar. */
+@keyframes trk-sway {
+  0%, 100% { transform: translateY(0) rotate(-1.4deg); }
+  50%      { transform: translateY(-7px) rotate(1.4deg); }
+}
+.trk-sway { transform-box: fill-box; transform-origin: 50% 90%; animation: trk-sway 4s ease-in-out infinite; }
+
+/* Periodic blink — eyelids drop briefly then lift. */
+@keyframes trk-blinklid {
+  0%, 90%, 100% { transform: scaleY(0); }
+  94%, 96%      { transform: scaleY(1); }
+}
+.trk-eyelid { transform-box: fill-box; transform-origin: top; animation: trk-blinklid 4.5s ease-in-out infinite; }
+
 @keyframes trk-wave {
   0%, 100% { transform: rotate(0deg); }
   10%      { transform: rotate(-16deg); }

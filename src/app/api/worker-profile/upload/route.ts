@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { uploadFile } from '@/lib/backblaze'
+
+export const runtime = 'nodejs'
 
 export async function POST(req: NextRequest) {
   const supabase = createSupabaseServerClient()
@@ -25,22 +28,22 @@ export async function POST(req: NextRequest) {
   }
 
   const ext = file.name.split('.').pop() ?? 'bin'
-  const path = `worker-docs/${targetUserId}/${fieldName}-${Date.now()}.${ext}`
-  const arrayBuffer = await file.arrayBuffer()
+  const key = `worker-docs/${targetUserId}/${fieldName}-${Date.now()}.${ext}`
+  const buf = Buffer.from(await file.arrayBuffer())
 
-  const { error: uploadErr } = await sa.storage
-    .from('account-slips')
-    .upload(path, arrayBuffer, { contentType: file.type, upsert: true })
-
-  if (uploadErr) return NextResponse.json({ error: uploadErr.message }, { status: 500 })
-
-  const { data: urlData } = sa.storage.from('account-slips').getPublicUrl(path)
-  const publicUrl = urlData?.publicUrl
+  let url: string
+  try {
+    // Private B2 — worker docs are viewed by staff/self via the /api/media proxy.
+    const up = await uploadFile(key, buf, file.type || 'application/octet-stream')
+    url = up.url
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || 'Upload failed' }, { status: 500 })
+  }
 
   await sa.from('worker_profiles').upsert(
-    { user_id: targetUserId, [fieldName]: publicUrl },
+    { user_id: targetUserId, [fieldName]: url },
     { onConflict: 'user_id' }
   )
 
-  return NextResponse.json({ url: publicUrl })
+  return NextResponse.json({ url })
 }

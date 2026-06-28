@@ -6,13 +6,10 @@ import { Loader2, ArrowLeft, Plus, X, Upload, FileText, Trash2, ExternalLink, Wa
 import { fmtDate } from '@/lib/utils'
 import { lkr } from '@/lib/accounting'
 
-const DOC_BUCKET = 'attendance-records'
-const SIGNED_URL_TTL = 60 * 60
-
 interface WorkerDoc {
   name: string
-  path: string
-  signedUrl: string
+  key: string
+  url: string
   uploadedAt?: string
   size?: number
   type: 'salary' | 'attendance'
@@ -84,26 +81,13 @@ export default function WorkerDetailPage() {
     if (!id) return
     setDocsLoading(true)
     try {
-      const [salaryList, attendanceList] = await Promise.all([
-        supabase.storage.from(DOC_BUCKET).list(`salary/${id}`, { limit: 100, sortBy: { column: 'created_at', order: 'desc' } }),
-        supabase.storage.from(DOC_BUCKET).list(`attendance/${id}`, { limit: 100, sortBy: { column: 'created_at', order: 'desc' } }),
-      ])
-      const buildDocs = async (items: any[] | null, type: 'salary' | 'attendance'): Promise<WorkerDoc[]> => {
-        if (!items || items.length === 0) return []
-        const files = items.filter(i => i.name && i.id !== null)
-        const docs: WorkerDoc[] = []
-        for (const f of files) {
-          const path = `${type}/${id}/${f.name}`
-          const { data: signed } = await supabase.storage.from(DOC_BUCKET).createSignedUrl(path, SIGNED_URL_TTL)
-          if (signed?.signedUrl) {
-            docs.push({ name: f.name, path, signedUrl: signed.signedUrl, uploadedAt: f.created_at, size: f.metadata?.size, type })
-          }
-        }
-        return docs
-      }
-      const [s, a] = await Promise.all([buildDocs(salaryList.data, 'salary'), buildDocs(attendanceList.data, 'attendance')])
-      setSalaryDocs(s)
-      setAttendanceDocs(a)
+      const res = await fetch(`/api/worker-docs?userId=${id}`)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error || 'Failed to load documents')
+      const tag = (arr: any[], type: 'salary' | 'attendance'): WorkerDoc[] =>
+        (arr || []).map((d) => ({ ...d, type }))
+      setSalaryDocs(tag(data.salary, 'salary'))
+      setAttendanceDocs(tag(data.attendance, 'attendance'))
     } catch (err) {
       console.error('Failed to fetch worker documents:', err)
     }
@@ -133,14 +117,15 @@ export default function WorkerDetailPage() {
     setUploading(true)
     setUploadError('')
     try {
-      const safeTitle = docTitle.trim().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_\-]/g, '').slice(0, 80) || 'document'
-      const ext = (pendingFile.name.split('.').pop() || 'pdf').toLowerCase()
-      const stamp = Date.now()
-      const monthPart = docMonth ? `_${docMonth}` : ''
-      const filename = `${safeTitle}${monthPart}_${stamp}.${ext}`
-      const path = `${uploadType}/${id}/${filename}`
-      const { error: upErr } = await supabase.storage.from(DOC_BUCKET).upload(path, pendingFile, { upsert: false, contentType: pendingFile.type || 'application/pdf' })
-      if (upErr) throw upErr
+      const fd = new FormData()
+      fd.append('file', pendingFile)
+      fd.append('type', uploadType)
+      fd.append('userId', String(id))
+      fd.append('title', docTitle.trim())
+      if (docMonth) fd.append('month', docMonth)
+      const res = await fetch('/api/worker-docs', { method: 'POST', body: fd })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error || 'Upload failed')
       setDocTitle(''); setDocMonth(''); setPendingFile(null)
       if (docFileRef.current) docFileRef.current.value = ''
       await fetchDocs()
@@ -154,8 +139,13 @@ export default function WorkerDetailPage() {
   const deleteDoc = async (doc: WorkerDoc) => {
     if (!confirm(`Delete "${doc.name}"?`)) return
     try {
-      const { error } = await supabase.storage.from(DOC_BUCKET).remove([doc.path])
-      if (error) throw error
+      const res = await fetch('/api/worker-docs', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: doc.key }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error || 'Delete failed')
       await fetchDocs()
     } catch (err: any) {
       alert(err?.message || 'Delete failed')
@@ -281,13 +271,13 @@ export default function WorkerDetailPage() {
           ) : (
             <div className="space-y-2">
               {activeDocs.map(doc => (
-                <div key={doc.path} className="flex items-center gap-3 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2.5">
+                <div key={doc.key} className="flex items-center gap-3 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2.5">
                   <div className="w-8 h-8 rounded-lg bg-pink-100 flex items-center justify-center flex-shrink-0"><FileText size={14} className="text-pink-500" /></div>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-bold text-gray-700 truncate">{doc.name}</p>
                     <p className="text-[9px] text-gray-400 font-medium">{doc.uploadedAt ? fmtDate(doc.uploadedAt) : '—'}{doc.size ? ` · ${(doc.size / 1024).toFixed(0)} KB` : ''}</p>
                   </div>
-                  <a href={doc.signedUrl} target="_blank" rel="noopener noreferrer" className="p-2 rounded-lg bg-white border border-gray-200 text-gray-500 hover:text-pink-600"><ExternalLink size={12} /></a>
+                  <a href={doc.url} target="_blank" rel="noopener noreferrer" className="p-2 rounded-lg bg-white border border-gray-200 text-gray-500 hover:text-pink-600"><ExternalLink size={12} /></a>
                   <button onClick={() => deleteDoc(doc)} className="p-2 rounded-lg bg-white border border-gray-200 text-gray-400 hover:text-red-500"><Trash2 size={12} /></button>
                 </div>
               ))}

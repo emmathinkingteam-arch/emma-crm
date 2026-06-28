@@ -36,7 +36,6 @@ interface HistoryRow {
     created_at: string
 }
 
-const BUCKET = 'whatsapp-broadcasts'
 const COST_PER_NUMBER = 25.28
 
 const lkr = (n: number) =>
@@ -102,14 +101,12 @@ export default function WhatsappBroadcastPage() {
         setSending(true)
         try {
             setProgress('Uploading image…')
-            const ext = image.name.split('.').pop() || 'jpg'
-            const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
-            const { error: upErr } = await supabase.storage
-                .from(BUCKET)
-                .upload(path, image, { upsert: false, contentType: image.type })
-            if (upErr) throw new Error('Image upload failed: ' + upErr.message)
-
-            const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(path)
+            const imgForm = new FormData()
+            imgForm.append('file', image)
+            const upRes = await fetch('/api/whatsapp/upload-image', { method: 'POST', body: imgForm })
+            const upJson = await upRes.json()
+            if (!upRes.ok) throw new Error('Image upload failed: ' + (upJson.error || upRes.status))
+            const publicUrl: string = upJson.url
 
             const { data: { session } } = await supabase.auth.getSession()
             const token = session?.access_token

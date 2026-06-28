@@ -47,10 +47,10 @@ export async function POST(req: Request) {
   )
 
   try {
-    // E-sign docs are viewed by EXTERNAL signers (no login), so keep them on
-    // the public Supabase bucket — the private B2 media proxy requires a session.
-    const docUp = await uploadFile(`documents/${doc.id}/signed.html`, docHtml, 'text/html; charset=utf-8', { provider: 'supabase' })
-    const certUp = await uploadFile(`documents/${doc.id}/certificate.html`, certHtml, 'text/html; charset=utf-8', { provider: 'supabase' })
+    // E-sign docs are viewed by EXTERNAL signers (no login), so serve them via
+    // the public B2 proxy (no session required, files stay in private B2).
+    const docUp = await uploadFile(`documents/${doc.id}/signed.html`, docHtml, 'text/html; charset=utf-8', { public: true })
+    const certUp = await uploadFile(`documents/${doc.id}/certificate.html`, certHtml, 'text/html; charset=utf-8', { public: true })
 
     await sb.from('esign_documents').update({
       final_url: docUp.url,

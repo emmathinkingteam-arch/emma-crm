@@ -13,13 +13,10 @@ import { recordPing } from '@/lib/location'
 import { Attendance, RewardMilestone } from '@/types'
 import WorkerPersonalDetailsTab from '@/components/worker/WorkerPersonalDetailsTab'
 
-const DOC_BUCKET = 'attendance-records'
-const SIGNED_URL_TTL = 60 * 60
-
 interface WorkerDoc {
   name: string
-  path: string
-  signedUrl: string
+  key: string
+  url: string
   uploadedAt?: string
   size?: number
   type: 'salary' | 'attendance'
@@ -118,28 +115,13 @@ export default function ProfilePage() {
     if (!user) return
     setDocsLoading(true)
     try {
-      const [salaryList, attendanceList] = await Promise.all([
-        supabase.storage.from(DOC_BUCKET).list(`salary/${user.id}`, { limit: 100, sortBy: { column: 'created_at', order: 'desc' } }),
-        supabase.storage.from(DOC_BUCKET).list(`attendance/${user.id}`, { limit: 100, sortBy: { column: 'created_at', order: 'desc' } }),
-      ])
-
-      const buildDocs = async (items: any[] | null, type: 'salary' | 'attendance'): Promise<WorkerDoc[]> => {
-        if (!items || items.length === 0) return []
-        const files = items.filter(i => i.name && i.id !== null)
-        const docs: WorkerDoc[] = []
-        for (const f of files) {
-          const path = `${type}/${user.id}/${f.name}`
-          const { data: signed } = await supabase.storage.from(DOC_BUCKET).createSignedUrl(path, SIGNED_URL_TTL)
-          if (signed?.signedUrl) {
-            docs.push({ name: f.name, path, signedUrl: signed.signedUrl, uploadedAt: f.created_at, size: f.metadata?.size, type })
-          }
-        }
-        return docs
-      }
-
-      const [s, a] = await Promise.all([buildDocs(salaryList.data, 'salary'), buildDocs(attendanceList.data, 'attendance')])
-      setSalaryDocs(s)
-      setAttendanceDocs(a)
+      const res = await fetch(`/api/worker-docs?userId=${user.id}`)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error || 'Failed to load documents')
+      const tag = (arr: any[], type: 'salary' | 'attendance'): WorkerDoc[] =>
+        (arr || []).map((d) => ({ ...d, type }))
+      setSalaryDocs(tag(data.salary, 'salary'))
+      setAttendanceDocs(tag(data.attendance, 'attendance'))
     } catch (err) {
       console.error('Failed to fetch worker documents:', err)
     }
@@ -300,7 +282,7 @@ export default function ProfilePage() {
   const openDoc = (doc: WorkerDoc) => {
     if (typeof window === 'undefined') return
     const a = document.createElement('a')
-    a.href = doc.signedUrl
+    a.href = doc.url
     a.target = '_blank'
     a.rel = 'noopener noreferrer'
     document.body.appendChild(a)
@@ -550,7 +532,7 @@ export default function ProfilePage() {
           ) : (
             <div className="space-y-2">
               {activeDocs.map(doc => (
-                <button key={doc.path} onClick={() => openDoc(doc)}
+                <button key={doc.key} onClick={() => openDoc(doc)}
                   className="w-full flex items-center gap-3 bg-white border border-gray-100 rounded-2xl px-3 py-2.5 hover:border-pink-200 active:scale-[0.98] transition-all text-left">
                   <div className="w-8 h-8 rounded-xl bg-pink-50 flex items-center justify-center flex-shrink-0">
                     <FileText size={14} className="text-pink-500" />

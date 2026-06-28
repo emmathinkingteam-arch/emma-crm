@@ -2,9 +2,8 @@
 // Emma Thinking CRM — WhatsApp Cloud API service
 // ============================================================================
 
-import { supabaseAdmin } from './supabase-admin'
+import { b2List, b2Delete } from './backblaze'
 
-const BUCKET = 'whatsapp-broadcasts'
 const CLEANUP_HOURS = 48
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -213,24 +212,14 @@ export async function sendBroadcast(args: {
 
 export async function cleanupOldBroadcastImages(): Promise<{ removed: number }> {
     try {
-        const sb = supabaseAdmin()
-        const { data: files, error } = await sb.storage.from(BUCKET).list('', {
-            limit: 1000,
-            sortBy: { column: 'created_at', order: 'asc' },
-        })
-        if (error || !files?.length) return { removed: 0 }
+        const files = await b2List('whatsapp/')
+        if (!files.length) return { removed: 0 }
 
         const cutoff = Date.now() - CLEANUP_HOURS * 60 * 60 * 1000
-        const toDelete = files
-            .filter(f => {
-                const created = f.created_at ? new Date(f.created_at).getTime() : 0
-                return created > 0 && created < cutoff
-            })
-            .map(f => f.name)
-
+        const toDelete = files.filter(f => new Date(f.uploadedAt).getTime() < cutoff)
         if (!toDelete.length) return { removed: 0 }
 
-        await sb.storage.from(BUCKET).remove(toDelete)
+        for (const f of toDelete) await b2Delete(f.key)
         return { removed: toDelete.length }
     } catch {
         return { removed: 0 }

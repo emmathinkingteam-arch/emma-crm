@@ -10,20 +10,21 @@
 //   B2_BUCKET_ID     = the target bucket's ID
 //   B2_BUCKET_NAME   = the target bucket's name
 //
-// The bucket is PRIVATE. Files are never served by a public URL. Instead,
-// uploadFile() returns an app path like "/api/media/<key>", and the
-// /api/media/[...key] route streams the bytes after checking the requester is
-// a logged-in staff member. b2Download() is what that route uses.
+// The bucket is PRIVATE. Files are never served by a direct public URL, and
+// NOTHING is ever written to Supabase Storage. uploadFile() returns an app path
+// and the bytes are streamed through one of two proxy routes:
+//   - /api/media/<key>        -> logged-in staff only (default)
+//   - /api/public-media/<key> -> anyone (pass { public:true }); used for files
+//                                outsiders must open, e.g. e-sign docs that
+//                                external signers view and WhatsApp images Meta
+//                                fetches. The public route allowlists prefixes.
+// b2Download() is what both routes use.
 //
-// If the env vars are NOT set, uploads fall back to the public Supabase
-// Storage bucket "esign" so the flow still works before B2 is configured.
-//
-// E-sign documents are viewed by EXTERNAL signers (no login), so e-sign passes
-// { provider: 'supabase' } to keep its files on the public Supabase bucket.
+// If the B2 env vars are NOT set, uploadFile() throws — there is deliberately
+// no Supabase fallback.
 // ============================================================================
 
 import crypto from 'crypto'
-import { supabaseAdmin } from '@/lib/supabase-admin'
 
 const B2_KEY_ID = process.env.B2_KEY_ID
 const B2_APP_KEY = process.env.B2_APP_KEY
@@ -76,23 +77,25 @@ function encodeKey(key: string): string {
 
 export interface UploadResult {
   url: string
-  provider: 'backblaze' | 'supabase'
+  provider: 'backblaze'
   key: string
 }
 
 export interface UploadOptions {
-  // 'auto'     -> Backblaze when configured, else Supabase (default)
-  // 'supabase' -> always Supabase public bucket (used by e-sign: external viewers)
-  provider?: 'auto' | 'supabase'
+  // public: true  -> served via the UNauthenticated /api/public-media proxy,
+  //                  for files outsiders must open (e-sign docs, WhatsApp images).
+  // default       -> served via the auth-gated /api/media proxy (staff only).
+  public?: boolean
 }
 
 /**
- * Upload a file. Uses Backblaze B2 (private) when configured, otherwise the
- * public Supabase "esign" bucket.
+ * Upload a file to the PRIVATE Backblaze B2 bucket. Nothing is ever written to
+ * Supabase Storage.
  *
- * For B2 the returned `url` is an APP PATH ("/api/media/<key>"), NOT a public
- * link — the bucket is private and bytes are served through the auth-gated
- * /api/media proxy.
+ * The returned `url` is an APP PATH, not a direct link — the bucket is private
+ * and bytes are streamed through a proxy:
+ *   - default        -> "/api/media/<key>"        (logged-in staff only)
+ *   - { public:true }-> "/api/public-media/<key>" (anyone — for e-sign/WhatsApp)
  *
  * @param key   object path, e.g. "avatars/<userId>/photo-123.jpg"
  */
@@ -104,35 +107,31 @@ export async function uploadFile(
 ): Promise<UploadResult> {
   const buf = Buffer.isBuffer(data) ? data : Buffer.from(data as any)
 
-  if (opts.provider !== 'supabase' && b2Configured()) {
-    const auth = await b2Authorize()
-    const { uploadUrl, uploadAuthToken } = await b2GetUploadUrl(auth)
-    const sha1 = crypto.createHash('sha1').update(buf).digest('hex')
-    const res = await fetch(uploadUrl, {
-      method: 'POST',
-      headers: {
-        Authorization: uploadAuthToken,
-        'X-Bz-File-Name': encodeKey(key),
-        'Content-Type': contentType,
-        'Content-Length': String(buf.length),
-        'X-Bz-Content-Sha1': sha1,
-      },
-      body: buf,
-    })
-    if (!res.ok) throw new Error(`B2 upload failed: ${res.status} ${await res.text()}`)
-    // Private bucket: serve via the auth-gated proxy, not a public URL.
-    return { url: `/api/media/${key}`, provider: 'backblaze', key }
+  if (!b2Configured()) {
+    throw new Error(
+      'Backblaze B2 is not configured (B2_KEY_ID / B2_APP_KEY / B2_BUCKET_ID / B2_BUCKET_NAME). ' +
+      'Supabase storage is intentionally disabled — set the B2 env vars.',
+    )
   }
 
-  // ── Fallback / forced: Supabase Storage (public "esign" bucket) ───────────
-  const sb = supabaseAdmin()
-  const { error } = await sb.storage.from('esign').upload(key, buf, {
-    contentType,
-    upsert: true,
+  const auth = await b2Authorize()
+  const { uploadUrl, uploadAuthToken } = await b2GetUploadUrl(auth)
+  const sha1 = crypto.createHash('sha1').update(buf).digest('hex')
+  const res = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: uploadAuthToken,
+      'X-Bz-File-Name': encodeKey(key),
+      'Content-Type': contentType,
+      'Content-Length': String(buf.length),
+      'X-Bz-Content-Sha1': sha1,
+    },
+    body: buf,
   })
-  if (error) throw new Error(`Supabase storage upload failed: ${error.message}`)
-  const { data: pub } = sb.storage.from('esign').getPublicUrl(key)
-  return { url: pub.publicUrl, provider: 'supabase', key }
+  if (!res.ok) throw new Error(`B2 upload failed: ${res.status} ${await res.text()}`)
+
+  const base = opts.public ? '/api/public-media/' : '/api/media/'
+  return { url: `${base}${key}`, provider: 'backblaze', key }
 }
 
 /**
@@ -144,4 +143,58 @@ export async function b2Download(key: string): Promise<Response> {
   const auth = await b2Authorize()
   const url = `${auth.downloadUrl}/file/${encodeURIComponent(B2_BUCKET_NAME!)}/${encodeKey(key)}`
   return fetch(url, { headers: { Authorization: auth.authorizationToken } })
+}
+
+export interface B2File {
+  key: string
+  size: number
+  uploadedAt: string // ISO
+}
+
+/**
+ * List files under a key prefix, e.g. "salary/<userId>/". Returns newest first.
+ */
+export async function b2List(prefix: string): Promise<B2File[]> {
+  if (!b2Configured()) throw new Error('B2 not configured')
+  const auth = await b2Authorize()
+  const out: B2File[] = []
+  let startFileName: string | undefined
+  do {
+    const res = await fetch(`${auth.apiUrl}/b2api/v2/b2_list_file_names`, {
+      method: 'POST',
+      headers: { Authorization: auth.authorizationToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bucketId: B2_BUCKET_ID, prefix, maxFileCount: 1000, startFileName }),
+    })
+    if (!res.ok) throw new Error(`B2 list failed: ${res.status} ${await res.text()}`)
+    const j = await res.json()
+    for (const f of j.files || []) {
+      out.push({ key: f.fileName, size: f.contentLength ?? 0, uploadedAt: new Date(f.uploadTimestamp || Date.now()).toISOString() })
+    }
+    startFileName = j.nextFileName || undefined
+  } while (startFileName)
+  out.sort((a, b) => (a.uploadedAt < b.uploadedAt ? 1 : -1)) // newest first
+  return out
+}
+
+/**
+ * Delete every version of a file (by exact key) from the private B2 bucket.
+ */
+export async function b2Delete(key: string): Promise<void> {
+  if (!b2Configured()) throw new Error('B2 not configured')
+  const auth = await b2Authorize()
+  // Find all versions of this exact file name, then delete each.
+  const res = await fetch(`${auth.apiUrl}/b2api/v2/b2_list_file_versions`, {
+    method: 'POST',
+    headers: { Authorization: auth.authorizationToken, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bucketId: B2_BUCKET_ID, prefix: key, maxFileCount: 1000 }),
+  })
+  if (!res.ok) throw new Error(`B2 list_versions failed: ${res.status} ${await res.text()}`)
+  const j = await res.json()
+  for (const f of (j.files || []).filter((x: any) => x.fileName === key)) {
+    await fetch(`${auth.apiUrl}/b2api/v2/b2_delete_file_version`, {
+      method: 'POST',
+      headers: { Authorization: auth.authorizationToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileName: f.fileName, fileId: f.fileId }),
+    })
+  }
 }

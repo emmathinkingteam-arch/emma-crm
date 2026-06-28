@@ -115,6 +115,7 @@ export default function CustomerDetailPage() {
 
   // Order creation
   const [showOrderForm, setShowOrderForm] = useState(false)
+  const [orderMode, setOrderMode] = useState<'paid' | 'free'>('paid') // 'free' = Free Post campaign order (no payment)
   const [orderCustomerName, setOrderCustomerName] = useState('')   // shown on invoice
   const [orderTitle, setOrderTitle] = useState('')                 // honorific: 'Mr.' | 'Miss.' — used on the confirmation SMS
   const [selectedPkg, setSelectedPkg] = useState('')
@@ -213,6 +214,8 @@ export default function CustomerDetailPage() {
   }, [timerActive, orderTimer])
 
   // Computed order form values
+  // Free Post campaign: the single zero-price package every free order points at.
+  const freePackage = packages.find(p => p.flow_variant === 'free')
   const selectedPkgObj = packages.find(p => p.id === selectedPkg)
   const basePrice = selectedPkgObj?.price || 0
   const discountedPrice = discount > 0 ? Math.round(basePrice * (1 - discount / 100)) : basePrice
@@ -300,6 +303,9 @@ export default function CustomerDetailPage() {
   const isActiveStep = canAct()
   const countdown = activeStep ? getCountdown(activeStep.deadline, activeStep.extended_deadline) : null
   const isInstallmentPending = (activeOrder as any)?.installment_status === 'partial'
+  // Free Post campaign order — drives the purple theme + the shortened
+  // Back Office → Counselor → Designer pipeline (no Manager step).
+  const isFree = activeOrder?.step_variant === 'free'
 
   // Upload payment slip
   const handleSlipUpload = async (file: File): Promise<string> => {
@@ -697,11 +703,40 @@ export default function CustomerDetailPage() {
     }).eq('id', activeOrder.id)
 
     const amt = (activeOrder as any).installment_2_amount
-    // Include the slip URL itself (not just "Slip uploaded") so the
-    // history list can render a "View payment slip" button.
     await logAction(
       `2nd installment paid — LKR ${amt ? Number(amt).toLocaleString() : '?'}${uploadedSlip2Url ? ` | Slip: ${uploadedSlip2Url}` : ''}`
     )
+
+    // Auto-generate 2nd installment invoice
+    try {
+      const inst1 = Number((activeOrder as any).installment_1_amount || 0)
+      const inst2 = Number(amt || 0)
+      const invRes = await fetch('/api/generate-invoice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: activeOrder.id,
+          clientName: customer?.name || customer?.phone,
+          clientNumber: customer?.phone,
+          paymentMethod: activeOrder.payment_type === 'bank_transfer' ? 'Bank Transfer'
+            : activeOrder.payment_type === 'koko' ? 'KOKO' : 'Genie',
+          bankName: (activeOrder as any).payment_bank || undefined,
+          packageName: (activeOrder as any).package?.name || '',
+          finalAmount: inst2,
+          discountPercent: 0,
+          installmentType: '2nd',
+          packageTotal: inst1 + inst2,
+          otherInstallmentAmount: inst1,
+        })
+      })
+      if (invRes.ok) {
+        const invData = await invRes.json()
+        if (invData.invoiceUrl) {
+          setInvoice2ndUrl(invData.invoiceUrl)
+          await logAction(`2nd installment invoice generated | Invoice: ${invData.invoiceUrl}`)
+        }
+      }
+    } catch (_) { /* silent */ }
 
     setShow2ndInstallment(false); setSlip2File(null); setSlip2Url('')
     await fetchAll()
@@ -876,6 +911,80 @@ export default function CustomerDetailPage() {
         description: `Assigned to back office: ${assignedWorker?.full_name || 'unassigned'} — 4hr deadline set`,
         created_by: user.id,
       }] : []),
+    ])
+
+    setShowOrderForm(false); setTimerActive(false); setSelectedAssignee('')
+    await fetchAll()
+    setActionLoading(false)
+  }
+
+  // ── Create FREE Post Order ─────────────────────────────────
+  // Free Post campaign: no package, no payment, no invoice, no commission.
+  // Creates a `step_variant: 'free'` order straight at Step 3 (Back Office),
+  // which then runs the shortened Back Office → Counselor → Designer pipeline.
+  const handleCreateFreeOrder = async () => {
+    if (!freePackage || !user || !customer || !selectedAssignee) return
+    setActionLoading(true)
+
+    // Persist any customer name/title edits (same as the paid flow).
+    const trimmedCustomerName = orderCustomerName.trim()
+    const custUpdates: any = {}
+    if (trimmedCustomerName && trimmedCustomerName !== customer.name) custUpdates.name = trimmedCustomerName
+    if (orderTitle !== ((customer as any).title || '')) custUpdates.title = orderTitle || null
+    if (Object.keys(custUpdates).length > 0) {
+      await supabase.from('customers').update(custUpdates).eq('id', customer.id)
+      setCustomer(c => c ? { ...c, ...custUpdates } : c)
+    }
+
+    const { data: order, error: orderErr } = await supabase.from('orders').insert({
+      customer_id: customer.id,
+      package_id: freePackage.id,
+      current_step: 3,
+      step_variant: 'free',
+      status: 'active',
+      amount_paid: 0,
+      payment_type: 'other',
+      created_by: user.id,
+      agent_name: null,
+      installment_status: 'complete',
+    }).select().single()
+
+    if (orderErr || !order) {
+      console.error('FREE ORDER INSERT ERROR:', JSON.stringify(orderErr))
+      alert('Free order failed: ' + (orderErr?.message || 'unknown error'))
+      setActionLoading(false)
+      return
+    }
+
+    const stepDeadline = makeDeadline(3)
+    await supabase.from('order_steps').insert({
+      order_id: order.id,
+      step_number: 3,
+      step_name: 'Back Office — Free Post Onboarding',
+      status: 'pending',
+      assigned_to: selectedAssignee,
+      deadline: stepDeadline,
+    })
+
+    // 🔔 Fire SMS to the back office worker — first handoff in the free chain.
+    fetch('/api/sms/handoff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        orderId: order.id,
+        assignedUserId: selectedAssignee,
+      }),
+    }).catch(() => { })
+
+    // No invoice, no commission, no payment-confirm SMS for free orders.
+    const assignedWorker = workers.find(w => w.id === selectedAssignee)
+    await supabase.from('interactions').insert([
+      {
+        customer_id: id,
+        type: 'order',
+        description: `🆓 Free Post order created — routed to Back Office: ${assignedWorker?.full_name || 'unassigned'}`,
+        created_by: user.id,
+      },
     ])
 
     setShowOrderForm(false); setTimerActive(false); setSelectedAssignee('')
@@ -1192,8 +1301,12 @@ export default function CustomerDetailPage() {
           </div>
           {activeOrder && (
             <div className="flex gap-2 mt-3 flex-wrap">
-              {[2, 3, 4, 5, 6].map(n => (
-                <span key={n} className={`text-[8px] font-bold px-2.5 py-1 rounded-full ${activeOrder.current_step >= n ? 'bg-pink-600 text-white' : 'bg-white text-gray-300'}`}>
+              {isFree && (
+                <span className="text-[8px] font-bold px-2.5 py-1 rounded-full bg-purple-600 text-white uppercase tracking-wide">🆓 Free Post</span>
+              )}
+              {/* Free orders run a shortened 3 → 4 → 6 pipeline (no Manager step 5). */}
+              {(isFree ? [3, 4, 6] : [2, 3, 4, 5, 6]).map(n => (
+                <span key={n} className={`text-[8px] font-bold px-2.5 py-1 rounded-full ${activeOrder.current_step >= n ? (isFree ? 'bg-purple-600 text-white' : 'bg-pink-600 text-white') : 'bg-white text-gray-300'}`}>
                   Step {n}
                 </span>
               ))}
@@ -1306,39 +1419,22 @@ export default function CustomerDetailPage() {
                   <p className="text-gray-800 font-bold">LKR {Number((activeOrder as any).installment_2_amount).toLocaleString()}</p>
                 </div>
               </div>
-              {!(activeOrder as any).invoice_html_2nd && !invoice2ndUrl ? (
-                <button onClick={handleGenerate2ndInvoice} disabled={actionLoading}
-                  className="w-full bg-green-600 text-white rounded-xl py-3 text-xs font-bold disabled:opacity-40 flex items-center justify-center gap-2">
-                  {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <><Receipt size={13} /> Generate 2nd Installment Invoice</>}
-                </button>
-              ) : (
-                <div className="space-y-2">
-                  <a
-                    href={invoice2ndUrl || `${process.env.NEXT_PUBLIC_APP_URL}/invoice/${activeOrder.id}?type=2nd`}
-                    target="_blank" rel="noreferrer"
-                    className="w-full flex items-center justify-center gap-2 bg-white border border-green-200 text-green-700 rounded-xl py-2.5 text-xs font-bold">
-                    <ExternalLink size={13} /> View 2nd installment invoice
-                  </a>
-                  <button onClick={() => {
-                    const url = invoice2ndUrl || `${process.env.NEXT_PUBLIC_APP_URL}/invoice/${activeOrder.id}?type=2nd`
-                    openWa(buildWaLink(customer.phone, WA.send2ndInstallmentInvoice(customer.name || customer.phone, url)))
-                    logAction('2nd installment invoice sent via WhatsApp')
-                  }}
-                    className="w-full bg-green-600 text-white rounded-xl py-2.5 text-xs font-bold flex items-center justify-center gap-2">
-                    Send 2nd installment invoice via WhatsApp
-                  </button>
-                </div>
+              {(activeOrder as any).installment_2_slip_url && (
+                <a href={(activeOrder as any).installment_2_slip_url} target="_blank" rel="noreferrer"
+                  className="w-full flex items-center justify-center gap-2 bg-white border border-green-200 text-green-700 rounded-xl py-2.5 text-xs font-bold">
+                  <ExternalLink size={13} /> View 2nd installment slip
+                </a>
               )}
             </div>
           )}
 
           {/* ── STEP PANEL ────────────────────────────────── */}
           {activeOrder && activeStep && !isExpired && (
-            <div className={`border rounded-2xl overflow-hidden ${isActiveStep ? 'border-pink-200' : 'border-gray-100'}`}>
-              <div className={`px-4 py-3 ${isActiveStep ? 'bg-pink-50' : 'bg-gray-50'}`}>
+            <div className={`border rounded-2xl overflow-hidden ${isActiveStep ? (isFree ? 'border-purple-200' : 'border-pink-200') : 'border-gray-100'}`}>
+              <div className={`px-4 py-3 ${isActiveStep ? (isFree ? 'bg-purple-50' : 'bg-pink-50') : 'bg-gray-50'}`}>
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className={`text-[9px] font-bold uppercase tracking-wide ${isActiveStep ? 'text-pink-600' : 'text-gray-400'}`}>
+                    <p className={`text-[9px] font-bold uppercase tracking-wide ${isActiveStep ? (isFree ? 'text-purple-600' : 'text-pink-600') : 'text-gray-400'}`}>
                       {isActiveStep
                         ? stepAccepted ? 'In progress — your turn' : 'New assignment — accept to begin'
                         : `Waiting — Step ${activeStep.step_number}${(activeStep as any).assigned_user ? ` · ${(activeStep as any).assigned_user.full_name}` : ' · Unassigned'}`}
@@ -1351,8 +1447,8 @@ export default function CustomerDetailPage() {
                   </div>
                   {isActiveStep
                     ? <div className="flex items-center gap-1.5">
-                      <div className={`w-2 h-2 rounded-full ${countdown === 'Overdue' ? 'bg-red-500 animate-pulse' : stepAccepted ? 'bg-green-500' : 'bg-pink-500 animate-pulse'}`} />
-                      <span className={`text-[9px] font-bold ${countdown === 'Overdue' ? 'text-red-600' : stepAccepted ? 'text-green-600' : 'text-pink-600'}`}>
+                      <div className={`w-2 h-2 rounded-full ${countdown === 'Overdue' ? 'bg-red-500 animate-pulse' : stepAccepted ? 'bg-green-500' : (isFree ? 'bg-purple-500 animate-pulse' : 'bg-pink-500 animate-pulse')}`} />
+                      <span className={`text-[9px] font-bold ${countdown === 'Overdue' ? 'text-red-600' : stepAccepted ? 'text-green-600' : (isFree ? 'text-purple-600' : 'text-pink-600')}`}>
                         {countdown === 'Overdue' ? 'Overdue' : stepAccepted ? 'In Progress' : 'Pending'}
                       </span>
                     </div>
@@ -1360,13 +1456,98 @@ export default function CustomerDetailPage() {
                 </div>
               </div>
 
+              {/* STEP 3 (FREE POST) — Back Office onboarding for the Free Post campaign.
+                  Instead of greeting/invoice, the back office sends the website
+                  register link + instructions, then assigns a counselor. The post
+                  goes straight to the designer after the counselor (no manager). */}
+              {isActiveStep && myStep === 3 && isFree && (
+                <div className="p-4 space-y-2">
+                  <div className="bg-purple-50 border border-purple-200 rounded-xl px-3 py-2 flex items-center gap-2">
+                    <span className="text-[8px] font-bold bg-purple-600 text-white px-2 py-0.5 rounded-full uppercase">Free Post</span>
+                    <span className="text-[10px] text-purple-700 font-semibold">Send register link → assign counselor</span>
+                  </div>
+
+                  {!stepAccepted && (
+                    <button onClick={doAccept} disabled={actionLoading}
+                      className="w-full bg-purple-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
+                      {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Accept assignment'}
+                    </button>
+                  )}
+
+                  <button disabled={!stepAccepted} onClick={async () => {
+                    openWa(buildWaLink(customer.phone, WA.freeRegister(customer.name || customer.phone)))
+                    await logAction('Free Post register link & instructions sent via WhatsApp')
+                    await fetchAll()
+                  }} className={`w-full flex items-center gap-3 border rounded-xl px-4 py-3 text-xs font-semibold transition-all ${stepAccepted ? 'bg-white border-purple-200 text-purple-700' : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'}`}>
+                    <span className={`w-2 h-2 rounded-full ${stepAccepted ? 'bg-purple-500' : 'bg-gray-300'}`} />Send register link & instructions
+                  </button>
+
+                  {stepAccepted && (
+                    <>
+                      {/* Customer's public profile link — optional for the free flow.
+                          She creates her own profile via the register link; paste it
+                          here if available so the counselor has it for the brief. */}
+                      <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[9px] font-bold text-blue-700 uppercase tracking-wide">
+                            Customer public link <span className="text-gray-400 font-normal">(optional)</span>
+                          </p>
+                          <a
+                            href={`https://www.emmathinking.com/admin/users?q=${customer?.phone?.replace(/\D/g, '').slice(-9)}&field=phoneNumber`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[9px] font-bold text-blue-600 underline flex items-center gap-1"
+                          >
+                            <ExternalLink size={9} /> Open CRM
+                          </a>
+                        </div>
+                        <p className="text-[9px] text-blue-600 font-medium leading-relaxed">
+                          Once she has registered & built her profile, paste her profile link here for the counselor.
+                        </p>
+                        {publicProfileLink ? (
+                          <div className="flex items-center gap-2 bg-white border border-blue-100 rounded-lg px-3 py-2">
+                            <CheckCircle size={12} className="text-green-500 flex-shrink-0" />
+                            <p className="text-[10px] font-semibold text-gray-700 flex-1 truncate">{publicProfileLink}</p>
+                            <button onClick={() => setPublicProfileLink('')} className="text-[9px] text-red-400 font-bold flex-shrink-0">Remove</button>
+                          </div>
+                        ) : (
+                          <input
+                            type="url"
+                            value={publicProfileLink}
+                            onChange={e => setPublicProfileLink(e.target.value)}
+                            placeholder="Paste customer profile link here..."
+                            className="w-full bg-white border border-blue-200 rounded-lg px-3 py-2 text-xs font-medium outline-none focus:border-blue-400"
+                          />
+                        )}
+                      </div>
+                      <div>
+                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign counselor</label>
+                        <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
+                          className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
+                          <option value="">Select counselor...</option>
+                          {workers.filter(w => w.role === 'counselor').map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
+                        </select>
+                      </div>
+                      <button onClick={() => {
+                        const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'counselor'
+                        const linkNote = publicProfileLink ? ` | Profile link: ${publicProfileLink}` : ''
+                        doComplete(4, {}, selectedAssignee, `🆓 Free post — assigned to counselor: ${name} — 48hr deadline set${linkNote}`)
+                      }} disabled={!selectedAssignee || actionLoading}
+                        className="w-full bg-purple-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
+                        {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Assign to counselor'}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+
               {/* STEP 3 — Back Office */}
               {/* sub_step === 'customer_facing' means this row was created by the
                   counselor returning a silver_bronze order back to Back Office.
                   In that second pass the work is: review brief → send brief to
                   customer → mark approved → transfer to manager. The first-pass
                   greeting/invoice/assign-counselor UI does NOT apply here. */}
-              {isActiveStep && myStep === 3 && activeStep.sub_step !== 'customer_facing' && (
+              {isActiveStep && myStep === 3 && !isFree && activeStep.sub_step !== 'customer_facing' && (
                 <div className="p-4 space-y-2">
                   {!stepAccepted && (
                     <button onClick={doAccept} disabled={actionLoading}
@@ -1630,6 +1811,27 @@ export default function CustomerDetailPage() {
                           }} disabled={!selectedAssignee || actionLoading}
                             className="w-full bg-purple-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
                             Return to Back Office
+                          </button>
+                        </>
+                      )}
+                      {/* Free Post — counselor hands the brief straight to the designer
+                          (skips the Manager review step entirely). */}
+                      {customerApproved && activeOrder.step_variant === 'free' && (
+                        <>
+                          <div>
+                            <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign designer</label>
+                            <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
+                              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
+                              <option value="">Select designer...</option>
+                              {workers.filter(w => w.role === 'designer').map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
+                            </select>
+                          </div>
+                          <button onClick={() => {
+                            const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'designer'
+                            doComplete(6, { description: brief }, selectedAssignee, `🆓 Free post — assigned to designer: ${name}`, brief)
+                          }} disabled={!selectedAssignee || actionLoading}
+                            className="w-full bg-purple-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
+                            {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Assign to designer'}
                           </button>
                         </>
                       )}
@@ -2075,19 +2277,38 @@ export default function CustomerDetailPage() {
           {role === 'crm_agent' && (!activeOrder || isUpgrade) && (
             <div>
               {!showOrderForm ? (
-                <button onClick={openOrderTab}
-                  className={`w-full rounded-2xl py-4 text-xs font-bold shadow-lg active:scale-95 transition-all ${isUpgrade ? 'bg-amber-500 text-white shadow-amber-200' : 'bg-pink-600 text-white shadow-pink-200'}`}>
-                  {isUpgrade ? '⬆️ Create Upgrade Order' : 'Create order'}
-                </button>
+                <div className="space-y-2">
+                  <button onClick={() => { setOrderMode('paid'); openOrderTab() }}
+                    className={`w-full rounded-2xl py-4 text-xs font-bold shadow-lg active:scale-95 transition-all ${isUpgrade ? 'bg-amber-500 text-white shadow-amber-200' : 'bg-pink-600 text-white shadow-pink-200'}`}>
+                    {isUpgrade ? '⬆️ Create Upgrade Order' : 'Create order'}
+                  </button>
+                  {/* Free Post campaign — only for brand-new orders, never upgrades */}
+                  {!isUpgrade && (
+                    <button onClick={() => { setOrderMode('free'); openOrderTab() }}
+                      className="w-full rounded-2xl py-4 text-xs font-bold shadow-lg shadow-purple-200 active:scale-95 transition-all bg-purple-600 text-white">
+                      🆓 Free Post Order
+                    </button>
+                  )}
+                </div>
               ) : (
-                <div className="border border-pink-200 rounded-2xl overflow-hidden">
-                  <div className="bg-red-50 px-4 py-3 flex items-center justify-between">
-                    <div>
-                      <p className="text-[9px] font-bold text-red-500 uppercase tracking-wide">10 min order window</p>
-                      <p className="text-[8px] text-red-400 font-medium">Complete before time runs out</p>
+                <div className={`border rounded-2xl overflow-hidden ${orderMode === 'free' ? 'border-purple-200' : 'border-pink-200'}`}>
+                  {orderMode === 'free' ? (
+                    <div className="bg-purple-50 px-4 py-3 flex items-center justify-between">
+                      <div>
+                        <p className="text-[9px] font-bold text-purple-600 uppercase tracking-wide">🆓 Free Post — Campaign</p>
+                        <p className="text-[8px] text-purple-400 font-medium">No payment · generates a free profile post</p>
+                      </div>
+                      <span className="text-[8px] font-bold bg-purple-600 text-white px-2.5 py-1 rounded-full uppercase">Free</span>
                     </div>
-                    <span className="text-xl font-bold text-red-500 font-mono">{fmtTimer(orderTimer)}</span>
-                  </div>
+                  ) : (
+                    <div className="bg-red-50 px-4 py-3 flex items-center justify-between">
+                      <div>
+                        <p className="text-[9px] font-bold text-red-500 uppercase tracking-wide">10 min order window</p>
+                        <p className="text-[8px] text-red-400 font-medium">Complete before time runs out</p>
+                      </div>
+                      <span className="text-xl font-bold text-red-500 font-mono">{fmtTimer(orderTimer)}</span>
+                    </div>
+                  )}
                   <div className="p-4 space-y-3">
 
                     {/* ── CUSTOMER NAME (shown on invoice + confirmation SMS) ── */}
@@ -2117,13 +2338,26 @@ export default function CustomerDetailPage() {
                       />
                     </div>
 
+                    {/* ── FREE POST NOTE (free mode only) ── */}
+                    {orderMode === 'free' && (
+                      <div className="bg-purple-50 border border-purple-200 rounded-xl px-3 py-2.5 flex items-start gap-2">
+                        <Receipt size={13} className="text-purple-500 mt-0.5 flex-shrink-0" />
+                        <p className="text-[10px] text-purple-700 font-medium leading-relaxed">
+                          This generates a <strong>free profile post</strong> — no package or payment.
+                          It goes straight to Back Office, who will send the registration link and instructions.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* ── PAID-ONLY FIELDS (package / payment) ── */}
+                    {orderMode === 'paid' && (<>
                     {/* ── PACKAGE ── */}
                     <div>
                       <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Package</label>
                       <select value={selectedPkg} onChange={e => { setSelectedPkg(e.target.value); setDiscount(0) }}
                         className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
                         <option value="">Select package...</option>
-                        {packages.map(p => <option key={p.id} value={p.id}>{p.name} — LKR {p.price.toLocaleString()}</option>)}
+                        {packages.filter(p => p.flow_variant !== 'free').map(p => <option key={p.id} value={p.id}>{p.name} — LKR {p.price.toLocaleString()}</option>)}
                       </select>
                     </div>
 
@@ -2328,6 +2562,7 @@ export default function CustomerDetailPage() {
                           className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none focus:border-pink-300" />
                       </div>
                     )}
+                    </>)}
 
                     {/* ── ASSIGN BACK OFFICE ── */}
                     <div>
@@ -2339,6 +2574,15 @@ export default function CustomerDetailPage() {
                       </select>
                     </div>
 
+                    {orderMode === 'free' ? (
+                      <button onClick={handleCreateFreeOrder}
+                        disabled={!selectedAssignee || !freePackage || actionLoading}
+                        className="w-full bg-purple-600 text-white rounded-xl py-3 text-xs font-bold disabled:opacity-40 flex items-center justify-center gap-2">
+                        {actionLoading ? <><Loader2 size={14} className="animate-spin" /> Processing...</> : (
+                          <>🆓 Generate Free Post → Submit</>
+                        )}
+                      </button>
+                    ) : (
                     <button onClick={handleCreateOrder}
                       disabled={
                         !selectedPkg ||
@@ -2357,7 +2601,8 @@ export default function CustomerDetailPage() {
                         </>
                       )}
                     </button>
-                    {invoiceUrl && (
+                    )}
+                    {orderMode === 'paid' && invoiceUrl && (
                       <a href={invoiceUrl} target="_blank" rel="noreferrer"
                         className="flex items-center justify-center gap-2 bg-green-50 border border-green-100 text-green-700 rounded-xl py-3 text-xs font-bold">
                         <ExternalLink size={13} /> View invoice

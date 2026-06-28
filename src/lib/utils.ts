@@ -72,6 +72,12 @@ export const WA = {
   greeting: (name: string) =>
     `Hi ${name},\n\nWelcome to Emma Thinking.\n\nYour order has been received and we are getting everything ready for you.\n\n---\n\nTo maintain privacy and fairness, Emma Thinking controls the sharing of contact information between members. If you wish to connect directly with someone, you must first register with us.\n\nඔබට අප හරහා කවුරුන්හෝ සම්බන්ධ කරගැනීමට අවශ්‍ය නම්, ප්‍රථමයෙන් අප සමග ලියාපදිංචි වීම අත්‍යවශ්‍යයවේ.\n\nලියාපදිංචිය සම්පූර්ණයෙන්ම නොමිලේ වන අතර, ඔබට පහත Website එක Fill කර එය සිදු කල හැකිය:\n\nලියාපදිංචි වීමට - https://www.emmathinking.com/login\n\nඔබට අදාළ පුද්ගලයා / පුද්ගලයන් සම්බන්ධ කර ගත හැකි වන්නෙ ලියාපදිංචියෙන් පසුව පමණක් බව කරුණාවෙන් සලකන්න.\n\nEmma Thinking (Pvt) Ltd කෙරෙහි තැබූ විශ්වාසට ඔබට තූති.`,
 
+  // Free Post campaign — Back Office sends the girl the website register link
+  // and step-by-step instructions to log in and complete a full profile before
+  // the order moves on to the counselor.
+  freeRegister: (name: string) =>
+    `Hi ${name},\n\nWelcome to Emma Thinking 💜\n\nYour FREE post request has been received. To get your free profile post published, please complete your registration on our website — it only takes a few minutes and is completely free.\n\nHow to get started:\n1️⃣ Open the link below\n2️⃣ Log in / register with your details\n3️⃣ Create your profile with FULL details (photos, bio, preferences)\n\n👉 https://www.emmathinking.com/login\n\n---\n\nඔබගේ නොමිලේ Post එක සඳහා, කරුණාකර පහත Website එකට ගොස් ලියාපදිංචි වී ඔබගේ Profile එක සම්පූර්ණ විස්තර සහිතව සකසන්න:\n\n1️⃣ පහත Link එක Open කරන්න\n2️⃣ ඔබගේ විස්තර සමඟ Log in / register වන්න\n3️⃣ ඔබගේ Profile එක සම්පූර්ණ විස්තර සහිතව (ඡායාරූප, විස්තර) සකසන්න\n\n👉 https://www.emmathinking.com/login\n\nProfile එක සම්පූර්ණ කළ පසු අපගේ කණ්ඩායම ඔබ සමඟ සම්බන්ධ වනු ඇත.\n\nEmma Thinking (Pvt) Ltd`,
+
   sendInvoice: (name: string, invoiceUrl: string) =>
     `Hi ${name},\n\nPlease find your invoice below for your reference.\n\n${invoiceUrl}\n\n---\n\nThis is your personal Relationship Manager.\n\nIf you have any questions or need assistance, please feel free to contact me at any time.\n\nEmma Thinking (Pvt) Ltd`,
 

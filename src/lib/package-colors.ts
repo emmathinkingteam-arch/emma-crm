@@ -28,6 +28,7 @@ export const PACKAGE_TONE: Record<string, PackageTone> = {
   bronze:   { bg: 'bg-orange-100',  border: 'border-orange-300',  text: 'text-orange-700',  dot: 'bg-orange-500',  chip: 'bg-orange-200 text-orange-800' },
   diamond:  { bg: 'bg-sky-100',     border: 'border-sky-300',     text: 'text-sky-700',     dot: 'bg-sky-500',     chip: 'bg-sky-200 text-sky-700' },
   elite:    { bg: 'bg-emerald-100', border: 'border-emerald-300', text: 'text-emerald-700', dot: 'bg-emerald-500', chip: 'bg-emerald-200 text-emerald-700' },
+  free:     { bg: 'bg-purple-100',  border: 'border-purple-300',  text: 'text-purple-700',  dot: 'bg-purple-500',  chip: 'bg-purple-200 text-purple-700' },
 }
 
 export const PACKAGE_TONE_FALLBACK: PackageTone = {

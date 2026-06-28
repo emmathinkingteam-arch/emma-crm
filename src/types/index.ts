@@ -20,7 +20,7 @@ export type LeaveType = 'annual' | 'casual' | 'sick' | 'other'
 export type RequestStatus = 'pending' | 'approved' | 'rejected'
 export type MilestoneType = 'wallet_balance' | 'order_count' | 'package_specific' | 'daily_entry' | 'custom'
 export type TimeSlot = 'W' | 'X' | 'Y' | 'Z' // four daily sittings; clock time varies by weekday/weekend — see getSlotLabel
-export type FlowVariant = 'standard' | 'silver_bronze'
+export type FlowVariant = 'standard' | 'silver_bronze' | 'free'
 
 // ── Database row types ───────────────────────────────────────
 

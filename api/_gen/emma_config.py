@@ -80,9 +80,23 @@ TEMPLATES = {
     "gold":       {"file": "gold.png",       **_normal(721, THEME_GOLD)},
     "vip":        {"file": "vip.png",        **_normal(735)},
     "princess":   {"file": "princess.png",   **_normal(721, THEME_PINK)},
-    "platinum":   {"file": "platinum-japan-1.png", "region_top": 490,
-                   "region_bottom": 700, "colors": THEME_BLACK},
 }
+
+# Platinum: photo is baked into each country template; text sits in the band
+# below the photo (565) up to the country badge (734). Any file named
+# platinum-<country>-<n>.png is picked up automatically — no config edit needed.
+PLATINUM_DEFAULT = {"region_top": 565, "region_bottom": 734, "colors": THEME_BLACK}
+DEFAULT_PLATINUM = "platinum-srilanka-1"
+
+def get_template(key):
+    key = (key or "").strip().lower()
+    if key in TEMPLATES:
+        return TEMPLATES[key]
+    if key.startswith("platinum"):
+        f = key + ".png"
+        if os.path.exists(os.path.join(TEMPLATE_DIR, f)):
+            return {"file": f, **PLATINUM_DEFAULT}
+    return None
 
 # package name (e.g. "Gold Pass", "Princess Silver", "VIP Pass") -> template key.
 # Order matters: princess first so "Princess Gold" -> princess (pink).
@@ -92,5 +106,5 @@ def template_for_package(name):
     n = (name or "").strip().lower()
     for key in _PKG_ORDER:
         if key in n:
-            return key
+            return DEFAULT_PLATINUM if key == "platinum" else key
     return "silver"  # safe default

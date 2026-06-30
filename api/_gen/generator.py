@@ -178,7 +178,7 @@ def parse_system_text(raw):
 
 def render(template_key, data, opts=None):
     opts = opts or {}
-    tpl = C.TEMPLATES[template_key]
+    tpl = C.get_template(template_key) or C.TEMPLATES["silver"]
     img = Image.open(os.path.join(C.TEMPLATE_DIR, tpl["file"])).convert("RGB")
     if img.size != (C.CANVAS, C.CANVAS):
         img = img.resize((C.CANVAS, C.CANVAS), Image.LANCZOS)
@@ -243,7 +243,7 @@ def generate(brief, package="", code="", opts=None):
     data = parse_system_text(brief)
     if code:
         data["code"] = code
-    key = (opts.get("template") or "").strip().lower() or C.template_for_package(package)
-    if key not in C.TEMPLATES:
+    key = (opts.get("template") or "").strip().lower()
+    if not key or C.get_template(key) is None:
         key = C.template_for_package(package)
     return render(key, data, opts)

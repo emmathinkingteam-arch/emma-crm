@@ -169,7 +169,7 @@ export default function PostTunerPage() {
               </select>
             </div>
             <div>
-              <label className={lbl}>Title boldness (0–4)</label>
+              <label className={lbl}>Title boldness — Sinhala only (0–4)</label>
               <input type="number" min={0} max={4} className={sel} value={stroke}
                 onChange={e => setStroke(Number(e.target.value))} />
             </div>

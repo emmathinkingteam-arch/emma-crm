@@ -74,11 +74,13 @@ def line_metrics(si, la, size):
 
 def draw_line_centered(draw, text, cx, baseline_y, si, la, size, fill, transform=None, stroke=0):
     runs = segment_runs(text, si, la, size, transform)
+    sin_font = get_font(si, size)          # boldness applies to Sinhala runs only
     total = sum(f.getlength(t) for t, f in runs)
     x = cx - total / 2.0
     for t, f in runs:
+        sw = stroke if f is sin_font else 0   # English title stays fixed (no stroke)
         draw.text((x, baseline_y), t, font=f, fill=fill, anchor="ls",
-                  stroke_width=stroke, stroke_fill=fill)
+                  stroke_width=sw, stroke_fill=fill)
         x += f.getlength(t)
 
 

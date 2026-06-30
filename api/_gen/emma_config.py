@@ -15,7 +15,7 @@ BOX_BOTTOM = CANVAS - MARGIN
 
 FONTS = {
     "corner":        os.path.join(FONT_DIR, "MYRIADPRO-BOLD.OTF"),
-    "title_sinhala": os.path.join(FONT_DIR, "apex049.ttf"),                 # legacy
+    "title_sinhala": os.path.join(FONT_DIR, "apex020.ttf"),                 # legacy (Apex Apura 020)
     "title_latin":   os.path.join(FONT_DIR, "fabiolla-personal-use.ttf"),
     "body_sinhala":  os.path.join(FONT_DIR, "4u-malith.ttf"),              # legacy
     "body_latin":    os.path.join(FONT_DIR, "MYRIADPRO-REGULAR.OTF"),
@@ -26,7 +26,7 @@ FONTS = {
 # fonts per role. Sinhala options are legacy (FM-Abhaya) fonts.
 FONT_FILES = {
     # Sinhala (legacy)
-    "apex": "apex049.ttf",
+    "apex": "apex020.ttf",
     "malith": "4u-malith.ttf",
     "kd": "0KDBOLIDDA.ttf",
     # English / Latin

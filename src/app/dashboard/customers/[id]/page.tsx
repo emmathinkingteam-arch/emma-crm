@@ -3198,28 +3198,31 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
     }
   }
 
-  // Generate the post artwork with Python (server) instead of Illustrator.
+  // Generate the post artwork with the Python function, then hand the PNG to the
+  // existing uploadDesign() (which compresses, uploads to B2 and saves the URL).
   const generateAI = async () => {
     if (!orderId) { setImgMsg('Open this from an active order first.'); return }
     if (!desc.trim()) { setImgMsg('No brief text to generate from.'); return }
-    setImgBusy(true); setImgMsg(null)
+    setImgBusy(true); setImgMsg('Generating…')
+    let file: File
     try {
-      const res = await fetch('/api/post-image/generate', {
+      const res = await fetch('/api/generate-post', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId, brief: desc, package: packageName, code: postCode }),
+        body: JSON.stringify({ brief: desc, package: packageName, code: postCode }),
       })
-      const raw = await res.text()
-      let j: any = null
-      try { j = raw ? JSON.parse(raw) : null } catch { /* non-JSON */ }
-      if (!res.ok) throw new Error(j?.error || raw || `Generation failed (${res.status})`)
-      setImageUrl(j.url)
-      setImgMsg('✓ Generated — review the preview below.')
+      if (!res.ok) {
+        const t = await res.text()
+        let j: any = null
+        try { j = JSON.parse(t) } catch { /* non-JSON */ }
+        throw new Error(j?.error || t || `Generation failed (${res.status})`)
+      }
+      const blob = await res.blob()
+      file = new File([blob], `${saveAsName}.png`, { type: 'image/png' })
     } catch (e: any) {
-      setImgMsg(e?.message || 'Generation failed')
-    } finally {
-      setImgBusy(false)
+      setImgMsg(e?.message || 'Generation failed'); setImgBusy(false); return
     }
+    await uploadDesign(file)   // reuses the existing B2 upload + DB save + preview
   }
 
   const findAndUpload = async () => {

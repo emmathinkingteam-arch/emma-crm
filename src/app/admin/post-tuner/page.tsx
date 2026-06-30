@@ -50,6 +50,7 @@ export default function PostTunerPage() {
   const [bodySi, setBodySi] = useState('')
   const [corner, setCorner] = useState('')
   const [stroke, setStroke] = useState(0)
+  const [strokeEn, setStrokeEn] = useState(0)
   const [maxSize, setMaxSize] = useState(89)
 
   const [busy, setBusy] = useState(false)
@@ -64,6 +65,7 @@ export default function PostTunerPage() {
     body_la: bodyLa, body_si: bodySi,
     corner,
     title_stroke: stroke,
+    title_stroke_en: strokeEn,
     title_max_size: maxSize,
   })
 
@@ -169,9 +171,14 @@ export default function PostTunerPage() {
               </select>
             </div>
             <div>
-              <label className={lbl}>Title boldness — Sinhala only (0–4)</label>
+              <label className={lbl}>Title boldness — Sinhala (0–4)</label>
               <input type="number" min={0} max={4} className={sel} value={stroke}
                 onChange={e => setStroke(Number(e.target.value))} />
+            </div>
+            <div>
+              <label className={lbl}>Title boldness — English (0–4)</label>
+              <input type="number" min={0} max={4} className={sel} value={strokeEn}
+                onChange={e => setStrokeEn(Number(e.target.value))} />
             </div>
             <div>
               <label className={lbl}>Title max size</label>

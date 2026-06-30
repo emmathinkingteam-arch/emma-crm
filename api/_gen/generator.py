@@ -72,13 +72,14 @@ def line_metrics(si, la, size):
     return max(a1, a2), max(d1, d2)
 
 
-def draw_line_centered(draw, text, cx, baseline_y, si, la, size, fill, transform=None, stroke=0):
+def draw_line_centered(draw, text, cx, baseline_y, si, la, size, fill, transform=None,
+                       stroke_si=0, stroke_la=0):
     runs = segment_runs(text, si, la, size, transform)
-    sin_font = get_font(si, size)          # boldness applies to Sinhala runs only
+    sin_font = get_font(si, size)          # separate boldness for Sinhala vs English
     total = sum(f.getlength(t) for t, f in runs)
     x = cx - total / 2.0
     for t, f in runs:
-        sw = stroke if f is sin_font else 0   # English title stays fixed (no stroke)
+        sw = stroke_si if f is sin_font else stroke_la
         draw.text((x, baseline_y), t, font=f, fill=fill, anchor="ls",
                   stroke_width=sw, stroke_fill=fill)
         x += f.getlength(t)
@@ -191,7 +192,8 @@ def render(template_key, data, opts=None):
     t_la = C.font_path(opts.get("title_la"), "title_latin")
     b_si = C.font_path(opts.get("body_si"), "body_sinhala")
     b_la = C.font_path(opts.get("body_la"), "body_latin")
-    stroke = int(opts.get("title_stroke", C.TITLE_STROKE) or 0)
+    stroke_si = int(opts.get("title_stroke", C.TITLE_STROKE) or 0)      # Sinhala boldness
+    stroke_la = int(opts.get("title_stroke_en", 0) or 0)                # English boldness
     title_max = int(opts.get("title_max_size") or C.TITLE_MAX_SIZE)
 
     cfn = lambda t, x, y, a: (t and draw.text((x, y), t, font=get_font(corner_font, C.CORNER_SIZE),
@@ -218,7 +220,7 @@ def render(template_key, data, opts=None):
     block_top = region_top + max(0, (region_h - total_h) / 2.0)
 
     draw_line_centered(draw, data["title"], cx, block_top + t_asc, t_si, t_la, t_size,
-                       colors["title"], transform=to_legacy, stroke=stroke)
+                       colors["title"], transform=to_legacy, stroke_si=stroke_si, stroke_la=stroke_la)
     if desc_lines:
         first = block_top + title_h + C.TITLE_DESC_GAP + d_asc
         for i, line in enumerate(desc_lines):

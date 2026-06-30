@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import Tracker, { type Milestone, type ParsedBrief, type MState } from './Tracker'
+import PlatinumPicker from './PlatinumPicker'
 
 // Plain anon client (no cookies) so the page is open to any visitor with
 // the link. Data comes from the SECURITY DEFINER function get_order_tracking,
@@ -138,7 +139,17 @@ export default async function TrackPage({ params }: Props) {
     const brief = parseBrief(t.brief)
     const designReady = !!t.post_image_url
 
+    // Platinum customers pick their own photo (country set by the agent) until
+    // the post is published.
+    const isPlatinum = (t.package_name || '').toLowerCase().includes('platinum')
+    const platinumCountry = (t.platinum_country || '').toLowerCase()
+    const showPicker = isPlatinum && platinumCountry && !t.published_at
+
     return (
+      <>
+        {showPicker && (
+          <PlatinumPicker token={params.token} country={platinumCountry} current={t.platinum_template || ''} />
+        )}
         <Tracker
             token={params.token}
             customerName={t.customer_name || ''}
@@ -153,5 +164,6 @@ export default async function TrackPage({ params }: Props) {
             brief={brief}
             designReady={designReady}
         />
+      </>
     )
 }

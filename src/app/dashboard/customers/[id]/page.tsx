@@ -2819,6 +2819,8 @@ export default function CustomerDetailPage() {
           orderId={activeOrder?.id || ''}
           initialImageUrl={activeOrder?.post_image_url || ''}
           packageName={isFree ? 'Princess Pass' : ((activeOrder as any)?.package?.name || '')}
+          initialPlatinumCountry={(activeOrder as any)?.platinum_country || ''}
+          initialPlatinumTemplate={(activeOrder as any)?.platinum_template || ''}
           plannedDate={
             (plannedSlot ? slotInstantISO(plannedSlot.slot_time, plannedSlot.slot_date) : null)
             || activeOrder?.planned_post_date
@@ -3148,24 +3150,41 @@ interface PostBuilderModalProps {
   initialImageUrl?: string
   plannedDate?: string | null
   packageName?: string
+  initialPlatinumCountry?: string
+  initialPlatinumTemplate?: string
 }
 
-function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultProfileUrl = '', orderId = '', initialImageUrl = '', plannedDate = null, packageName = '' }: PostBuilderModalProps) {
+function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultProfileUrl = '', orderId = '', initialImageUrl = '', plannedDate = null, packageName = '', initialPlatinumCountry = '', initialPlatinumTemplate = '' }: PostBuilderModalProps) {
   const [desc, setDesc] = useState(initialDesc)
   const [profileUrl, setProfileUrl] = useState(defaultProfileUrl || 'https://www.emmathinking.com/profile/')
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [titleFont, setTitleFont] = useState<'greatvibes' | 'dancing'>('greatvibes')  // English title font
   const isPlatinum = (packageName || '').toLowerCase().includes('platinum')
   const [platinumList, setPlatinumList] = useState<string[]>([])
-  const [platinumTemplate, setPlatinumTemplate] = useState('')
+  const [platinumCountry, setPlatinumCountry] = useState(initialPlatinumCountry)
+  const [platinumTemplate, setPlatinumTemplate] = useState(initialPlatinumTemplate)
   useEffect(() => {
     if (!isPlatinum) return
-    fetch('/api/generate-post').then(r => r.json()).then(j => {
-      const list: string[] = j.platinum || []
-      setPlatinumList(list)
-      setPlatinumTemplate(prev => prev || list[0] || '')
-    }).catch(() => { })
+    fetch('/api/generate-post').then(r => r.json()).then(j => setPlatinumList(j.platinum || [])).catch(() => { })
   }, [isPlatinum])
+  const platinumCountries = Array.from(new Set(platinumList.map(k => k.replace(/^platinum-/, '').replace(/-\d+$/, ''))))
+  const countryVariants = platinumList.filter(k => k.startsWith(`platinum-${platinumCountry}-`))
+  // keep a valid variant selected when the country changes
+  useEffect(() => {
+    if (!isPlatinum || !platinumCountry) return
+    const cv = platinumList.filter(k => k.startsWith(`platinum-${platinumCountry}-`))
+    setPlatinumTemplate(prev => (prev && prev.startsWith(`platinum-${platinumCountry}-`)) ? prev : (cv[0] || ''))
+  }, [platinumCountry, platinumList])  // eslint-disable-line react-hooks/exhaustive-deps
+  const saveCountry = async (c: string) => {
+    setPlatinumCountry(c)
+    if (!orderId) return
+    try {
+      await fetch('/api/post-image/platinum-country', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId, country: c }),
+      })
+    } catch { }
+  }
 
   // ── Design artwork (the "AI" image grab) ───────────────────────────────────
   // The designer saves the Illustrator export named exactly as `saveAsName`,
@@ -3360,19 +3379,35 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
                 ✦ Post design <span className="text-pink-500">← generate it automatically</span>
               </p>
 
-              {/* Platinum: choose the country photo variant */}
+              {/* Platinum: agent sets country (so customer can pick on their link); variant = customer's pick */}
               {isPlatinum && platinumList.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wide flex-none">Platinum photo</span>
-                  <select
-                    value={platinumTemplate}
-                    onChange={e => setPlatinumTemplate(e.target.value)}
-                    className="flex-1 text-[11px] border border-gray-200 rounded-lg px-2 py-1.5 bg-white"
-                  >
-                    {platinumList.map(t => (
-                      <option key={t} value={t}>{t.replace(/^platinum-/, '').replace(/-/g, ' ')}</option>
-                    ))}
-                  </select>
+                <div className="space-y-2 bg-cyan-50 border border-cyan-100 rounded-xl p-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] font-bold text-cyan-700 uppercase tracking-wide flex-none w-16">Country</span>
+                    <select
+                      value={platinumCountry}
+                      onChange={e => saveCountry(e.target.value)}
+                      className="flex-1 text-[11px] border border-gray-200 rounded-lg px-2 py-1.5 bg-white"
+                    >
+                      <option value="">— pick country —</option>
+                      {platinumCountries.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  {platinumCountry && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[9px] font-bold text-cyan-700 uppercase tracking-wide flex-none w-16">Photo</span>
+                      <select
+                        value={platinumTemplate}
+                        onChange={e => setPlatinumTemplate(e.target.value)}
+                        className="flex-1 text-[11px] border border-gray-200 rounded-lg px-2 py-1.5 bg-white"
+                      >
+                        {countryVariants.map(v => (
+                          <option key={v} value={v}>{`Photo ${v.replace(`platinum-${platinumCountry}-`, '')}`}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <p className="text-[8px] text-cyan-600 leading-snug">Set the country → the customer picks a photo from their tracking link. {initialPlatinumTemplate ? 'Customer has chosen one ✓' : ''}</p>
                 </div>
               )}
 

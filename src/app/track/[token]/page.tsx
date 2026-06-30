@@ -139,11 +139,11 @@ export default async function TrackPage({ params }: Props) {
     const brief = parseBrief(t.brief)
     const designReady = !!t.post_image_url
 
-    // Platinum customers pick their own photo (country set by the agent) until
-    // the post is published.
+    // Platinum customers pick their own photo: shown once the counsellor's brief
+    // is in (and country set by the agent), until the post is published.
     const isPlatinum = (t.package_name || '').toLowerCase().includes('platinum')
     const platinumCountry = (t.platinum_country || '').toLowerCase()
-    const showPicker = isPlatinum && platinumCountry && !t.published_at
+    const showPicker = isPlatinum && platinumCountry && !!brief && !t.published_at
 
     return (
       <>

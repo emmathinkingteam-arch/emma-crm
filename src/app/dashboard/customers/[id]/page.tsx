@@ -3158,7 +3158,6 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
   const [desc, setDesc] = useState(initialDesc)
   const [profileUrl, setProfileUrl] = useState(defaultProfileUrl || 'https://www.emmathinking.com/profile/')
   const [copiedId, setCopiedId] = useState<string | null>(null)
-  const [titleFont, setTitleFont] = useState<'greatvibes' | 'dancing'>('greatvibes')  // English title font
   const isPlatinum = (packageName || '').toLowerCase().includes('platinum')
   const [platinumList, setPlatinumList] = useState<string[]>([])
   const [platinumCountry, setPlatinumCountry] = useState(initialPlatinumCountry)
@@ -3242,7 +3241,7 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           brief: desc, package: packageName, code: postCode,
-          opts: { title_la: titleFont, ...(isPlatinum && platinumTemplate ? { template: platinumTemplate } : {}) },
+          opts: { ...(isPlatinum && platinumTemplate ? { template: platinumTemplate } : {}) },
         }),
       })
       if (!res.ok) {
@@ -3410,19 +3409,6 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
                   <p className="text-[8px] text-cyan-600 leading-snug">Set the country → the customer picks a photo from their tracking link. {initialPlatinumTemplate ? 'Customer has chosen one ✓' : ''}</p>
                 </div>
               )}
-
-              {/* English title font choice (Great Vibes / Dancing Script) */}
-              <div className="flex items-center gap-2">
-                <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wide flex-none">English title font</span>
-                <select
-                  value={titleFont}
-                  onChange={e => setTitleFont(e.target.value as 'greatvibes' | 'dancing')}
-                  className="flex-1 text-[11px] border border-gray-200 rounded-lg px-2 py-1.5 bg-white"
-                >
-                  <option value="greatvibes">Great Vibes</option>
-                  <option value="dancing">Dancing Script</option>
-                </select>
-              </div>
 
               {/* Auto-generate with Python (no Illustrator needed) */}
               <button

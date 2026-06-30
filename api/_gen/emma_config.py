@@ -85,7 +85,9 @@ TEMPLATES = {
 # Platinum: photo is baked into each country template; text sits in the band
 # below the photo (565) up to the country badge (734). Any file named
 # platinum-<country>-<n>.png is picked up automatically — no config edit needed.
-PLATINUM_DEFAULT = {"region_top": 565, "region_bottom": 734, "colors": THEME_BLACK}
+# Title sits on the photo's faded lower area; band ends safely ABOVE the badge
+# (badge top = 734) so text never collides with it.
+PLATINUM_DEFAULT = {"region_top": 485, "region_bottom": 712, "colors": THEME_BLACK}
 DEFAULT_PLATINUM = "platinum-srilanka-1"
 
 def list_platinum():

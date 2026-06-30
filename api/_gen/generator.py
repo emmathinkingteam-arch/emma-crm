@@ -221,17 +221,29 @@ def render(template_key, data, opts=None, base=""):
     region_top = tpl["region_top"]
     region_h = tpl["region_bottom"] - tpl["region_top"]
 
+    # Title fits the width first...
     t_size = fit_title_size(data["title"], t_si, t_la, C.TITLE_MAX_WIDTH,
                             title_max, C.TITLE_MIN_SIZE, transform=to_legacy)
-    t_asc, t_desc = line_metrics(t_si, t_la, t_size)
-    title_h = t_asc + t_desc
+    d_size = C.DESC_SIZE
+    # ...then a HARD height guard: shrink (title first, then body) until the whole
+    # block fits inside the region. Guarantees text never overflows onto the badge.
+    for _ in range(80):
+        t_asc, t_desc = line_metrics(t_si, t_la, t_size)
+        title_h = t_asc + t_desc
+        desc_lines = wrap_words(data["description"], b_si, b_la, d_size, C.DESC_WIDTH, transform=to_legacy)
+        d_asc, d_desc = line_metrics(b_si, b_la, d_size)
+        d_adv = (d_asc + d_desc) * C.DESC_LEADING
+        desc_h = d_adv * len(desc_lines)
+        total_h = title_h + (C.TITLE_DESC_GAP + desc_h if desc_lines else 0)
+        if total_h <= region_h:
+            break
+        if t_size > C.TITLE_MIN_SIZE:
+            t_size -= 2
+        elif d_size > 18:
+            d_size -= 1
+        else:
+            break
 
-    desc_lines = wrap_words(data["description"], b_si, b_la, C.DESC_SIZE, C.DESC_WIDTH, transform=to_legacy)
-    d_asc, d_desc = line_metrics(b_si, b_la, C.DESC_SIZE)
-    d_adv = (d_asc + d_desc) * C.DESC_LEADING
-    desc_h = d_adv * len(desc_lines)
-
-    total_h = title_h + (C.TITLE_DESC_GAP + desc_h if desc_lines else 0)
     block_top = region_top + max(0, (region_h - total_h) / 2.0)
 
     draw_line_centered(draw, data["title"], cx, block_top + t_asc, t_si, t_la, t_size,
@@ -240,7 +252,7 @@ def render(template_key, data, opts=None, base=""):
         first = block_top + title_h + C.TITLE_DESC_GAP + d_asc
         for i, line in enumerate(desc_lines):
             draw_line_justified(draw, line.split(), C.DESC_LEFT, C.DESC_WIDTH, first + i * d_adv,
-                                b_si, b_la, C.DESC_SIZE, colors["body"],
+                                b_si, b_la, d_size, colors["body"],
                                 transform=to_legacy, justify=(i != len(desc_lines) - 1))
 
     if data.get("code"):

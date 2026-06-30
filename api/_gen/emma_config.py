@@ -22,6 +22,29 @@ FONTS = {
     "code":          os.path.join(FONT_DIR, "MYRIADPRO-REGULAR.OTF"),
 }
 
+# Font registry — short key -> filename. Used by the admin Post Tuner to swap
+# fonts per role. Sinhala options are legacy (FM-Abhaya) fonts.
+FONT_FILES = {
+    # Sinhala (legacy)
+    "apex": "apex049.ttf",
+    "malith": "4u-malith.ttf",
+    "kd": "0KDBOLIDDA.ttf",
+    # English / Latin
+    "fabiolla": "fabiolla-personal-use.ttf",
+    "pacifico": "Pacifico-Regular.ttf",
+    "greatvibes": "GreatVibes-Regular.ttf",
+    "sacramento": "Sacramento-Regular.ttf",
+    "dancing": "DancingScript.ttf",
+    "myriad_bold": "MYRIADPRO-BOLD.OTF",
+    "myriad": "MYRIADPRO-REGULAR.OTF",
+}
+
+def font_path(key, default_role):
+    """Resolve a tuner font key to a path, falling back to the role default."""
+    fn = FONT_FILES.get((key or "").strip().lower())
+    return os.path.join(FONT_DIR, fn) if fn else FONTS[default_role]
+
+
 THEME_BLACK = {"corner": (20, 20, 20), "title": (25, 25, 25), "body": (30, 30, 30), "code": (150, 150, 150)}
 THEME_GOLD = {k: (196, 148, 58) for k in ("corner", "title", "body", "code")}
 THEME_PINK = {k: (233, 64, 121) for k in ("corner", "title", "body", "code")}

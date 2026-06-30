@@ -26,7 +26,7 @@ export async function middleware(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  const publicRoutes = ['/auth/login', '/invoice', '/track', '/api/sms/process-overdue', '/api/whatsapp/webhook']
+  const publicRoutes = ['/auth/login', '/invoice', '/track', '/api/sms/process-overdue', '/api/whatsapp/webhook', '/api/generate-post']
   const isPublic = publicRoutes.some(r => pathname.startsWith(r))
 
   // 1. Not logged in -> only public routes allowed.

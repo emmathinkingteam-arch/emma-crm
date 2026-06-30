@@ -18,6 +18,7 @@ class handler(BaseHTTPRequestHandler):
                 payload.get("brief", ""),
                 payload.get("package", ""),
                 payload.get("code", ""),
+                payload.get("opts") or {},
             )
             self.send_response(200)
             self.send_header("Content-Type", "image/png")

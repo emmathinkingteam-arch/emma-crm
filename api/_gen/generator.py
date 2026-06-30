@@ -173,7 +173,8 @@ def parse_system_text(raw):
     }
 
 
-def render(template_key, data):
+def render(template_key, data, opts=None):
+    opts = opts or {}
     tpl = C.TEMPLATES[template_key]
     img = Image.open(os.path.join(C.TEMPLATE_DIR, tpl["file"])).convert("RGB")
     if img.size != (C.CANVAS, C.CANVAS):
@@ -182,7 +183,16 @@ def render(template_key, data):
     cx = C.CANVAS / 2.0
     colors = tpl["colors"]
 
-    cfn = lambda t, x, y, a: (t and draw.text((x, y), t, font=get_font(C.FONTS["corner"], C.CORNER_SIZE),
+    # tuner overrides (fall back to template/role defaults)
+    corner_font = C.font_path(opts.get("corner"), "corner")
+    t_si = C.font_path(opts.get("title_si"), "title_sinhala")
+    t_la = C.font_path(opts.get("title_la"), "title_latin")
+    b_si = C.font_path(opts.get("body_si"), "body_sinhala")
+    b_la = C.font_path(opts.get("body_la"), "body_latin")
+    stroke = int(opts.get("title_stroke", C.TITLE_STROKE) or 0)
+    title_max = int(opts.get("title_max_size") or C.TITLE_MAX_SIZE)
+
+    cfn = lambda t, x, y, a: (t and draw.text((x, y), t, font=get_font(corner_font, C.CORNER_SIZE),
                                               fill=colors["corner"], anchor=a))
     cfn(f"{data['gender']} | Age {data['age']}".strip(" |"), C.BOX_LEFT, C.CORNER_TOP_Y, "la")
     cfn(data["profession"], C.BOX_RIGHT, C.CORNER_TOP_Y, "ra")
@@ -191,11 +201,9 @@ def render(template_key, data):
 
     region_top = tpl["region_top"]
     region_h = tpl["region_bottom"] - tpl["region_top"]
-    t_si, t_la = C.FONTS["title_sinhala"], C.FONTS["title_latin"]
-    b_si, b_la = C.FONTS["body_sinhala"], C.FONTS["body_latin"]
 
     t_size = fit_title_size(data["title"], t_si, t_la, C.TITLE_MAX_WIDTH,
-                            C.TITLE_MAX_SIZE, C.TITLE_MIN_SIZE, transform=to_legacy)
+                            title_max, C.TITLE_MIN_SIZE, transform=to_legacy)
     t_asc, t_desc = line_metrics(t_si, t_la, t_size)
     title_h = t_asc + t_desc
 
@@ -208,7 +216,7 @@ def render(template_key, data):
     block_top = region_top + max(0, (region_h - total_h) / 2.0)
 
     draw_line_centered(draw, data["title"], cx, block_top + t_asc, t_si, t_la, t_size,
-                       colors["title"], transform=to_legacy, stroke=C.TITLE_STROKE)
+                       colors["title"], transform=to_legacy, stroke=stroke)
     if desc_lines:
         first = block_top + title_h + C.TITLE_DESC_GAP + d_asc
         for i, line in enumerate(desc_lines):
@@ -225,10 +233,13 @@ def render(template_key, data):
     return buf.getvalue()
 
 
-def generate(brief, package="", code=""):
-    """Parse the brief, pick the template from the package name, return PNG bytes."""
+def generate(brief, package="", code="", opts=None):
+    """Parse brief, pick template (opts['template'] wins, else package), return PNG."""
+    opts = opts or {}
     data = parse_system_text(brief)
     if code:
         data["code"] = code
-    key = C.template_for_package(package)
-    return render(key, data)
+    key = (opts.get("template") or "").strip().lower() or C.template_for_package(package)
+    if key not in C.TEMPLATES:
+        key = C.template_for_package(package)
+    return render(key, data, opts)

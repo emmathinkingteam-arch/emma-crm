@@ -3165,7 +3165,7 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
   const [platinumTemplate, setPlatinumTemplate] = useState(initialPlatinumTemplate)
   useEffect(() => {
     if (!isPlatinum) return
-    fetch('/api/generate-post').then(r => r.json()).then(j => setPlatinumList(j.platinum || [])).catch(() => { })
+    fetch('/api/platinum/list').then(r => r.json()).then(j => setPlatinumList(j.platinum || [])).catch(() => { })
   }, [isPlatinum])
   const platinumCountries = Array.from(new Set(platinumList.map(k => k.replace(/^platinum-/, '').replace(/-\d+$/, ''))))
   const countryVariants = platinumList.filter(k => k.startsWith(`platinum-${platinumCountry}-`))

@@ -23,11 +23,14 @@ class handler(BaseHTTPRequestHandler):
         try:
             n = int(self.headers.get("content-length") or 0)
             payload = json.loads(self.rfile.read(n).decode("utf-8") or "{}")
+            host = self.headers.get("x-forwarded-host") or self.headers.get("host") or ""
+            base = ("https://" + host) if host else ""
             png = generate(
                 payload.get("brief", ""),
                 payload.get("package", ""),
                 payload.get("code", ""),
                 payload.get("opts") or {},
+                base,
             )
             self.send_response(200)
             self.send_header("Content-Type", "image/png")

@@ -15,6 +15,15 @@ export default function PlatinumPicker({
   const [busy, setBusy] = useState('')
   const [msg, setMsg] = useState('')
   const [missing, setMissing] = useState<Record<string, boolean>>({})
+  // each thumb tries the uploaded B2 photo first, then the bundled default
+  const [stage, setStage] = useState<Record<string, 'b2' | 'bundle'>>({})
+
+  const srcFor = (k: string) =>
+    (stage[k] === 'bundle') ? `/platinum/${k}.png` : `/api/public-media/platinum/${k}.png`
+  const onImgError = (k: string) => {
+    if (stage[k] === 'bundle') setMissing(m => ({ ...m, [k]: true }))
+    else setStage(s => ({ ...s, [k]: 'bundle' }))
+  }
 
   const keys = Array.from({ length: MAX_VARIANTS }, (_, i) => `platinum-${country}-${i + 1}`)
     .filter(k => !missing[k])
@@ -57,10 +66,10 @@ export default function PlatinumPicker({
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={`/platinum/${key}.png`}
+                src={srcFor(key)}
                 alt={key}
                 className="w-full aspect-square object-cover"
-                onError={() => setMissing(m => ({ ...m, [key]: true }))}
+                onError={() => onImgError(key)}
               />
               {picked === key && (
                 <span className="absolute top-1.5 right-1.5 bg-pink-500 text-white text-[10px] font-bold rounded-full px-2 py-0.5">✓</span>

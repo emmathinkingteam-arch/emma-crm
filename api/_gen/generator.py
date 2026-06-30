@@ -176,10 +176,25 @@ def parse_system_text(raw):
     }
 
 
-def render(template_key, data, opts=None):
+def _load_template_image(template_key, tpl, base):
+    # Platinum photos may be uploaded to B2 (served via /api/public-media); try
+    # that first, then fall back to the bundled default.
+    if template_key.startswith("platinum") and base:
+        try:
+            import urllib.request
+            url = base + "/api/public-media/platinum/" + template_key + ".png"
+            with urllib.request.urlopen(url, timeout=8) as r:
+                if getattr(r, "status", 200) == 200:
+                    return Image.open(io.BytesIO(r.read())).convert("RGB")
+        except Exception:
+            pass
+    return Image.open(os.path.join(C.TEMPLATE_DIR, tpl["file"])).convert("RGB")
+
+
+def render(template_key, data, opts=None, base=""):
     opts = opts or {}
     tpl = C.get_template(template_key) or C.TEMPLATES["silver"]
-    img = Image.open(os.path.join(C.TEMPLATE_DIR, tpl["file"])).convert("RGB")
+    img = _load_template_image(template_key, tpl, base)
     if img.size != (C.CANVAS, C.CANVAS):
         img = img.resize((C.CANVAS, C.CANVAS), Image.LANCZOS)
     draw = ImageDraw.Draw(img)
@@ -237,7 +252,7 @@ def render(template_key, data, opts=None):
     return buf.getvalue()
 
 
-def generate(brief, package="", code="", opts=None):
+def generate(brief, package="", code="", opts=None, base=""):
     """Parse brief, pick template (opts['template'] wins, else package), return PNG."""
     opts = opts or {}
     data = parse_system_text(brief)
@@ -246,4 +261,4 @@ def generate(brief, package="", code="", opts=None):
     key = (opts.get("template") or "").strip().lower()
     if not key or C.get_template(key) is None:
         key = C.template_for_package(package)
-    return render(key, data, opts)
+    return render(key, data, opts, base)

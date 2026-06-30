@@ -93,14 +93,16 @@ def list_platinum():
     files = glob.glob(os.path.join(TEMPLATE_DIR, "platinum-*.png"))
     return sorted(os.path.splitext(os.path.basename(f))[0] for f in files)
 
+import re as _re
+
 def get_template(key):
     key = (key or "").strip().lower()
     if key in TEMPLATES:
         return TEMPLATES[key]
-    if key.startswith("platinum"):
-        f = key + ".png"
-        if os.path.exists(os.path.join(TEMPLATE_DIR, f)):
-            return {"file": f, **PLATINUM_DEFAULT}
+    # Any platinum-<country>-<n> is valid: image loads from B2 (uploaded) or the
+    # bundle (defaults) at render time.
+    if _re.match(r"^platinum-[a-z]+-\d+$", key):
+        return {"file": key + ".png", **PLATINUM_DEFAULT}
     return None
 
 # package name (e.g. "Gold Pass", "Princess Silver", "VIP Pass") -> template key.

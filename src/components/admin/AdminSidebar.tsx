@@ -69,6 +69,7 @@ const SECTIONS: Section[] = [
       { href: '/admin/packages', icon: Briefcase, label: 'Packages' },
       { href: '/admin/facebook', icon: Facebook, label: 'Connect Facebook' },
       { href: '/admin/post-tuner', icon: Sparkles, label: 'Post Tuner' },
+      { href: '/admin/platinum-photos', icon: Sparkles, label: 'Platinum Photos' },
       { href: '/admin/whatsapp', icon: MessageCircle, label: 'WhatsApp' },
       { href: '/admin/whatsapp/delivery', icon: BarChart2, label: 'WA Delivery' },
       { href: '/admin/whatsapp/support', icon: Headphones, label: 'WA Support' },

@@ -17,7 +17,7 @@ import { b2Download } from '@/lib/backblaze'
 export const runtime = 'nodejs'
 
 // Only these top-level prefixes may be served publicly.
-const PUBLIC_PREFIXES = ['documents/', 'letterheads/', 'whatsapp/']
+const PUBLIC_PREFIXES = ['documents/', 'letterheads/', 'whatsapp/', 'platinum/']
 
 export async function GET(
   _req: NextRequest,

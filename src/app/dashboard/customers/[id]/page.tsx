@@ -2818,6 +2818,7 @@ export default function CustomerDetailPage() {
           defaultProfileUrl={savedProfileLink}
           orderId={activeOrder?.id || ''}
           initialImageUrl={activeOrder?.post_image_url || ''}
+          packageName={(activeOrder as any)?.package?.name || ''}
           plannedDate={
             (plannedSlot ? slotInstantISO(plannedSlot.slot_time, plannedSlot.slot_date) : null)
             || activeOrder?.planned_post_date
@@ -3146,9 +3147,10 @@ interface PostBuilderModalProps {
   orderId?: string
   initialImageUrl?: string
   plannedDate?: string | null
+  packageName?: string
 }
 
-function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultProfileUrl = '', orderId = '', initialImageUrl = '', plannedDate = null }: PostBuilderModalProps) {
+function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultProfileUrl = '', orderId = '', initialImageUrl = '', plannedDate = null, packageName = '' }: PostBuilderModalProps) {
   const [desc, setDesc] = useState(initialDesc)
   const [profileUrl, setProfileUrl] = useState(defaultProfileUrl || 'https://www.emmathinking.com/profile/')
   const [copiedId, setCopiedId] = useState<string | null>(null)
@@ -3191,6 +3193,30 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
       setImgMsg('✓ Uploaded — review the preview below.')
     } catch (e: any) {
       setImgMsg(e?.message || 'Upload failed')
+    } finally {
+      setImgBusy(false)
+    }
+  }
+
+  // Generate the post artwork with Python (server) instead of Illustrator.
+  const generateAI = async () => {
+    if (!orderId) { setImgMsg('Open this from an active order first.'); return }
+    if (!desc.trim()) { setImgMsg('No brief text to generate from.'); return }
+    setImgBusy(true); setImgMsg(null)
+    try {
+      const res = await fetch('/api/post-image/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId, brief: desc, package: packageName, code: postCode }),
+      })
+      const raw = await res.text()
+      let j: any = null
+      try { j = raw ? JSON.parse(raw) : null } catch { /* non-JSON */ }
+      if (!res.ok) throw new Error(j?.error || raw || `Generation failed (${res.status})`)
+      setImageUrl(j.url)
+      setImgMsg('✓ Generated — review the preview below.')
+    } catch (e: any) {
+      setImgMsg(e?.message || 'Generation failed')
     } finally {
       setImgBusy(false)
     }
@@ -3313,10 +3339,23 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
           {(role === 'designer' || role === 'admin') && (
             <div className="bg-white border border-pink-100 rounded-2xl p-4 space-y-3">
               <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">
-                ✦ Post design <span className="text-pink-500">← AI grabs it from your folder</span>
+                ✦ Post design <span className="text-pink-500">← generate it automatically</span>
               </p>
 
-              {/* Save-as code */}
+              {/* Auto-generate with Python (no Illustrator needed) */}
+              <button
+                onClick={generateAI}
+                disabled={imgBusy}
+                className="w-full bg-gradient-to-r from-pink-600 to-violet-600 text-white rounded-xl py-3 text-[12px] font-bold flex items-center justify-center gap-2 disabled:opacity-40 active:scale-95 transition-all"
+              >
+                {imgBusy ? <Loader2 size={14} className="animate-spin" /> : <span>✦</span>}
+                Generate post with AI
+              </button>
+              <p className="text-[8px] text-gray-400 font-medium leading-snug text-center">
+                Builds the {packageName || 'post'} image from the brief above. Or grab a manual export below.
+              </p>
+
+              {/* Save-as code (manual Illustrator fallback) */}
               <div className="bg-pink-50 border border-pink-100 rounded-xl px-3 py-2.5 space-y-1">
                 <p className="text-[9px] font-semibold text-pink-600 uppercase tracking-wide">Save your Illustrator export as</p>
                 <div className="flex items-center gap-2">

@@ -14,9 +14,34 @@ export default function PlatinumPhotosPage() {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [list, setList] = useState<string[]>([])
+  const [uploaded, setUploaded] = useState<string[]>([])
+  const [nonce, setNonce] = useState(Date.now())
 
-  const load = () => fetch('/api/platinum/list').then(r => r.json()).then(j => setList(j.platinum || [])).catch(() => { })
+  const load = () => fetch('/api/platinum/list').then(r => r.json()).then(j => {
+    setList(j.platinum || [])
+    setUploaded(j.uploaded || [])
+    setNonce(Date.now())  // bust thumbnail cache after any change
+  }).catch(() => { })
   useEffect(() => { load() }, [])
+
+  const remove = async (template: string) => {
+    if (!confirm(`Delete ${template}? This removes the uploaded photo.`)) return
+    setBusy(true); setMsg('')
+    try {
+      const r = await fetch('/api/platinum/delete', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ template }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.error || 'Delete failed')
+      setMsg(`✓ Deleted ${template}`)
+      load()
+    } catch (e: any) {
+      setMsg(e?.message || 'Delete failed')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const upload = async () => {
     if (!file) { setMsg('Choose an image'); return }
@@ -82,15 +107,25 @@ export default function PlatinumPhotosPage() {
         <div key={c} className="mb-5">
           <p className="text-xs font-bold text-gray-600 capitalize mb-2">{c}</p>
           <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
-            {byCountry[c].sort().map(k => (
-              <div key={k} className="rounded-lg overflow-hidden border border-gray-100 bg-gray-50">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={`/api/public-media/platinum/${k}.png`} alt={k}
-                  onError={e => { (e.currentTarget as HTMLImageElement).src = `/platinum/${k}.png` }}
-                  className="w-full aspect-square object-cover" />
-                <p className="text-[8px] text-gray-400 text-center py-0.5">{k.replace(/^platinum-[a-z]+-/, '#')}</p>
-              </div>
-            ))}
+            {byCountry[c].sort().map(k => {
+              const isUploaded = uploaded.includes(k)
+              return (
+                <div key={k} className="relative rounded-lg overflow-hidden border border-gray-100 bg-gray-50">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={`/api/public-media/platinum/${k}.png?v=${nonce}`} alt={k}
+                    onError={e => { (e.currentTarget as HTMLImageElement).src = `/platinum/${k}.png` }}
+                    className="w-full aspect-square object-cover" />
+                  {isUploaded ? (
+                    <button onClick={() => remove(k)} disabled={busy}
+                      title="Delete this photo"
+                      className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-500 text-white text-[11px] font-bold leading-none flex items-center justify-center shadow disabled:opacity-40">×</button>
+                  ) : (
+                    <span className="absolute top-1 left-1 bg-gray-700/80 text-white text-[7px] font-bold rounded px-1 py-0.5">default</span>
+                  )}
+                  <p className="text-[8px] text-gray-400 text-center py-0.5">{k.replace(/^platinum-[a-z]+-/, '#')}</p>
+                </div>
+              )
+            })}
           </div>
         </div>
       ))}

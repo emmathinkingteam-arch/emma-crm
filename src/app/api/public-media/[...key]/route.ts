@@ -46,9 +46,11 @@ export async function GET(
   headers.set('Content-Type', b2res.headers.get('content-type') || 'application/octet-stream')
   const len = b2res.headers.get('content-length')
   if (len) headers.set('Content-Length', len)
-  // Unique filenames per upload → cache hard at the edge + browser. Public so
-  // CDNs/Meta can cache it, which keeps repeated fetches off our origin.
-  headers.set('Cache-Control', 'public, max-age=31536000, immutable')
+  // Platinum photos reuse the same filename (platinum-<country>-<n>.png) on
+  // re-upload/delete, so they must NOT be cached or stale images linger.
+  // Everything else has unique filenames → cache hard at the edge.
+  headers.set('Cache-Control',
+    key.startsWith('platinum/') ? 'no-store, max-age=0' : 'public, max-age=31536000, immutable')
 
   return new NextResponse(b2res.body, { status: 200, headers })
 }

@@ -181,8 +181,9 @@ def _load_template_image(template_key, tpl, base):
     # that first, then fall back to the bundled default.
     if template_key.startswith("platinum") and base:
         try:
-            import urllib.request
-            url = base + "/api/public-media/platinum/" + template_key + ".png"
+            import urllib.request, time
+            # cache-buster so a re-uploaded/deleted photo is never served stale
+            url = base + "/api/public-media/platinum/" + template_key + ".png?v=" + str(int(time.time()))
             with urllib.request.urlopen(url, timeout=8) as r:
                 if getattr(r, "status", 200) == 200:
                     return Image.open(io.BytesIO(r.read())).convert("RGB")

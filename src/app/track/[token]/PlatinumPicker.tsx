@@ -17,9 +17,10 @@ export default function PlatinumPicker({
   const [msg, setMsg] = useState('')
   const [missing, setMissing] = useState<Record<string, boolean>>({})
   const [stage, setStage] = useState<Record<string, 'b2' | 'bundle'>>({})
+  const [nonce] = useState(() => Date.now())  // bust stale CDN copies
 
   const srcFor = (k: string) =>
-    stage[k] === 'bundle' ? `/platinum/${k}.png` : `/api/public-media/platinum/${k}.png`
+    stage[k] === 'bundle' ? `/platinum/${k}.png` : `/api/public-media/platinum/${k}.png?v=${nonce}`
   const onImgError = (k: string) => {
     if (stage[k] === 'bundle') setMissing(m => ({ ...m, [k]: true }))
     else setStage(s => ({ ...s, [k]: 'bundle' }))

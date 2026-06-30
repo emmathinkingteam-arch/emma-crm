@@ -18,15 +18,21 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const keys = new Set<string>(BUNDLED)
+  const uploaded: string[] = []
+  const times: Record<string, string> = {}
 
   // Uploaded photos on B2 (platinum/platinum-<country>-<n>.png).
   try {
     const files = await b2List('platinum/')
     for (const f of files) {
       const base = f.key.replace(/^platinum\//, '').replace(/\.png$/i, '')
-      if (/^platinum-[a-z]+-\d+$/.test(base)) keys.add(base)
+      if (/^platinum-[a-z]+-\d+$/.test(base)) {
+        keys.add(base)
+        uploaded.push(base)
+        times[base] = f.uploadedAt
+      }
     }
   } catch { /* B2 optional */ }
 
-  return NextResponse.json({ platinum: Array.from(keys).sort() })
+  return NextResponse.json({ platinum: Array.from(keys).sort(), uploaded, times })
 }

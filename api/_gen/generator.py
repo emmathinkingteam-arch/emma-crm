@@ -193,7 +193,7 @@ def render(template_key, data, opts=None):
     b_si = C.font_path(opts.get("body_si"), "body_sinhala")
     b_la = C.font_path(opts.get("body_la"), "body_latin")
     stroke_si = int(opts.get("title_stroke", C.TITLE_STROKE) or 0)      # Sinhala boldness
-    stroke_la = int(opts.get("title_stroke_en", 0) or 0)                # English boldness
+    stroke_la = int(opts.get("title_stroke_en", C.TITLE_STROKE_EN) or 0)  # English boldness
     title_max = int(opts.get("title_max_size") or C.TITLE_MAX_SIZE)
 
     cfn = lambda t, x, y, a: (t and draw.text((x, y), t, font=get_font(corner_font, C.CORNER_SIZE),

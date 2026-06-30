@@ -16,7 +16,7 @@ BOX_BOTTOM = CANVAS - MARGIN
 FONTS = {
     "corner":        os.path.join(FONT_DIR, "MYRIADPRO-BOLD.OTF"),
     "title_sinhala": os.path.join(FONT_DIR, "apex020.ttf"),                 # legacy (Apex Apura 020)
-    "title_latin":   os.path.join(FONT_DIR, "fabiolla-personal-use.ttf"),
+    "title_latin":   os.path.join(FONT_DIR, "GreatVibes-Regular.ttf"),      # default English title
     "body_sinhala":  os.path.join(FONT_DIR, "4u-malith.ttf"),              # legacy
     "body_latin":    os.path.join(FONT_DIR, "MYRIADPRO-REGULAR.OTF"),
     "code":          os.path.join(FONT_DIR, "MYRIADPRO-REGULAR.OTF"),
@@ -55,7 +55,8 @@ CORNER_BOTTOM_Y = 1010
 
 TITLE_MAX_SIZE = 89
 TITLE_MIN_SIZE = 24
-TITLE_STROKE = 0
+TITLE_STROKE = 0          # default Sinhala title boldness
+TITLE_STROKE_EN = 1       # default English title boldness
 TITLE_DESC_GAP = 13
 DESC_SIZE = 32
 DESC_LEADING = 1.06

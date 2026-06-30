@@ -3154,6 +3154,7 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
   const [desc, setDesc] = useState(initialDesc)
   const [profileUrl, setProfileUrl] = useState(defaultProfileUrl || 'https://www.emmathinking.com/profile/')
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [titleFont, setTitleFont] = useState<'greatvibes' | 'dancing'>('greatvibes')  // English title font
 
   // ── Design artwork (the "AI" image grab) ───────────────────────────────────
   // The designer saves the Illustrator export named exactly as `saveAsName`,
@@ -3209,7 +3210,7 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
       const res = await fetch('/api/generate-post', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ brief: desc, package: packageName, code: postCode }),
+        body: JSON.stringify({ brief: desc, package: packageName, code: postCode, opts: { title_la: titleFont } }),
       })
       if (!res.ok) {
         const t = await res.text()
@@ -3344,6 +3345,19 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
               <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">
                 ✦ Post design <span className="text-pink-500">← generate it automatically</span>
               </p>
+
+              {/* English title font choice (Great Vibes / Dancing Script) */}
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wide flex-none">English title font</span>
+                <select
+                  value={titleFont}
+                  onChange={e => setTitleFont(e.target.value as 'greatvibes' | 'dancing')}
+                  className="flex-1 text-[11px] border border-gray-200 rounded-lg px-2 py-1.5 bg-white"
+                >
+                  <option value="greatvibes">Great Vibes</option>
+                  <option value="dancing">Dancing Script</option>
+                </select>
+              </div>
 
               {/* Auto-generate with Python (no Illustrator needed) */}
               <button

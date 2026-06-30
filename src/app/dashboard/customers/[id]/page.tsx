@@ -2818,7 +2818,7 @@ export default function CustomerDetailPage() {
           defaultProfileUrl={savedProfileLink}
           orderId={activeOrder?.id || ''}
           initialImageUrl={activeOrder?.post_image_url || ''}
-          packageName={(activeOrder as any)?.package?.name || ''}
+          packageName={isFree ? 'Princess Pass' : ((activeOrder as any)?.package?.name || '')}
           plannedDate={
             (plannedSlot ? slotInstantISO(plannedSlot.slot_time, plannedSlot.slot_date) : null)
             || activeOrder?.planned_post_date

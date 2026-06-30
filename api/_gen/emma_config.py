@@ -88,6 +88,11 @@ TEMPLATES = {
 PLATINUM_DEFAULT = {"region_top": 565, "region_bottom": 734, "colors": THEME_BLACK}
 DEFAULT_PLATINUM = "platinum-srilanka-1"
 
+def list_platinum():
+    import glob
+    files = glob.glob(os.path.join(TEMPLATE_DIR, "platinum-*.png"))
+    return sorted(os.path.splitext(os.path.basename(f))[0] for f in files)
+
 def get_template(key):
     key = (key or "").strip().lower()
     if key in TEMPLATES:

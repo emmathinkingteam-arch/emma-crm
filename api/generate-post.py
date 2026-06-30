@@ -10,6 +10,15 @@ from _gen.generator import generate
 
 
 class handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        from _gen.emma_config import list_platinum
+        body = json.dumps({"platinum": list_platinum()}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_POST(self):
         try:
             n = int(self.headers.get("content-length") or 0)

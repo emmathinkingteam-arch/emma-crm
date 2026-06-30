@@ -3155,6 +3155,17 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
   const [profileUrl, setProfileUrl] = useState(defaultProfileUrl || 'https://www.emmathinking.com/profile/')
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [titleFont, setTitleFont] = useState<'greatvibes' | 'dancing'>('greatvibes')  // English title font
+  const isPlatinum = (packageName || '').toLowerCase().includes('platinum')
+  const [platinumList, setPlatinumList] = useState<string[]>([])
+  const [platinumTemplate, setPlatinumTemplate] = useState('')
+  useEffect(() => {
+    if (!isPlatinum) return
+    fetch('/api/generate-post').then(r => r.json()).then(j => {
+      const list: string[] = j.platinum || []
+      setPlatinumList(list)
+      setPlatinumTemplate(prev => prev || list[0] || '')
+    }).catch(() => { })
+  }, [isPlatinum])
 
   // ── Design artwork (the "AI" image grab) ───────────────────────────────────
   // The designer saves the Illustrator export named exactly as `saveAsName`,
@@ -3210,7 +3221,10 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
       const res = await fetch('/api/generate-post', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ brief: desc, package: packageName, code: postCode, opts: { title_la: titleFont } }),
+        body: JSON.stringify({
+          brief: desc, package: packageName, code: postCode,
+          opts: { title_la: titleFont, ...(isPlatinum && platinumTemplate ? { template: platinumTemplate } : {}) },
+        }),
       })
       if (!res.ok) {
         const t = await res.text()
@@ -3345,6 +3359,22 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
               <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">
                 ✦ Post design <span className="text-pink-500">← generate it automatically</span>
               </p>
+
+              {/* Platinum: choose the country photo variant */}
+              {isPlatinum && platinumList.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wide flex-none">Platinum photo</span>
+                  <select
+                    value={platinumTemplate}
+                    onChange={e => setPlatinumTemplate(e.target.value)}
+                    className="flex-1 text-[11px] border border-gray-200 rounded-lg px-2 py-1.5 bg-white"
+                  >
+                    {platinumList.map(t => (
+                      <option key={t} value={t}>{t.replace(/^platinum-/, '').replace(/-/g, ' ')}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {/* English title font choice (Great Vibes / Dancing Script) */}
               <div className="flex items-center gap-2">

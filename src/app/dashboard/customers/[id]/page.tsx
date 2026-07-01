@@ -180,6 +180,10 @@ export default function CustomerDetailPage() {
   const [showPartnerLink, setShowPartnerLink] = useState(false)
   const [showPostBuilder, setShowPostBuilder] = useState(false)
   const [postBuilderPrefill, setPostBuilderPrefill] = useState('')
+  // Order the Post Builder should target. null = the active order (default).
+  // Set to a specific (often old / completed) order so back office can build
+  // its post with AI even after the order is no longer the active one.
+  const [postBuilderOrder, setPostBuilderOrder] = useState<Order | null>(null)
 
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
@@ -1192,6 +1196,14 @@ export default function CustomerDetailPage() {
   // auto-filled "Boosting" panel. Back office / admin only.
   const isBoss = role === 'back_office' || role === 'admin'
   const orderPosts = isBoss ? allOrders.filter(o => (o as any).post_image_url) : []
+  // Orders that never got a post image — back office builds these with AI (the
+  // active order already has its own Post Builder button above, so skip it).
+  // Once a post is generated it moves into `orderPosts` and gets a Boosting panel.
+  const ordersNeedingPost = isBoss
+    ? allOrders.filter(o => !(o as any).post_image_url && o.id !== activeOrder?.id)
+    : []
+  // The Post Builder targets the chosen order, falling back to the active one.
+  const postBuilderTarget = postBuilderOrder || activeOrder
 
   if (loading) return <div className="h-screen flex items-center justify-center bg-white"><Loader2 className="animate-spin text-pink-600" size={28} /></div>
   if (!customer) return <div className="h-screen flex items-center justify-center bg-white"><p className="text-gray-400 text-sm">Customer not found</p></div>
@@ -2210,14 +2222,14 @@ export default function CustomerDetailPage() {
           {(role === 'designer' || role === 'back_office' || role === 'counselor' || role === 'admin') && activeOrder && (
             <div className="flex gap-2">
               <button
-                onClick={() => { setPostBuilderPrefill(''); setShowPostBuilder(true) }}
+                onClick={() => { setPostBuilderPrefill(''); setPostBuilderOrder(null); setShowPostBuilder(true) }}
                 className="flex-1 border-2 border-pink-200 text-pink-700 rounded-2xl py-3 text-xs font-bold flex items-center justify-center gap-2 bg-pink-50 active:scale-95 transition-all"
               >
                 <span>🗂️</span> Post Builder
               </button>
               {completedBrief && (
                 <button
-                  onClick={() => { setPostBuilderPrefill(completedBrief); setShowPostBuilder(true) }}
+                  onClick={() => { setPostBuilderPrefill(completedBrief); setPostBuilderOrder(null); setShowPostBuilder(true) }}
                   className="flex-none border-2 border-violet-200 text-violet-700 rounded-2xl px-4 py-3 text-xs font-bold flex items-center justify-center gap-1.5 bg-violet-50 active:scale-95 transition-all"
                   title="Auto-fill from existing brief"
                 >
@@ -2665,6 +2677,44 @@ export default function CustomerDetailPage() {
               <LogInteractionForm customerId={id} userId={user!.id} onSaved={fetchAll} />
             )}
 
+            {/* ── POSTS · BUILD WITH AI (no post yet) ───────── */}
+            {/* Back office / admin. Old or completed orders that never got a  */}
+            {/* post. Build it with AI here — once generated it drops into the */}
+            {/* Boosting list below so it can be boosted (works for old orders).*/}
+            {isBoss && ordersNeedingPost.length > 0 && (
+              <div className="mb-4 space-y-3">
+                <p className="text-[10px] font-bold text-violet-500 uppercase tracking-wider">Posts · Build with AI</p>
+                {ordersNeedingPost.map(o => {
+                  const slot = postSlotByOrder[o.id]
+                  const code = slot?.code || ''
+                  const planDate = fmtPlanDate(slot?.date || (o as any).planned_post_date)
+                  const brief = postBriefByOrder[o.id] || ''
+                  return (
+                    <div key={o.id} className="border border-violet-100 rounded-2xl p-3 space-y-2 bg-violet-50/30">
+                      <div className="min-w-0">
+                        {code && <p className="text-[11px] font-mono font-bold text-purple-700 truncate">{code}</p>}
+                        <p className="text-[10px] font-semibold text-gray-500 truncate">
+                          {(o as any).package?.name || 'Free Post'}
+                        </p>
+                        {planDate && <p className="text-[10px] text-gray-400 font-medium">{planDate}</p>}
+                        {!brief && (
+                          <p className="text-[10px] text-amber-600 font-medium mt-0.5">
+                            No saved brief — paste the description inside the builder.
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => { setPostBuilderPrefill(brief); setPostBuilderOrder(o); setShowPostBuilder(true) }}
+                        className="w-full bg-gradient-to-r from-pink-600 to-violet-600 text-white rounded-xl py-2.5 text-[11px] font-bold flex items-center justify-center gap-2 active:scale-95 transition-all"
+                      >
+                        <span>✦</span> Build post with AI
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
             {/* ── POSTS · WHATSAPP BOOSTING ─────────────────── */}
             {/* Back office / admin only. Each uploaded post shows its artwork  */}
             {/* and a "Boosting" button that opens the WhatsApp panel with the  */}
@@ -2811,19 +2861,19 @@ export default function CustomerDetailPage() {
       </div>
       {showPostBuilder && (
         <PostBuilderModal
-          postCode={plannedSlot?.post_id_code || ''}
-          onClose={() => setShowPostBuilder(false)}
+          postCode={postSlotByOrder[postBuilderTarget?.id || '']?.code || plannedSlot?.post_id_code || ''}
+          onClose={() => { setShowPostBuilder(false); setPostBuilderOrder(null); fetchAll() }}
           role={role || ''}
           initialDesc={postBuilderPrefill}
           defaultProfileUrl={savedProfileLink}
-          orderId={activeOrder?.id || ''}
-          initialImageUrl={activeOrder?.post_image_url || ''}
-          packageName={isFree ? 'Princess Pass' : ((activeOrder as any)?.package?.name || '')}
-          initialPlatinumCountry={(activeOrder as any)?.platinum_country || ''}
-          initialPlatinumTemplate={(activeOrder as any)?.platinum_template || ''}
+          orderId={postBuilderTarget?.id || ''}
+          initialImageUrl={(postBuilderTarget as any)?.post_image_url || ''}
+          packageName={(postBuilderTarget as any)?.step_variant === 'free' ? 'Princess Pass' : ((postBuilderTarget as any)?.package?.name || '')}
+          initialPlatinumCountry={(postBuilderTarget as any)?.platinum_country || ''}
+          initialPlatinumTemplate={(postBuilderTarget as any)?.platinum_template || ''}
           plannedDate={
-            (plannedSlot ? slotInstantISO(plannedSlot.slot_time, plannedSlot.slot_date) : null)
-            || activeOrder?.planned_post_date
+            (postBuilderTarget?.id === activeOrder?.id && plannedSlot ? slotInstantISO(plannedSlot.slot_time, plannedSlot.slot_date) : null)
+            || (postBuilderTarget as any)?.planned_post_date
             || null
           }
         />
@@ -3371,8 +3421,10 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
             </div>
           )}
 
-          {/* Design artwork — designer / admin: grab the Illustrator export */}
-          {(role === 'designer' || role === 'admin') && (
+          {/* Design artwork — designer / back office / admin: generate with AI
+              (or grab the Illustrator export). Back office needs this so old
+              orders with no post can be built and then boosted. */}
+          {(role === 'designer' || role === 'back_office' || role === 'admin') && (
             <div className="bg-white border border-pink-100 rounded-2xl p-4 space-y-3">
               <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">
                 ✦ Post design <span className="text-pink-500">← generate it automatically</span>

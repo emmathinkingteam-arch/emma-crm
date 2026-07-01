@@ -2748,6 +2748,10 @@ export default function CustomerDetailPage() {
                         planDate={planDate}
                         defaultProfileUrl={savedProfileLink || undefined}
                         contextLabel="Auto-filled from this post"
+                        onSent={async (n) => {
+                          await logAction(`📣 Boosting sent to ${n} number${n === 1 ? '' : 's'}${code ? ` — post ${code}` : ''}`)
+                          await fetchAll()
+                        }}
                       />
                     </div>
                   )

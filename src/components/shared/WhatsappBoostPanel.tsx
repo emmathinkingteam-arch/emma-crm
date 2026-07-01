@@ -71,6 +71,8 @@ interface Props {
     contextLabel?: string
     /** Collapsed-state button label. Defaults to "WhatsApp Boost". */
     triggerLabel?: string
+    /** Called after a successful send, with how many numbers were reached. */
+    onSent?: (sentCount: number) => void
 }
 
 export default function WhatsappBoostPanel({
@@ -81,6 +83,7 @@ export default function WhatsappBoostPanel({
     defaultProfileUrl = 'https://www.emmathinking.com/profile/',
     contextLabel,
     triggerLabel = 'WhatsApp Boost',
+    onSent,
 }: Props) {
     const [open, setOpen] = useState(false)
 
@@ -201,8 +204,12 @@ export default function WhatsappBoostPanel({
             const data = await res.json()
             if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
 
-            setResults(data.results || [])
+            const rows = data.results || []
+            setResults(rows)
             setProgress('')
+            // Log this boost in the customer history (parent handles the insert).
+            const okCount = rows.filter((r: BroadcastResult) => r.status === 'sent').length
+            if (okCount > 0) onSent?.(okCount)
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Unknown error')
             setProgress('')

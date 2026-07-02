@@ -14,6 +14,13 @@ const publicSupabase = createClient(
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
+// Paint the iPhone status-bar / Dynamic Island area in the page's pink instead
+// of white, and let the background extend under it.
+export const viewport = {
+    themeColor: '#FFE9F2',
+    viewportFit: 'cover' as const,
+}
+
 interface Props { params: { token: string } }
 
 const fmt = (d?: string | null) =>

@@ -298,6 +298,15 @@ export default function Tracker(props: TrackerProps) {
     designReady, platinumSlot,
   } = props
 
+  // Tint the document itself so the iPhone status bar / overscroll bounce area
+  // matches the page pink instead of flashing white.
+  useEffect(() => {
+    const html = document.documentElement
+    const prev = html.style.backgroundColor
+    html.style.backgroundColor = '#FFE9F2'
+    return () => { html.style.backgroundColor = prev }
+  }, [])
+
   // Honorific: a Princess package is always an unmarried girl, so it wins even
   // over the title typed at order entry; then the entry title; then the gender
   // parsed from the counselling brief (older orders have no title field).

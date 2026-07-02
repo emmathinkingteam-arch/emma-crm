@@ -146,16 +146,14 @@ export default async function TrackPage({ params }: Props) {
     const showPicker = isPlatinum && platinumCountry && !!brief && !t.published_at
 
     return (
-      <>
-        {showPicker && (
-          <PlatinumPicker token={params.token} country={platinumCountry} current={t.platinum_template || ''} />
-        )}
         <Tracker
             token={params.token}
             customerName={t.customer_name || ''}
+            customerTitle={t.customer_title || ''}
             customerPhone={t.customer_phone || ''}
             packageName={t.package_name || ''}
             invoiceNumber={t.invoice_number || ''}
+            invoiceUrl={t.has_invoice && t.order_id ? `/invoice/${t.order_id}` : ''}
             isLive={isLive}
             isExpired={isExpired}
             statusLabel={statusBadge.label}
@@ -163,7 +161,9 @@ export default async function TrackPage({ params }: Props) {
             milestones={milestones}
             brief={brief}
             designReady={designReady}
+            platinumSlot={showPicker ? (
+              <PlatinumPicker token={params.token} country={platinumCountry} current={t.platinum_template || ''} />
+            ) : undefined}
         />
-      </>
     )
 }

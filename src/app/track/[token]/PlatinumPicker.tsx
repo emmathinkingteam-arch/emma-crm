@@ -51,7 +51,7 @@ export default function PlatinumPicker({
   const prettyCountry = country.charAt(0).toUpperCase() + country.slice(1)
 
   return (
-    <div className="px-4 pt-6 pb-2 max-w-xl mx-auto">
+    <div>
       <div className="rounded-3xl bg-white shadow-lg ring-1 ring-pink-100 overflow-hidden">
         <div className="px-5 pt-5 pb-3" style={{ background: 'linear-gradient(135deg,#fff,#ffeef4)' }}>
           <p className="text-[11px] font-bold tracking-wide" style={{ color: PINK }}>EMMA THINKING · PLATINUM</p>

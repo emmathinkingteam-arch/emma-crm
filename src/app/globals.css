@@ -368,6 +368,31 @@ html.dark .skeleton {
 }
 .trk-livedot { animation: trk-blink 1.2s ease-in-out infinite; }
 
+/* IN PROGRESS badge — same breathing glow, brand pink. */
+@keyframes trk-workpulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(234, 30, 99, 0.4); }
+  50%      { box-shadow: 0 0 0 7px rgba(234, 30, 99, 0); }
+}
+.trk-working { animation: trk-workpulse 1.8s ease-out infinite; }
+
+/* Hero photo — edges dissolve into the page background so the image and the
+   page read as one surface. */
+.trk-hero-fade {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 14%, #000 82%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 14%, #000 82%, transparent 100%);
+}
+
+/* Top ticker — endless right-to-left scroll; two identical halves, shifting
+   by exactly half loops seamlessly. */
+@keyframes trk-marquee {
+  to { transform: translateX(-50%); }
+}
+.trk-marquee {
+  display: inline-flex;
+  animation: trk-marquee 55s linear infinite;
+  will-change: transform;
+}
+
 /* Active milestone dot — pulsing pink ring. */
 @keyframes trk-ring {
   0%   { box-shadow: 0 0 0 0 rgba(255, 146, 186, 0.7); }

@@ -1,12 +1,14 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 // ─────────────────────────────────────────────────────────────────────────
-// Animated, customer-facing order tracker. Everything is rendered with the
-// trk-* CSS keyframes from globals.css — pure CSS, no extra dependencies.
-// The page itself stays a server component; it parses the data and hands this
-// component plain serializable props.
+// Customer-facing order tracker, pastel edition. Layout order (top → bottom):
+// brand header → couple hero photo → name (Mr./Miss.) + status → package /
+// invoice → progress timeline (brief + design inline) → Platinum photo picker
+// → WhatsApp button → fixed bottom nav with section shortcuts.
+// Animations reuse the trk-* keyframes from globals.css; the hero photo is
+// intentionally static.
 // ─────────────────────────────────────────────────────────────────────────
 
 export type MState = 'done' | 'active' | 'upcoming'
@@ -29,9 +31,11 @@ export interface ParsedBrief {
 export interface TrackerProps {
   token: string
   customerName: string
+  customerTitle: string
   customerPhone: string
   packageName: string
   invoiceNumber: string
+  invoiceUrl: string
   isLive: boolean
   isExpired: boolean
   statusLabel: string
@@ -39,146 +43,11 @@ export interface TrackerProps {
   milestones: Milestone[]
   brief: ParsedBrief | null
   designReady: boolean
+  platinumSlot?: ReactNode
 }
 
-// ── A polished 3D-style avatar, picked by gender. Pixar-ish soft shading via
-//    SVG gradients, with a graceful float/sway, blink and a soft wave. ────────
-function WavingCharacter({ gender }: { gender: 'male' | 'female' | null }) {
-  const female = (
-    <svg viewBox="0 0 200 210" width="94" height="99" aria-hidden="true">
-      <defs>
-        <radialGradient id="trkFaceF" cx="40%" cy="34%" r="78%">
-          <stop offset="0%" stopColor="#FDE0C8" />
-          <stop offset="62%" stopColor="#F3C2A1" />
-          <stop offset="100%" stopColor="#E29D7A" />
-        </radialGradient>
-        <linearGradient id="trkHairF" x1="0" y1="0" x2="0.3" y2="1">
-          <stop offset="0%" stopColor="#B07A45" />
-          <stop offset="100%" stopColor="#6E4322" />
-        </linearGradient>
-        <linearGradient id="trkJacketF" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#BCD7A0" />
-          <stop offset="100%" stopColor="#8CB76B" />
-        </linearGradient>
-        <radialGradient id="trkGlowF" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="#FFE3EF" />
-          <stop offset="100%" stopColor="#FFE3EF" stopOpacity="0" />
-        </radialGradient>
-      </defs>
-      <ellipse cx="100" cy="198" rx="48" ry="8" fill="#000" opacity="0.06" />
-      <circle cx="100" cy="96" r="94" fill="url(#trkGlowF)" opacity="0.6" />
-      <g className="trk-sway">
-        {/* jacket / shoulders */}
-        <path d="M44 206 v-20 q0 -36 56 -36 t56 36 v20 z" fill="url(#trkJacketF)" />
-        <path d="M86 150 L100 206 L114 150 q-14 -8 -28 0 z" fill="#F7F7F4" />
-        <path d="M100 152 V206" stroke="#7BA85C" strokeWidth="3" />
-        {/* neck */}
-        <rect x="88" y="118" width="24" height="36" rx="12" fill="#EBAE89" />
-        {/* hair behind */}
-        <path d="M56 64 q-14 44 6 78 q-22 -34 -12 -80 z" fill="url(#trkHairF)" />
-        <path d="M144 64 q14 44 -6 78 q22 -34 12 -80 z" fill="url(#trkHairF)" />
-        {/* face */}
-        <ellipse cx="100" cy="92" rx="42" ry="46" fill="url(#trkFaceF)" />
-        {/* ears */}
-        <circle cx="60" cy="96" r="9" fill="#EBAE89" />
-        <circle cx="140" cy="96" r="9" fill="#EBAE89" />
-        {/* top hair + messy bun */}
-        <path d="M57 80 q-6 -58 43 -58 t43 58 q-10 -30 -43 -30 t-43 30 z" fill="url(#trkHairF)" />
-        <circle cx="100" cy="26" r="17" fill="url(#trkHairF)" />
-        <circle cx="89" cy="22" r="8" fill="url(#trkHairF)" />
-        <circle cx="112" cy="24" r="9" fill="url(#trkHairF)" />
-        {/* brows */}
-        <path d="M74 78 q9 -5 18 -0.5" stroke="#6E4322" strokeWidth="3.5" fill="none" strokeLinecap="round" />
-        <path d="M108 77.5 q9 -4.5 18 0.5" stroke="#6E4322" strokeWidth="3.5" fill="none" strokeLinecap="round" />
-        {/* eyes */}
-        <ellipse cx="83" cy="92" rx="8" ry="9" fill="#fff" />
-        <ellipse cx="117" cy="92" rx="8" ry="9" fill="#fff" />
-        <circle cx="84" cy="93" r="5.2" fill="#6B4A2B" />
-        <circle cx="116" cy="93" r="5.2" fill="#6B4A2B" />
-        <circle cx="84" cy="93" r="2.4" fill="#2a1a0d" />
-        <circle cx="116" cy="93" r="2.4" fill="#2a1a0d" />
-        <circle cx="86" cy="90.5" r="1.6" fill="#fff" />
-        <circle cx="118" cy="90.5" r="1.6" fill="#fff" />
-        <rect className="trk-eyelid" x="74" y="83" width="18" height="10" rx="5" fill="#F3C2A1" />
-        <rect className="trk-eyelid" x="108" y="83" width="18" height="10" rx="5" fill="#F3C2A1" />
-        {/* nose + smile */}
-        <ellipse cx="100" cy="104" rx="4.5" ry="3.4" fill="#E89A77" />
-        <path d="M88 113 q12 11 24 0" stroke="#B5604A" strokeWidth="3" fill="none" strokeLinecap="round" />
-        {/* cheeks + freckles */}
-        <circle cx="75" cy="106" r="6.5" fill="#FF9FBE" opacity="0.45" />
-        <circle cx="125" cy="106" r="6.5" fill="#FF9FBE" opacity="0.45" />
-        {[[72, 102], [78, 106], [74, 110], [122, 102], [128, 106], [124, 110]].map(([x, y], i) => (
-          <circle key={i} cx={x} cy={y} r="1" fill="#C77B57" opacity="0.5" />
-        ))}
-        {/* soft waving hand */}
-        <g className="trk-wave">
-          <path d="M150 150 q24 -6 22 -36" stroke="url(#trkJacketF)" strokeWidth="15" fill="none" strokeLinecap="round" />
-          <circle cx="172" cy="112" r="10" fill="#EBAE89" />
-        </g>
-      </g>
-    </svg>
-  )
-
-  const male = (
-    <svg viewBox="0 0 200 210" width="94" height="99" aria-hidden="true">
-      <defs>
-        <radialGradient id="trkFaceM" cx="40%" cy="34%" r="78%">
-          <stop offset="0%" stopColor="#FDE0C8" />
-          <stop offset="62%" stopColor="#F3C2A1" />
-          <stop offset="100%" stopColor="#E29D7A" />
-        </radialGradient>
-        <linearGradient id="trkHairM" x1="0" y1="0" x2="0.3" y2="1">
-          <stop offset="0%" stopColor="#B5824C" />
-          <stop offset="100%" stopColor="#7A4E27" />
-        </linearGradient>
-        <linearGradient id="trkSweaterM" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#FFFFFF" />
-          <stop offset="100%" stopColor="#E7EAEE" />
-        </linearGradient>
-        <radialGradient id="trkGlowM" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="#E3EEFF" />
-          <stop offset="100%" stopColor="#E3EEFF" stopOpacity="0" />
-        </radialGradient>
-      </defs>
-      <ellipse cx="100" cy="198" rx="48" ry="8" fill="#000" opacity="0.06" />
-      <circle cx="100" cy="96" r="94" fill="url(#trkGlowM)" opacity="0.6" />
-      <g className="trk-sway">
-        {/* sweater / shoulders */}
-        <path d="M42 206 v-18 q0 -38 58 -38 t58 38 v18 z" fill="url(#trkSweaterM)" />
-        <path d="M78 152 q22 14 44 0 q-2 12 -22 12 t-22 -12 z" fill="#D9DEE5" opacity="0.7" />
-        {/* neck */}
-        <rect x="88" y="118" width="24" height="36" rx="12" fill="#EBAE89" />
-        {/* face */}
-        <ellipse cx="100" cy="92" rx="42" ry="47" fill="url(#trkFaceM)" />
-        {/* ears */}
-        <circle cx="60" cy="94" r="9" fill="#EBAE89" />
-        <circle cx="140" cy="94" r="9" fill="#EBAE89" />
-        {/* tousled quiff hair */}
-        <path d="M58 76 q-2 -34 18 -46 q-6 12 0 18 q10 -22 28 -22 q-4 10 2 14 q12 -16 30 -8 q16 10 8 44 q-8 -26 -42 -26 t-42 26 z" fill="url(#trkHairM)" />
-        {/* brows */}
-        <path d="M74 80 q9 -4 18 0" stroke="#6E4322" strokeWidth="4" fill="none" strokeLinecap="round" />
-        <path d="M108 80 q9 -4 18 0" stroke="#6E4322" strokeWidth="4" fill="none" strokeLinecap="round" />
-        {/* happy closed eyes (^_^) */}
-        <path d="M75 92 q8 -8 16 0" stroke="#3A2A1C" strokeWidth="3.5" fill="none" strokeLinecap="round" />
-        <path d="M109 92 q8 -8 16 0" stroke="#3A2A1C" strokeWidth="3.5" fill="none" strokeLinecap="round" />
-        {/* nose */}
-        <ellipse cx="100" cy="104" rx="5" ry="4" fill="#E89A77" />
-        {/* big smile */}
-        <path d="M84 112 q16 16 32 0" stroke="#B5604A" strokeWidth="3.2" fill="none" strokeLinecap="round" />
-        {/* cheeks */}
-        <circle cx="74" cy="106" r="7" fill="#FF9FBE" opacity="0.4" />
-        <circle cx="126" cy="106" r="7" fill="#FF9FBE" opacity="0.4" />
-        {/* soft waving hand */}
-        <g className="trk-wave">
-          <path d="M150 152 q24 -6 22 -36" stroke="url(#trkSweaterM)" strokeWidth="15" fill="none" strokeLinecap="round" />
-          <circle cx="172" cy="114" r="10" fill="#EBAE89" />
-        </g>
-      </g>
-    </svg>
-  )
-
-  return gender === 'male' ? male : female
-}
+const BRAND = '#EA1E63'
+const WHATSAPP_URL = 'https://wa.me/94744120715'
 
 function FloatingHearts() {
   const hearts = ['💖', '💕', '✨', '💞', '🌸', '💗']
@@ -202,19 +71,78 @@ function FloatingHearts() {
   )
 }
 
-function BriefPanel({ brief }: { brief: ParsedBrief }) {
-  const [open, setOpen] = useState(false)
+// Endless right-to-left ticker, like the marketing site's top bar.
+function Marquee() {
+  const items = Array(6).fill("SRI LANKA'S #1 PROFESSIONAL MATCHMAKING SERVICE")
   return (
-    <div className="mt-2">
+    <div className="overflow-hidden whitespace-nowrap py-2.5 select-none" aria-hidden="true">
+      <div className="trk-marquee">
+        {[0, 1].map((half) => (
+          <span key={half} className="flex-shrink-0">
+            {items.map((t: string, i: number) => (
+              <span key={i} className="text-[10px] font-bold tracking-[0.18em] text-gray-900 uppercase">
+                {t}
+                <span className="mx-4 text-[8px] align-middle">✦</span>
+              </span>
+            ))}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// Hero photo — edges masked into the background, pinned behind the content
+// (sticky) and blurring progressively as the customer scrolls up.
+// Hides itself gracefully if /track/couple-hero.jpg is missing.
+function CoupleHero() {
+  const [failed, setFailed] = useState(false)
+  const imgRef = useRef<HTMLImageElement>(null)
+
+  useEffect(() => {
+    let raf = 0
+    const onScroll = () => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        const blur = Math.min(window.scrollY / 12, 14)
+        if (imgRef.current) imgRef.current.style.filter = blur > 0.3 ? `blur(${blur}px)` : ''
+      })
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => { window.removeEventListener('scroll', onScroll); cancelAnimationFrame(raf) }
+  }, [])
+
+  if (failed) return null
+  return (
+    <div className="trk-hero-fade -mx-4">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        ref={imgRef}
+        src="/track/couple-hero.jpg"
+        alt="A happy couple"
+        width={1200}
+        height={800}
+        fetchPriority="high"
+        className="w-full h-auto block"
+        onError={() => setFailed(true)}
+      />
+    </div>
+  )
+}
+
+function BriefPanel({ brief }: { brief: ParsedBrief }) {
+  const [open, setOpen] = useState(true) // visible by default
+  return (
+    <div className="mt-2" id="brief" style={{ scrollMarginTop: 16 }}>
       <button
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center justify-between gap-2 rounded-xl bg-pink-50 px-3 py-2 text-left transition active:scale-[0.98]"
       >
         <span className="text-[12px] font-bold text-pink-700">
-          {open ? 'Hide your profile brief' : 'View your profile brief'}
+          {open ? 'Your profile brief' : 'View your profile brief'}
         </span>
         <span
-          className="text-pink-500 text-[11px] transition-transform"
+          className="text-pink-400 text-[11px] transition-transform"
           style={{ transform: open ? 'rotate(180deg)' : 'none' }}
         >
           ▼
@@ -297,29 +225,104 @@ function DesignPanel({ token }: { token: string }) {
   )
 }
 
-export default function Tracker(props: TrackerProps) {
-  const {
-    token, customerName, customerPhone, packageName, invoiceNumber,
-    isLive, isExpired, statusLabel, statusCls, milestones, brief, designReady,
-  } = props
+// ── Bottom nav: white pill, section shortcuts, WhatsApp highlighted center ──
+function NavIcon({ d }: { d: string }) {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+         strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={d} />
+    </svg>
+  )
+}
 
-  const gender = brief?.gender ?? null
-  const firstName = (customerName || 'there').split(' ')[0]
+const ICONS = {
+  status: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2 M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8',
+  progress: 'M9 11l3 3L22 4 M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11',
+  brief: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8',
+  photos: 'M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z M8.5 10a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3 M21 15l-5-5L5 21',
+}
+
+function BottomNav({ hasBrief, hasPhotos }: { hasBrief: boolean; hasPhotos: boolean }) {
+  const go = (id: string) =>
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+
+  const item = (id: string, label: string, icon: string) => (
+    <button
+      key={id}
+      onClick={() => go(id)}
+      className="flex flex-col items-center gap-0.5 text-pink-300 hover:text-pink-500 active:scale-90 transition px-2"
+    >
+      <NavIcon d={icon} />
+      <span className="text-[9px] font-bold text-gray-400">{label}</span>
+    </button>
+  )
+
+  const left = [item('status', 'Status', ICONS.status), item('progress', 'Progress', ICONS.progress)]
+  const right = [
+    ...(hasBrief ? [item('brief', 'Brief', ICONS.brief)] : []),
+    ...(hasPhotos ? [item('photos', 'Photos', ICONS.photos)] : []),
+  ]
+  // Keep the pill balanced when there's nothing on the right.
+  if (right.length === 0) right.push(item('contact', 'Help', ICONS.brief))
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-pink-50 via-white to-white overflow-hidden">
-      <div className="max-w-md mx-auto px-4 pb-12">
+    <nav className="fixed bottom-4 inset-x-4 z-40">
+      <div className="max-w-md mx-auto bg-white/90 backdrop-blur rounded-full shadow-lg ring-1 ring-pink-100 px-4 py-2 flex items-center justify-between">
+        {left}
+        <a
+          href={WHATSAPP_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Message your relationship manager on WhatsApp"
+          className="flex items-center justify-center w-12 h-12 rounded-full shadow-md -mt-6 ring-4 ring-white active:scale-90 transition"
+          style={{ background: 'linear-gradient(135deg,#F75C9E,#FFB199)' }}
+        >
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="#fff" aria-hidden="true">
+            <path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2zm0 18.2c-1.6 0-3.1-.4-4.4-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2zm4.6-6.1c-.3-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1-.2.3-.6.8-.8 1-.1.2-.3.2-.5.1a6.7 6.7 0 0 1-3.4-3c-.3-.4 0-.5.2-.7l.5-.6c.1-.2.1-.3 0-.5l-.8-1.9c-.2-.5-.4-.4-.6-.4h-.5c-.2 0-.5.1-.7.3-.2.3-.9.9-.9 2.2s.9 2.5 1.1 2.7c.1.2 1.9 2.9 4.6 4 .6.3 1.1.4 1.5.6.6.2 1.2.2 1.6.1.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.1-.3-.2-.6-.3z" />
+          </svg>
+        </a>
+        {right}
+      </div>
+    </nav>
+  )
+}
 
-        {/* Brand header + waving character */}
-        <div className="pt-8 pb-4 text-center relative">
+export default function Tracker(props: TrackerProps) {
+  const {
+    token, customerName, customerTitle, customerPhone, packageName, invoiceNumber,
+    invoiceUrl, isLive, isExpired, statusLabel, statusCls, milestones, brief,
+    designReady, platinumSlot,
+  } = props
+
+  // Honorific: a Princess package is always an unmarried girl, so it wins even
+  // over the title typed at order entry; then the entry title; then the gender
+  // parsed from the counselling brief (older orders have no title field).
+  const honorific =
+    packageName.toLowerCase().includes('princess') ? 'Miss.'
+      : customerTitle ||
+        (brief?.gender === 'male' ? 'Mr.'
+          : brief?.gender === 'female' ? 'Miss.' : '')
+  const displayName = [honorific, customerName || 'Valued Customer'].filter(Boolean).join(' ')
+
+  return (
+    <div
+      className="min-h-screen overflow-hidden"
+      style={{ background: 'linear-gradient(180deg,#FFE9F2 0%,#FFF4F8 30%,#FFFFFF 100%)' }}
+    >
+      <Marquee />
+
+      <div className="max-w-md mx-auto px-4 pb-32">
+
+        {/* Brand header — tight, so the logo sits right on the photo */}
+        <div className="pt-2 pb-1 text-center relative z-10">
           {isLive && <FloatingHearts />}
           <div
-            className="trk-zoom inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-3 shadow-sm"
-            style={{ background: '#EA1E63' }}
+            className="trk-zoom inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-1.5 shadow-sm"
+            style={{ background: BRAND }}
           >
             <span className="text-white text-xl font-extrabold">E</span>
           </div>
-          <p className="trk-rise text-sm font-extrabold tracking-wide" style={{ color: '#EA1E63', animationDelay: '0.1s' }}>
+          <p className="trk-rise text-sm font-extrabold tracking-wide" style={{ color: BRAND, animationDelay: '0.1s' }}>
             EMMA THINKING
           </p>
           <p className="trk-rise text-[11px] text-gray-400 font-medium mt-0.5" style={{ animationDelay: '0.18s' }}>
@@ -327,63 +330,85 @@ export default function Tracker(props: TrackerProps) {
           </p>
         </div>
 
-        {/* Greeting with the waving person */}
-        <div className="trk-rise flex items-center justify-center gap-2 pb-5" style={{ animationDelay: '0.26s' }}>
-          <WavingCharacter gender={gender} />
-          <div className="text-left">
-            <p className="text-lg font-extrabold text-gray-800 leading-tight">Hi, {firstName}</p>
-            <p className="text-[12px] text-gray-500 font-medium">
-              {isLive ? "You're live — congratulations!" : "Here's how your profile is coming along."}
-            </p>
-          </div>
+        {/* Couple photo — pinned behind the page; content scrolls over it while
+            it blurs. Pulled up so its faded top tucks under the header. */}
+        <div className="sticky top-0 z-0 -mt-5">
+          <CoupleHero />
         </div>
 
-        {/* Summary card */}
-        <div className="trk-rise bg-white rounded-3xl shadow-sm border border-pink-50 overflow-hidden" style={{ animationDelay: '0.34s' }}>
+        {/* Everything from here scrolls OVER the pinned photo */}
+        <div className="relative z-10 -mt-16">
+
+        {/* Name + status + package/invoice */}
+        <div
+          id="status"
+          className="trk-rise bg-white rounded-3xl shadow-sm border border-pink-50 overflow-hidden"
+          style={{ animationDelay: '0.3s', scrollMarginTop: 16 }}
+        >
           <div className="px-5 pt-5 pb-4 flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-lg font-bold text-gray-800 truncate">{customerName || 'Valued Customer'}</p>
+              <p className="text-lg font-extrabold text-gray-800 truncate">{displayName}</p>
               <p className="text-sm text-gray-400 font-medium">{customerPhone || ''}</p>
             </div>
             <span
-              className={`text-[10px] font-bold uppercase tracking-wide px-3 py-1.5 rounded-full flex-shrink-0 inline-flex items-center gap-1.5 ${statusCls} ${isLive ? 'trk-live' : ''}`}
+              className={`text-[10px] font-bold uppercase tracking-wide px-3 py-1.5 rounded-full flex-shrink-0 inline-flex items-center gap-1.5 ${statusCls} ${isLive ? 'trk-live' : !isExpired ? 'trk-working' : ''}`}
             >
               {isLive && <span className="trk-livedot w-1.5 h-1.5 rounded-full bg-green-600" />}
+              {!isLive && !isExpired && <span className="trk-livedot w-1.5 h-1.5 rounded-full bg-pink-600" />}
               {statusLabel}
             </span>
           </div>
-          <div className="grid grid-cols-2 gap-px bg-gray-100">
+          <div className="grid grid-cols-2 gap-px bg-pink-50">
             <div className="bg-white px-5 py-3">
               <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Package</p>
               <p className="text-sm font-bold text-gray-700 mt-0.5 truncate">{packageName || '—'}</p>
             </div>
             <div className="bg-white px-5 py-3">
               <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Invoice</p>
-              <p className="text-sm font-bold text-gray-700 mt-0.5">{invoiceNumber || '—'}</p>
+              {invoiceUrl ? (
+                <a
+                  href={invoiceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-sm font-bold text-pink-600 mt-0.5 active:scale-95 transition"
+                >
+                  {invoiceNumber || 'View'}
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                       strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M7 10l5 5 5-5 M12 15V3" />
+                  </svg>
+                </a>
+              ) : (
+                <p className="text-sm font-bold text-gray-700 mt-0.5">{invoiceNumber || '—'}</p>
+              )}
             </div>
           </div>
         </div>
 
         {/* Expired banner */}
         {isExpired && (
-          <div className="trk-rise mt-4 bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3 text-center" style={{ animationDelay: '0.4s' }}>
+          <div className="trk-rise mt-4 bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3 text-center" style={{ animationDelay: '0.36s' }}>
             <p className="text-sm font-bold text-gray-600">This campaign has expired</p>
           </div>
         )}
 
-        {/* Timeline */}
-        <div className="trk-rise mt-5 bg-white rounded-3xl shadow-sm border border-pink-50 p-5" style={{ animationDelay: '0.42s' }}>
+        {/* Progress timeline */}
+        <div
+          id="progress"
+          className="trk-rise mt-5 bg-white rounded-3xl shadow-sm border border-pink-50 p-5"
+          style={{ animationDelay: '0.42s', scrollMarginTop: 16 }}
+        >
           <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-4">Progress</p>
           <div className="relative">
             {milestones.map((m, i) => {
               const last = i === milestones.length - 1
-              // The whole timeline starts after the card lands (~0.6s), then each
-              // row rises in sequence — the "Paramount" stagger.
-              const delay = 0.6 + i * 0.16
+              // The whole timeline starts after the card lands, then each row
+              // rises in sequence — the "Paramount" stagger, kept snappy.
+              const delay = 0.4 + i * 0.1
               const dotColor =
-                m.state === 'done' ? '#EA1E63'
-                  : m.state === 'active' ? '#FF92BA'
-                    : '#E5E7EB'
+                m.state === 'done' ? '#F75C9E'
+                  : m.state === 'active' ? BRAND
+                    : '#F1E4EA'
               const showBrief = m.extra === 'brief' && m.state === 'done' && brief
               const showDesign = m.extra === 'design' && m.state === 'done' && designReady
               return (
@@ -393,7 +418,7 @@ export default function Tracker(props: TrackerProps) {
                     <span
                       className="trk-line absolute left-[11px] top-6 w-0.5 h-full"
                       style={{
-                        background: m.state === 'done' ? '#FCD2E3' : '#F1F1F3',
+                        background: m.state === 'done' ? '#FFC5D9' : '#F7EDF2',
                         animationDelay: `${delay + 0.1}s`,
                       }}
                     />
@@ -408,7 +433,7 @@ export default function Tracker(props: TrackerProps) {
                         ? <span className="text-white text-[12px] font-bold leading-none">✓</span>
                         : m.state === 'active'
                           ? <span className="w-2 h-2 rounded-full bg-white" />
-                          : <span className="w-2 h-2 rounded-full bg-gray-300" />}
+                          : <span className="w-2 h-2 rounded-full bg-pink-100" />}
                     </div>
                   </div>
                   {/* content */}
@@ -433,19 +458,37 @@ export default function Tracker(props: TrackerProps) {
           </div>
         </div>
 
-        <p className="trk-fade text-center text-[11px] text-gray-300 font-medium mt-8" style={{ animationDelay: '1.4s' }}>
-          Emma Thinking (Pvt) Ltd · Need help?{' '}
+        {/* Platinum photo picker — below the timeline, never above */}
+        {platinumSlot && (
+          <div id="photos" className="trk-rise mt-5" style={{ animationDelay: '0.5s', scrollMarginTop: 16 }}>
+            {platinumSlot}
+          </div>
+        )}
+
+        {/* WhatsApp contact */}
+        <div id="contact" className="trk-rise mt-5" style={{ animationDelay: '0.56s', scrollMarginTop: 16 }}>
           <a
-            href="https://wa.me/94744120715"
+            href={WHATSAPP_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="font-bold text-pink-500 underline underline-offset-2"
+            className="flex items-center justify-center gap-2.5 w-full rounded-2xl px-5 py-4 shadow-sm active:scale-[0.98] transition"
+            style={{ background: 'linear-gradient(135deg,#F75C9E,#FFB199)' }}
           >
-            Message your relationship manager
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="#fff" aria-hidden="true">
+              <path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2zm0 18.2c-1.6 0-3.1-.4-4.4-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2zm4.6-6.1c-.3-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1-.2.3-.6.8-.8 1-.1.2-.3.2-.5.1a6.7 6.7 0 0 1-3.4-3c-.3-.4 0-.5.2-.7l.5-.6c.1-.2.1-.3 0-.5l-.8-1.9c-.2-.5-.4-.4-.6-.4h-.5c-.2 0-.5.1-.7.3-.2.3-.9.9-.9 2.2s.9 2.5 1.1 2.7c.1.2 1.9 2.9 4.6 4 .6.3 1.1.4 1.5.6.6.2 1.2.2 1.6.1.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.1-.3-.2-.6-.3z" />
+            </svg>
+            <span className="text-white text-sm font-extrabold">Message your relationship manager</span>
           </a>
-          .
+        </div>
+
+        <p className="trk-fade text-center text-[11px] text-gray-300 font-medium mt-6" style={{ animationDelay: '1.2s' }}>
+          Emma Thinking (Pvt) Ltd
         </p>
+
+        </div>{/* /content-over-photo */}
       </div>
+
+      <BottomNav hasBrief={!!brief} hasPhotos={!!platinumSlot} />
     </div>
   )
 }

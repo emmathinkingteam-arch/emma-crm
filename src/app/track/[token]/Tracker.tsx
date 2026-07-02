@@ -250,7 +250,7 @@ function BottomNav({ hasBrief, hasPhotos }: { hasBrief: boolean; hasPhotos: bool
     <button
       key={id}
       onClick={() => go(id)}
-      className="flex flex-col items-center gap-0.5 text-pink-300 hover:text-pink-500 active:scale-90 transition px-2"
+      className="flex-1 flex flex-col items-center gap-0.5 text-pink-400 hover:text-pink-600 active:scale-90 transition py-1"
     >
       <NavIcon d={icon} />
       <span className="text-[9px] font-bold text-gray-400">{label}</span>
@@ -267,19 +267,23 @@ function BottomNav({ hasBrief, hasPhotos }: { hasBrief: boolean; hasPhotos: bool
 
   return (
     <nav className="fixed bottom-4 inset-x-4 z-40">
-      <div className="max-w-md mx-auto bg-white/90 backdrop-blur rounded-full shadow-lg ring-1 ring-pink-100 px-4 py-2 flex items-center justify-between">
+      <div className="max-w-sm mx-auto bg-white/90 backdrop-blur rounded-full shadow-lg ring-1 ring-pink-100 px-3 py-1.5 flex items-center">
         {left}
         <a
           href={WHATSAPP_URL}
           target="_blank"
           rel="noopener noreferrer"
           aria-label="Message your relationship manager on WhatsApp"
-          className="flex items-center justify-center w-12 h-12 rounded-full shadow-md -mt-6 ring-4 ring-white active:scale-90 transition"
-          style={{ background: 'linear-gradient(135deg,#F75C9E,#FFB199)' }}
+          className="flex-1 flex flex-col items-center gap-0.5 py-1 active:scale-90 transition"
         >
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="#fff" aria-hidden="true">
-            <path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2zm0 18.2c-1.6 0-3.1-.4-4.4-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2zm4.6-6.1c-.3-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1-.2.3-.6.8-.8 1-.1.2-.3.2-.5.1a6.7 6.7 0 0 1-3.4-3c-.3-.4 0-.5.2-.7l.5-.6c.1-.2.1-.3 0-.5l-.8-1.9c-.2-.5-.4-.4-.6-.4h-.5c-.2 0-.5.1-.7.3-.2.3-.9.9-.9 2.2s.9 2.5 1.1 2.7c.1.2 1.9 2.9 4.6 4 .6.3 1.1.4 1.5.6.6.2 1.2.2 1.6.1.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.1-.3-.2-.6-.3z" />
-          </svg>
+          <span
+            className="flex items-center justify-center w-9 h-9 rounded-full shadow-sm"
+            style={{ background: 'linear-gradient(135deg,#F75C9E,#FFB199)' }}
+          >
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="#fff" aria-hidden="true">
+              <path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2zm0 18.2c-1.6 0-3.1-.4-4.4-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2zm4.6-6.1c-.3-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1-.2.3-.6.8-.8 1-.1.2-.3.2-.5.1a6.7 6.7 0 0 1-3.4-3c-.3-.4 0-.5.2-.7l.5-.6c.1-.2.1-.3 0-.5l-.8-1.9c-.2-.5-.4-.4-.6-.4h-.5c-.2 0-.5.1-.7.3-.2.3-.9.9-.9 2.2s.9 2.5 1.1 2.7c.1.2 1.9 2.9 4.6 4 .6.3 1.1.4 1.5.6.6.2 1.2.2 1.6.1.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.1-.3-.2-.6-.3z" />
+            </svg>
+          </span>
         </a>
         {right}
       </div>

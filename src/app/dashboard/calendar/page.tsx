@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
-import { CalendarSlot, TimeSlot, TIME_SLOT_LABELS, getSlotLabel } from '@/types'
+import { CalendarSlot, FeedbackPost, TimeSlot, TIME_SLOT_LABELS, getSlotLabel } from '@/types'
 import { generatePostId } from '@/lib/utils'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { PACKAGE_TONE, packageTone } from '@/lib/package-colors'
@@ -20,9 +20,10 @@ export default function CalendarPage() {
   const router = useRouter()
   const { user, role } = useAuthStore()
   const [slots, setSlots] = useState<CalendarSlot[]>([])
+  const [feedbacks, setFeedbacks] = useState<FeedbackPost[]>([])
   const [currentDate, setCurrentDate] = useState(new Date())
   const [selectedCell, setSelectedCell] = useState<{ date: string; slot: TimeSlot } | null>(null)
-  const canEdit = role === 'designer' || role === 'admin'
+  const canEdit = role === 'designer' || role === 'back_office' || role === 'admin'
 
   useEffect(() => { fetchSlots() }, [currentDate])
 
@@ -38,6 +39,13 @@ export default function CalendarPage() {
       .gte('slot_date', firstDay)
       .lte('slot_date', lastDay)
     if (data) setSlots(data as any)
+    // Feedback posts occupy slots too (no order behind them)
+    const { data: fb } = await supabase
+      .from('feedback_posts')
+      .select('*')
+      .gte('slot_date', firstDay)
+      .lte('slot_date', lastDay)
+    if (fb) setFeedbacks(fb as any)
   }
 
   const getDaysInMonth = () => {
@@ -53,6 +61,9 @@ export default function CalendarPage() {
   const getSlot = (date: string, slot: TimeSlot) =>
     slots.find(s => s.slot_date === date && s.slot_time === slot)
 
+  const getFeedback = (date: string, slot: TimeSlot) =>
+    feedbacks.find(f => f.slot_date === date && f.slot_time === slot)
+
   const isExpiredSlot = (s: CalendarSlot | undefined) =>
     !!(s?.published_at && s?.validity_expires_at && new Date(s.validity_expires_at) < new Date())
 
@@ -67,9 +78,14 @@ export default function CalendarPage() {
 
   // Click handlers for the grid cells:
   //   - empty cell + canEdit  → open the (in-page) plan modal as before
+  //   - feedback cell         → open the feedback detail (image + copy things)
   //   - planned/published cell → navigate to read-only customer detail
   //     (designer / manager / counsellor can all view the brief + history)
-  const handleCellClick = (s: CalendarSlot | undefined, date: string, slot: TimeSlot) => {
+  const handleCellClick = (s: CalendarSlot | undefined, fb: FeedbackPost | undefined, date: string, slot: TimeSlot) => {
+    if (fb) {
+      router.push(`/dashboard/feedback/${fb.id}`)
+      return
+    }
     if (s) {
       const cid = (s as any).order?.customer_id
       if (cid) router.push(`/dashboard/customers/${cid}`)
@@ -102,7 +118,7 @@ export default function CalendarPage() {
 
         {!canEdit && (
           <div className="mx-4 mt-3 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 text-[10px] text-blue-600 font-semibold">
-            View only — only Designer can plan slots
+            View only — only Designer / Back Office can plan slots
           </div>
         )}
 
@@ -135,6 +151,7 @@ export default function CalendarPage() {
                 </div>
                 {days.map(d => {
                   const s = getSlot(d, slot)
+                  const fb = getFeedback(d, slot)
                   const expired = isExpiredSlot(s)
                   const tone = s ? packageTone((s as any).order?.package?.name) : null
                   // Sat/Sun run on a different schedule. Surface that day's actual
@@ -145,13 +162,22 @@ export default function CalendarPage() {
                   return (
                     <div key={d} className="w-[88px] flex-shrink-0 p-1">
                       <div
-                        onClick={() => handleCellClick(s, d, slot)}
-                        className={`h-full min-h-[76px] rounded-2xl p-2.5 transition-all active:scale-[0.97] ${cellClass(s)}`}
+                        onClick={() => handleCellClick(s, fb, d, slot)}
+                        className={`h-full min-h-[76px] rounded-2xl p-2.5 transition-all active:scale-[0.97] ${fb ? 'bg-fuchsia-50 border border-fuchsia-200 shadow-sm cursor-pointer hover:shadow-md hover:-translate-y-0.5' : cellClass(s)}`}
                       >
                         {showDayTime && (
                           <p className={`text-[8px] font-bold leading-none mb-1 ${s && !expired && tone ? `${tone.text} opacity-70` : 'text-pink-400'}`}>{dayTime}</p>
                         )}
-                        {s && tone && (
+                        {fb && (
+                          <div className="leading-tight">
+                            <p className="text-[11px] font-extrabold truncate text-fuchsia-700">{fb.post_id_code || 'FB'}</p>
+                            <p className="text-[10px] font-semibold truncate mt-0.5 text-fuchsia-700 opacity-80">{fb.display_name}</p>
+                            <span className="inline-block mt-1.5 px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-wide bg-fuchsia-100 text-fuchsia-700">
+                              Feedback
+                            </span>
+                          </div>
+                        )}
+                        {!fb && s && tone && (
                           <div className="leading-tight">
                             <p className={`text-[11px] font-extrabold truncate ${expired ? 'text-gray-400' : tone.text}`}>{s.post_id_code}</p>
                             <p className={`text-[10px] font-semibold truncate mt-0.5 ${expired ? 'text-gray-400' : `${tone.text} opacity-80`}`}>
@@ -181,6 +207,10 @@ export default function CalendarPage() {
               {name}
             </span>
           ))}
+          <span className="flex items-center gap-1.5 text-[10px] text-gray-600 font-semibold">
+            <span className="w-3 h-3 rounded-full bg-fuchsia-400 shadow-sm" />
+            Feedback
+          </span>
           <span className="flex items-center gap-1.5 text-[10px] text-gray-400 font-semibold">
             <span className="w-3 h-3 rounded-full bg-gray-300 shadow-sm" />
             Expired
@@ -206,6 +236,15 @@ export default function CalendarPage() {
               onClick={() => { setSelectedCell(null); router.push('/dashboard') }}
               className="w-full bg-pink-600 text-white rounded-2xl py-3 text-xs font-bold">
               Open my assignments →
+            </button>
+            <button
+              onClick={() => {
+                const { date, slot } = selectedCell
+                setSelectedCell(null)
+                router.push(`/dashboard/feedback/new?date=${date}&slot=${slot}`)
+              }}
+              className="w-full mt-2 bg-fuchsia-100 text-fuchsia-700 border border-fuchsia-200 rounded-2xl py-3 text-xs font-bold">
+              ✦ Add Feedback post here
             </button>
             <button
               onClick={() => setSelectedCell(null)}

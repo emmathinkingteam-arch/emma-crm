@@ -2,6 +2,9 @@
   "functions": {
     "api/generate-post.py": {
       "includeFiles": "api/_gen/**"
+    },
+    "api/generate-feedback.py": {
+      "includeFiles": "api/_gen/**"
     }
   }
 }

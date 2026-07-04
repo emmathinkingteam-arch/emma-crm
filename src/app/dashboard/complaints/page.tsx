@@ -1,11 +1,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
-import { Loader2, AlertCircle, CheckCircle, Clock, ChevronDown, ChevronUp, Plus, X } from 'lucide-react'
+import { Loader2, AlertCircle, CheckCircle, Clock, ChevronDown, ChevronUp, Plus, X, ArrowLeft } from 'lucide-react'
 import { fmtDate, fmtTime } from '@/lib/utils'
 
 // ── Complaint status display config ────────────────────────────────────────
@@ -39,6 +40,7 @@ interface Complaint {
 }
 
 export default function ComplaintsPage() {
+    const router = useRouter()
     const { user } = useAuthStore()
     const [complaints, setComplaints] = useState<Complaint[]>([])
     const [loading, setLoading] = useState(true)
@@ -103,11 +105,19 @@ export default function ComplaintsPage() {
                 {/* Header */}
                 <div className="bg-red-50 px-4 pt-4 pb-5">
                     <div className="flex items-center justify-between">
-                        <div>
+                        <div className="flex items-center gap-2.5">
+                            <button
+                                onClick={() => router.push('/dashboard/chat')}
+                                className="w-8 h-8 rounded-full bg-white/70 flex items-center justify-center text-gray-500 active:scale-95 transition-transform flex-shrink-0"
+                            >
+                                <ArrowLeft size={15} />
+                            </button>
+                            <div>
                             <h1 className="text-base font-extrabold text-gray-800">My Complaints</h1>
                             <p className="text-[10px] text-gray-500 font-medium mt-0.5">
                                 Lodge a complaint · Admin reviews and responds
                             </p>
+                            </div>
                         </div>
                         <button
                             onClick={() => setShowForm(f => !f)}

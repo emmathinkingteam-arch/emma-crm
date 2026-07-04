@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Users, CalendarRange,
-  PlusCircle, Wallet, Award, ClipboardList, Search, MessageSquareWarning,
+  PlusCircle, Wallet, Award, ClipboardList, Search, MessageCircle,
   ArrowDownToLine, ListOrdered, Landmark, Receipt, DollarSign
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
@@ -28,7 +28,7 @@ const NAV_CONFIG = {
     { href: '/dashboard/customers', icon: Users, label: 'Clients' },
     { href: '/dashboard/wallet', icon: Wallet, label: 'Wallet' },
     { href: '/dashboard/profile', icon: Award, label: 'Profile' },
-    { href: '/dashboard/complaints', icon: MessageSquareWarning, label: 'Complain' },
+    { href: '/dashboard/chat', icon: MessageCircle, label: 'Chat' },
   ],
   back_office: [
     { href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
@@ -37,7 +37,7 @@ const NAV_CONFIG = {
     { href: '/dashboard/legacy-history', icon: Search, label: 'Search' },
     { href: '/dashboard/calendar', icon: CalendarRange, label: 'Plan' },
     { href: '/dashboard/profile', icon: Award, label: 'Profile' },
-    { href: '/dashboard/complaints', icon: MessageSquareWarning, label: 'Complain' },
+    { href: '/dashboard/chat', icon: MessageCircle, label: 'Chat' },
   ],
   counselor: [
     { href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
@@ -45,7 +45,7 @@ const NAV_CONFIG = {
     { href: '/dashboard/calendar', icon: CalendarRange, label: 'Plan' },
     { href: '/dashboard/wallet', icon: Wallet, label: 'Wallet' },
     { href: '/dashboard/profile', icon: Award, label: 'Profile' },
-    { href: '/dashboard/complaints', icon: MessageSquareWarning, label: 'Complain' },
+    { href: '/dashboard/chat', icon: MessageCircle, label: 'Chat' },
   ],
   manager: [
     { href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
@@ -53,7 +53,7 @@ const NAV_CONFIG = {
     { href: '/dashboard/tasks', icon: ClipboardList, label: 'Tasks' },
     { href: '/dashboard/calendar', icon: CalendarRange, label: 'Plan' },
     { href: '/dashboard/profile', icon: Award, label: 'Profile' },
-    { href: '/dashboard/complaints', icon: MessageSquareWarning, label: 'Complain' },
+    { href: '/dashboard/chat', icon: MessageCircle, label: 'Chat' },
   ],
   designer: [
     { href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
@@ -61,7 +61,7 @@ const NAV_CONFIG = {
     { href: '/dashboard/calendar', icon: CalendarRange, label: 'Plan' },
     { href: '/dashboard/wallet', icon: Wallet, label: 'Wallet' },
     { href: '/dashboard/profile', icon: Award, label: 'Profile' },
-    { href: '/dashboard/complaints', icon: MessageSquareWarning, label: 'Complain' },
+    { href: '/dashboard/chat', icon: MessageCircle, label: 'Chat' },
   ],
 }
 

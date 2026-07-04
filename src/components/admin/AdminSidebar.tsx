@@ -6,7 +6,7 @@ import {
   LayoutDashboard, Users, ClipboardList, History,
   MapPin, Briefcase, UserPlus, BarChart2,
   CalendarRange, ShieldCheck, Settings, LogOut,
-  Bell, DollarSign, Target, Archive, MessageSquare, MessageCircle, AlertOctagon,
+  Bell, DollarSign, Target, Archive, MessageSquare, MessageCircle, MessagesSquare, AlertOctagon,
   Wallet, Megaphone, Eye, Headphones, FileSignature, Facebook, ReceiptText, Sparkles,
 } from 'lucide-react'
 
@@ -41,6 +41,7 @@ const SECTIONS: Section[] = [
   {
     title: 'Team',
     items: [
+      { href: '/admin/team-chat', icon: MessagesSquare, label: 'Team Chat' },
       { href: '/admin/workers', icon: Users, label: 'Workers' },
       { href: '/admin/attendance', icon: CalendarRange, label: 'Attendance' },
       { href: '/admin/tasks', icon: ClipboardList, label: 'Tasks' },

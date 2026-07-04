@@ -85,7 +85,7 @@ export default function CRMEntriesPage() {
   const [phoneError, setPhoneError] = useState('')
 
   useEffect(() => {
-    supabase.from('users').select('id,full_name').eq('role', 'crm_agent')
+    supabase.from('users').select('id,full_name').eq('role', 'crm_agent').eq('is_active', true)
       .then(({ data }) => { if (data) setAgents(data) })
     fetchEntries()
   }, [])

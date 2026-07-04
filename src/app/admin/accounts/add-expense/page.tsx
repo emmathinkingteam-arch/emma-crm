@@ -104,6 +104,7 @@ export default function AddExpensePage() {
                     .from('users')
                     .select('id, full_name, role, wallet_balance')
                     .neq('role', 'admin')
+                    .eq('is_active', true)
                     .order('full_name')
                 setWorkers((w || []) as WorkerHit[])
             } finally {

@@ -134,6 +134,7 @@ export default function DashboardPage() {
       .from('users')
       .select('id, full_name, profile_photo_url, is_supervisor')
       .eq('role', 'crm_agent')
+      .eq('is_active', true)
       .order('full_name')
     if (data) {
       const list = data as { id: string; full_name: string; profile_photo_url?: string; is_supervisor?: boolean }[]

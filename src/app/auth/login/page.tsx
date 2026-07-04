@@ -38,6 +38,14 @@ export default function LoginPage() {
         .eq('auth_user_id', data.user.id)
         .single()
 
+      if (profile && profile.is_active === false) {
+        // Deactivated (deleted) workers can no longer sign in.
+        await supabase.auth.signOut()
+        setError('This account has been deactivated. Please contact the office.')
+        setLoading(false)
+        return
+      }
+
       if (profile) {
         setUser(profile)
         await new Promise(r => setTimeout(r, 300))

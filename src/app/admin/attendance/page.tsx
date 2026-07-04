@@ -11,7 +11,7 @@ export default function AttendancePage() {
   const [dateTo, setDateTo] = useState(new Date().toISOString().split('T')[0])
 
   useEffect(() => {
-    supabase.from('users').select('id,full_name').neq('role','admin').then(({data})=>{ if(data) setWorkers(data) })
+    supabase.from('users').select('id,full_name').neq('role','admin').eq('is_active', true).then(({data})=>{ if(data) setWorkers(data) })
     fetch()
   }, [])
 

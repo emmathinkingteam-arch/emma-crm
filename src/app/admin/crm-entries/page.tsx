@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { fmtDate, fmtTime, normalisePhone } from '@/lib/utils'
 import { detectCountryFromPaste } from '@/lib/country-codes'
+import { CRM_TAG_MAP, effectiveTags } from '@/lib/crm-tags'
 import {
   ChevronDown, ChevronUp, MessageCircle, PhoneCall,
   ThumbsUp, ShoppingCart, Phone, Search, Loader2,
@@ -14,6 +15,7 @@ interface Interaction {
   id: string
   type: 'message' | 'call' | 'feedback' | 'order'
   description: string
+  tags?: string[]
   created_at: string
   created_by_user?: { full_name: string }
 }
@@ -490,6 +492,15 @@ export default function CRMEntriesPage() {
                                           {fmtDate(interaction.created_at)} · {fmtTime(interaction.created_at)}
                                         </span>
                                       </div>
+                                      {effectiveTags(interaction).length > 0 && (
+                                        <div className="flex flex-wrap gap-1 mb-1">
+                                          {effectiveTags(interaction).map(t => (
+                                            <span key={t} className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full ${CRM_TAG_MAP[t].chip}`}>
+                                              {CRM_TAG_MAP[t].label}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
                                       <p className="text-xs text-gray-700 font-medium leading-relaxed whitespace-pre-wrap">{cleanDesc}</p>
                                       {invoiceLink && (
                                         <a

@@ -18,6 +18,8 @@ import { formatPhoneDisplay } from '@/lib/country-codes'
 import InterestStatsCard from '@/components/shared/InterestStatsCard'
 import WhatsappBoostPanel from '@/components/shared/WhatsappBoostPanel'
 import { packageTone, PACKAGE_TONE } from '@/lib/package-colors'
+import CrmTagButtons from '@/components/shared/CrmTagButtons'
+import { buildEntryDescription, negativeOf, effectiveTags, CRM_TAG_MAP, type CrmTagKey } from '@/lib/crm-tags'
 
 // Slot occupancy info for the planner grid — package tier + expiry so each
 // taken cell can be coloured the same way as the FR PLAN calendar.
@@ -2674,7 +2676,7 @@ export default function CustomerDetailPage() {
             </div>
 
             {role === 'crm_agent' && (
-              <LogInteractionForm customerId={id} userId={user!.id} onSaved={fetchAll} />
+              <LogInteractionForm customerId={id} userId={user!.id} onSaved={fetchAll} phone={customer?.phone || ''} customerName={customer?.name || null} />
             )}
 
             {/* ── POSTS · BUILD WITH AI (no post yet) ───────── */}
@@ -2833,6 +2835,16 @@ export default function CustomerDetailPage() {
                         </div>
                         <span className="text-[11px] text-gray-500 font-semibold">{fmtDate(interaction.created_at)} {fmtTime(interaction.created_at)}</span>
                       </div>
+                      {/* Quick-status tag chips (structured, colored) */}
+                      {effectiveTags(interaction).length > 0 && (
+                        <div className="flex flex-wrap gap-1 mb-1">
+                          {effectiveTags(interaction).map(t => (
+                            <span key={t} className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full ${CRM_TAG_MAP[t].chip}`}>
+                              {CRM_TAG_MAP[t].label}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       <p className="text-[13px] text-gray-700 font-medium leading-relaxed whitespace-pre-wrap">{cleanDescription}</p>
                       {(invoiceLink || slipLink) && (
                         <div className="flex flex-wrap gap-1.5 mt-2">
@@ -3026,9 +3038,11 @@ function DesignerBriefPanel({ description, postCode }: { description: string; po
   )
 }
 
-function LogInteractionForm({ customerId, userId, onSaved }: { customerId: string; userId: string; onSaved: () => void }) {
+function LogInteractionForm({ customerId, userId, onSaved, phone, customerName }: { customerId: string; userId: string; onSaved: () => void; phone: string; customerName: string | null }) {
   const [type, setType] = useState<'message' | 'call' | 'feedback'>('message')
   const [notes, setNotes] = useState('')
+  const [tags, setTags] = useState<CrmTagKey[]>([])
+  const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
   const [showBuyDate, setShowBuyDate] = useState(false)
   const [buyDate, setBuyDate] = useState('')
@@ -3044,10 +3058,33 @@ function LogInteractionForm({ customerId, userId, onSaved }: { customerId: strin
   }
 
   const save = async () => {
-    if (!notes.trim()) return
+    if (!notes.trim() && tags.length === 0) return
+    const negatives = negativeOf(tags)
+    if (negatives.length > 0 && !reason.trim()) {
+      alert('Please add the reason — it goes to admin with this number.')
+      return
+    }
     setSaving(true)
-    await supabase.from('interactions').insert({ customer_id: customerId, type, description: notes, created_by: userId })
-    setNotes(''); setSaving(false); onSaved()
+    await supabase.from('interactions').insert({
+      customer_id: customerId,
+      type,
+      description: buildEntryDescription(tags, notes, reason),
+      created_by: userId,
+      tags,
+    })
+    if (negatives.length > 0) {
+      const { error: rejError } = await supabase.from('crm_rejections').insert({
+        customer_id: customerId,
+        phone,
+        customer_name: customerName,
+        agent_id: userId,
+        tags: negatives,
+        reason: reason.trim(),
+        note: notes.trim() || null,
+      })
+      if (rejError) console.error('Failed to file rejection:', rejError)
+    }
+    setNotes(''); setTags([]); setReason(''); setSaving(false); onSaved()
   }
 
   return (
@@ -3063,16 +3100,11 @@ function LogInteractionForm({ customerId, userId, onSaved }: { customerId: strin
         ))}
       </div>
 
-      {/* Quick fill buttons */}
+      {/* Quick status tags — multi-select, stored structurally */}
+      <CrmTagButtons selected={tags} onChange={setTags} reason={reason} onReasonChange={setReason} />
+
+      {/* Will Buy On... stays a date helper */}
       <div className="flex flex-wrap gap-1.5">
-        <button onClick={() => appendNote('Package details sent')}
-          className="bg-blue-50 border border-blue-100 text-blue-600 px-2.5 py-1.5 rounded-xl text-[9px] font-bold active:scale-95 transition-all">
-          Package Details Sent
-        </button>
-        <button onClick={() => appendNote('Bank details sent')}
-          className="bg-green-50 border border-green-100 text-green-600 px-2.5 py-1.5 rounded-xl text-[9px] font-bold active:scale-95 transition-all">
-          Bank Details Sent
-        </button>
         <button onClick={() => setShowBuyDate(!showBuyDate)}
           className={`px-2.5 py-1.5 rounded-xl text-[9px] font-bold active:scale-95 transition-all border ${showBuyDate ? 'bg-amber-600 text-white border-amber-600' : 'bg-amber-50 border-amber-100 text-amber-600'}`}>
           Will Buy On...
@@ -3094,7 +3126,7 @@ function LogInteractionForm({ customerId, userId, onSaved }: { customerId: strin
 
       <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Add notes..." rows={2}
         className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs font-medium outline-none resize-none" />
-      <button onClick={save} disabled={!notes.trim() || saving}
+      <button onClick={save} disabled={(!notes.trim() && tags.length === 0) || saving}
         className="w-full bg-pink-600 text-white rounded-xl py-2 text-[10px] font-bold disabled:opacity-40">
         {saving ? 'Saving...' : 'Log interaction'}
       </button>

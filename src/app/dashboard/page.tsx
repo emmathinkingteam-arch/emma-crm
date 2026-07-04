@@ -380,6 +380,21 @@ export default function DashboardPage() {
           </Link>
         )}
 
+        {/* Supervisor — hourly CRM entries monitor across all agents */}
+        {user?.is_supervisor && (
+          <Link href="/dashboard/team-entries"
+            className="flex items-center gap-3 bg-gradient-to-br from-purple-600 to-purple-500 text-white rounded-2xl p-4 shadow-md shadow-purple-200 active:scale-[0.98] transition-all">
+            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+              <TrendingUp size={18} className="text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold">CRM Entries Monitor</p>
+              <p className="text-[10px] font-medium opacity-80">All agents · every hour · numbers & updates</p>
+            </div>
+            <ChevronRight size={18} className="text-white/80" />
+          </Link>
+        )}
+
         {/* CRM order-amount leaderboard — everyone sees the monthly race */}
         {role === 'crm_agent' && <CrmLeaderboard meId={user?.id} />}
 

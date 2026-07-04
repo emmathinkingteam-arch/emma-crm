@@ -8,10 +8,12 @@
 // Body (JSON):
 //   {
 //     leadId:       string
-//     userId:       string
+//     userId:       string          (public.users.id of the worker)
 //     iType:        'message' | 'call' | 'feedback'
 //     notes:        string
-//     customerName: string   (optional)
+//     customerName: string          (optional)
+//     tags:         string[]        (optional — CrmTagKey quick statuses)
+//     reason:       string          (optional — required by UI for negatives)
 //   }
 //
 // Returns: { ok: true, customerId: string | null } | { ok: false, error: string }
@@ -19,23 +21,18 @@
 
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
-import { createSupabaseServerClient } from '@/lib/supabase-server'
+import { currentProfile } from '@/lib/api-auth'
+import { buildEntryDescription, isCrmTagKey, negativeOf } from '@/lib/crm-tags'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 export async function POST(req: Request) {
-    // Verify the caller is authenticated.
-    let sessionUserId = ''
-    try {
-        const sb = createSupabaseServerClient()
-        const { data: { user } } = await sb.auth.getUser()
-        if (!user) {
-            return NextResponse.json({ ok: false, error: 'unauthenticated' }, { status: 401 })
-        }
-        sessionUserId = user.id
-    } catch {
-        return NextResponse.json({ ok: false, error: 'auth_check_failed' }, { status: 500 })
+    // Verify the caller is authenticated and resolve their PROFILE id
+    // (users.id — what the client sends), not the raw auth uid.
+    const me = await currentProfile()
+    if (!me) {
+        return NextResponse.json({ ok: false, error: 'unauthenticated' }, { status: 401 })
     }
 
     let body: {
@@ -44,6 +41,8 @@ export async function POST(req: Request) {
         iType: 'message' | 'call' | 'feedback'
         notes: string
         customerName: string
+        tags?: string[]
+        reason?: string
     }
 
     try {
@@ -53,14 +52,16 @@ export async function POST(req: Request) {
     }
 
     const { leadId, userId, iType, notes, customerName } = body
+    const tags = (body.tags || []).filter(isCrmTagKey)
+    const reason = (body.reason || '').trim()
 
     if (!leadId || !userId) {
         return NextResponse.json({ ok: false, error: 'missing_fields' }, { status: 400 })
     }
 
-    // The userId in the body must match the session to prevent submitting
-    // another worker's lead.
-    if (userId !== sessionUserId) {
+    // The userId in the body must match the session's profile to prevent
+    // submitting another worker's lead.
+    if (userId !== me.id) {
         return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 })
     }
 
@@ -113,13 +114,28 @@ export async function POST(req: Request) {
         await sb.from('customers').update({ name: customerName }).eq('id', customerId)
     }
 
-    // 3. Log the interaction.
-    if (customerId && notes.trim()) {
+    // 3. Log the interaction (notes and/or quick-status tags).
+    if (customerId && (notes.trim() || tags.length > 0)) {
         await sb.from('interactions').insert({
             customer_id: customerId,
             type: iType,
-            description: notes.trim(),
+            description: buildEntryDescription(tags, notes, reason),
             created_by: userId,
+            tags,
+        })
+    }
+
+    // 3b. Negative outcome → file it into the admin's Rejected CRM queue.
+    const negatives = negativeOf(tags)
+    if (negatives.length > 0) {
+        await sb.from('crm_rejections').insert({
+            customer_id: customerId,
+            phone: lead.phone,
+            customer_name: customerName || null,
+            agent_id: userId,
+            tags: negatives,
+            reason: reason || null,
+            note: notes.trim() || null,
         })
     }
 

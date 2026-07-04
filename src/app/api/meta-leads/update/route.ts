@@ -21,6 +21,20 @@ import {
     META_STATUS_META,
     type MetaLeadStatus,
 } from '@/lib/meta-leads'
+import { type CrmTagKey } from '@/lib/crm-tags'
+
+// Map meta-lead statuses onto the shared CRM tag keys (structured filtering).
+const META_TO_TAG: Partial<Record<MetaLeadStatus, CrmTagKey>> = {
+    package_sent: 'package_sent',
+    payment_sent: 'payment_sent',
+    call_back: 'call_back',
+    no_answer: 'not_answer',
+    rejected: 'rejected',
+    fake: 'fake',
+}
+
+// Statuses that also land in the admin's Rejected CRM queue.
+const NEGATIVE_META: MetaLeadStatus[] = ['no_answer', 'rejected', 'fake']
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -32,7 +46,7 @@ export async function POST(req: Request) {
     if (!me) return NextResponse.json({ ok: false, error: 'unauthenticated' }, { status: 401 })
     const userId = me.id // the caller's own profile id
 
-    let body: { leadId: string; status: MetaLeadStatus; note?: string }
+    let body: { leadId: string; status: MetaLeadStatus; note?: string; reason?: string }
     try {
         body = await req.json()
     } catch {
@@ -40,6 +54,7 @@ export async function POST(req: Request) {
     }
 
     const { leadId, status, note } = body
+    const reason = (body.reason || '').trim()
     if (!leadId || !status) {
         return NextResponse.json({ ok: false, error: 'missing_fields' }, { status: 400 })
     }
@@ -100,13 +115,32 @@ export async function POST(req: Request) {
         .eq('id', leadId)
 
     // 3. Log the status change as an interaction (best-effort).
+    const tag = META_TO_TAG[status]
     if (customerId) {
         try {
             await sb.from('interactions').insert({
                 customer_id: customerId,
                 type: 'feedback',
-                description: `Lead status → ${META_STATUS_META[status].label}${note ? `\n${note}` : ''}`,
+                description: `Lead status → ${META_STATUS_META[status].label}${reason ? `\nReason: ${reason}` : ''}${note ? `\n${note}` : ''}`,
                 created_by: userId,
+                tags: tag ? [tag] : [],
+            })
+        } catch {
+            // non-fatal
+        }
+    }
+
+    // 3b. Negative outcome → file it into the admin's Rejected CRM queue.
+    if (NEGATIVE_META.includes(status)) {
+        try {
+            await sb.from('crm_rejections').insert({
+                customer_id: customerId,
+                phone: lead.phone || '',
+                customer_name: lead.full_name || null,
+                agent_id: userId,
+                tags: tag ? [tag] : [],
+                reason: reason || null,
+                note: note || null,
             })
         } catch {
             // non-fatal

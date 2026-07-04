@@ -18,6 +18,8 @@ import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import { formatPhoneDisplay } from '@/lib/country-codes'
 import { leadCountdown, type Lead } from '@/lib/leads'
+import CrmTagButtons from '@/components/shared/CrmTagButtons'
+import { negativeOf, type CrmTagKey } from '@/lib/crm-tags'
 import {
     Loader2,
     ArrowLeft,
@@ -25,8 +27,6 @@ import {
     MessageCircle,
     PhoneCall,
     ThumbsUp,
-    Package,
-    Landmark,
     CalendarClock,
     AlertTriangle,
 } from 'lucide-react'
@@ -45,6 +45,8 @@ export default function LeadResponsePage() {
     const [iType, setIType] = useState<IType>('call')
     const [notes, setNotes] = useState('')
     const [customerName, setCustomerName] = useState('')
+    const [tags, setTags] = useState<CrmTagKey[]>([])
+    const [reason, setReason] = useState('')
     const [buyDate, setBuyDate] = useState('')
     const [showBuyDate, setShowBuyDate] = useState(false)
 
@@ -65,6 +67,10 @@ export default function LeadResponsePage() {
 
     async function handleSave() {
         if (!user || !lead) return
+        if (negativeOf(tags).length > 0 && !reason.trim()) {
+            alert('Please add the reason — it goes to admin with this number.')
+            return
+        }
         setSaving(true)
 
         try {
@@ -78,6 +84,8 @@ export default function LeadResponsePage() {
                     iType,
                     notes,
                     customerName,
+                    tags,
+                    reason,
                 }),
             })
             const json = await res.json()
@@ -231,24 +239,20 @@ export default function LeadResponsePage() {
                                 </div>
                             </div>
 
+                            {/* What did you discuss? — quick status tags */}
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                                    What did you discuss? (tap all that apply)
+                                </label>
+                                <CrmTagButtons selected={tags} onChange={setTags} reason={reason} onReasonChange={setReason} />
+                            </div>
+
                             {/* Notes + quick fills */}
                             <div>
                                 <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
                                     Notes
                                 </label>
                                 <div className="flex flex-wrap gap-2 mb-2">
-                                    <button
-                                        onClick={() => appendNote('Package details sent ✅')}
-                                        className="flex items-center gap-1.5 bg-blue-50 border border-blue-100 text-blue-600 px-3 py-2 rounded-xl text-[10px] font-bold active:scale-95 transition-all"
-                                    >
-                                        <Package size={11} /> Pkg Details Sent
-                                    </button>
-                                    <button
-                                        onClick={() => appendNote('Bank details sent ✅')}
-                                        className="flex items-center gap-1.5 bg-green-50 border border-green-100 text-green-600 px-3 py-2 rounded-xl text-[10px] font-bold active:scale-95 transition-all"
-                                    >
-                                        <Landmark size={11} /> Bank Details Sent
-                                    </button>
                                     <button
                                         onClick={() => setShowBuyDate(!showBuyDate)}
                                         className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-bold active:scale-95 transition-all border ${showBuyDate

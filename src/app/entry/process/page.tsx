@@ -4,9 +4,11 @@ import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
-import { Loader2, ArrowLeft, Package, Landmark, CalendarClock, Flame } from 'lucide-react'
+import { Loader2, ArrowLeft, CalendarClock, Flame } from 'lucide-react'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
+import CrmTagButtons from '@/components/shared/CrmTagButtons'
+import { buildEntryDescription, negativeOf, type CrmTagKey } from '@/lib/crm-tags'
 import { recordPing } from '@/lib/location'
 
 function ProcessContent() {
@@ -21,6 +23,8 @@ function ProcessContent() {
   const [title, setTitle] = useState('')   // honorific: 'Mr.' | 'Miss.'
   const [existingId, setExistingId] = useState<string | null>(null)
   const [isPriority, setIsPriority] = useState(false)
+  const [tags, setTags] = useState<CrmTagKey[]>([])
+  const [reason, setReason] = useState('')
   const [buyDate, setBuyDate] = useState('')
   const [showBuyDate, setShowBuyDate] = useState(false)
   const [willingToday, setWillingToday] = useState(false)
@@ -45,8 +49,6 @@ function ProcessContent() {
     setNotes(prev => prev ? `${prev}\n${text}` : text)
   }
 
-  const handleQuickPackage = () => appendNote('Package details sent ✅')
-  const handleQuickBank = () => appendNote('Bank details sent ✅')
   const handleQuickBuyDate = () => {
     if (!buyDate) { setShowBuyDate(true); return }
     appendNote(`Will buy on ${buyDate} 📅`)
@@ -62,6 +64,11 @@ function ProcessContent() {
   const handleSave = async () => {
     if (!user) { alert('Your session expired. Please log in again.'); return }
     if (loading) return
+    const negatives = negativeOf(tags)
+    if (negatives.length > 0 && !reason.trim()) {
+      alert('Please add the reason — it goes to admin with this number.')
+      return
+    }
     setLoading(true)
 
     try {
@@ -95,14 +102,29 @@ function ProcessContent() {
 
       // Log the note as an interaction. If this hiccups, we still navigate —
       // the customer is saved, which is what matters.
-      if (notes) {
+      if (notes.trim() || tags.length > 0) {
         const { error: noteError } = await supabase.from('interactions').insert({
           customer_id: customerId,
           type: interactionType,
-          description: notes,
+          description: buildEntryDescription(tags, notes, reason),
           created_by: user.id,
+          tags,
         })
         if (noteError) console.error('Failed to log interaction note:', noteError)
+      }
+
+      // Negative outcome → file it into the admin's Rejected CRM queue.
+      if (negatives.length > 0) {
+        const { error: rejError } = await supabase.from('crm_rejections').insert({
+          customer_id: customerId,
+          phone,
+          customer_name: customerName || null,
+          agent_id: user.id,
+          tags: negatives,
+          reason: reason.trim(),
+          note: notes.trim() || null,
+        })
+        if (rejError) console.error('Failed to file rejection:', rejError)
       }
 
       router.push(`/dashboard/customers/${customerId}`)
@@ -171,24 +193,18 @@ function ProcessContent() {
               </div>
             </div>
 
+            {/* What did you discuss? — quick status tags (multi-select) */}
+            <div>
+              <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">What did you discuss? (tap all that apply)</label>
+              <CrmTagButtons selected={tags} onChange={setTags} reason={reason} onReasonChange={setReason} />
+            </div>
+
             {/* Notes with quick buttons */}
             <div>
               <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Notes</label>
 
               {/* Quick fill buttons */}
               <div className="flex flex-wrap gap-2 mb-2">
-                <button
-                  onClick={handleQuickPackage}
-                  className="flex items-center gap-1.5 bg-blue-50 border border-blue-100 text-blue-600 px-3 py-2 rounded-xl text-[10px] font-bold active:scale-95 transition-all"
-                >
-                  <Package size={11} /> Pkg Details Sent
-                </button>
-                <button
-                  onClick={handleQuickBank}
-                  className="flex items-center gap-1.5 bg-green-50 border border-green-100 text-green-600 px-3 py-2 rounded-xl text-[10px] font-bold active:scale-95 transition-all"
-                >
-                  <Landmark size={11} /> Bank Details Sent
-                </button>
                 <button
                   onClick={() => setShowBuyDate(!showBuyDate)}
                   className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-bold active:scale-95 transition-all border ${showBuyDate ? 'bg-amber-600 text-white border-amber-600' : 'bg-amber-50 border-amber-100 text-amber-600'}`}

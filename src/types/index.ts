@@ -127,6 +127,7 @@ export interface Interaction {
   customer_id: string
   type: 'message' | 'call' | 'feedback' | 'order'
   description: string
+  tags?: string[]        // structured quick-status tags — see lib/crm-tags.ts
   created_by: string
   created_at: string
   created_by_user?: User

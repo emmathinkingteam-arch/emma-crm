@@ -50,6 +50,8 @@ export default function DashboardPage() {
   const [secondPosts, setSecondPosts] = useState<any[]>([])
   const [leads, setLeads] = useState<Lead[]>([])
   const [metaLeads, setMetaLeads] = useState<MetaLead[]>([])
+  // CRM agents shown as photo circles under the hero (me first, then the rest)
+  const [team, setTeam] = useState<{ id: string; full_name: string; profile_photo_url?: string; is_supervisor?: boolean }[]>([])
 
   useEffect(() => {
     if (!user) { router.replace('/auth/login'); return }
@@ -71,6 +73,7 @@ export default function DashboardPage() {
     fetchMyWork()
     fetchSecondPosts()
     refreshLeads()
+    fetchTeam()
 
     // Poll every 60s: ask the server to release any due leads (respecting
     // punch-in + the meter), then re-read what's now active.
@@ -123,6 +126,20 @@ export default function DashboardPage() {
       .in('stage', ['new', 'active'])
       .order('due_at', { ascending: true, nullsFirst: false })
     setMetaLeads((meta as MetaLead[]) || [])
+  }
+
+  // CRM agent circles: logged-in user first, then teammates alphabetically.
+  const fetchTeam = async () => {
+    const { data } = await supabase
+      .from('users')
+      .select('id, full_name, profile_photo_url, is_supervisor')
+      .eq('role', 'crm_agent')
+      .order('full_name')
+    if (data) {
+      const list = data as { id: string; full_name: string; profile_photo_url?: string; is_supervisor?: boolean }[]
+      list.sort((a, b) => (a.id === user?.id ? -1 : b.id === user?.id ? 1 : 0))
+      setTeam(list)
+    }
   }
 
   const fetchSecondPosts = async () => {
@@ -222,13 +239,13 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="h-screen flex flex-col bg-white overflow-hidden">
+      <div className="h-screen flex flex-col bg-[#FAFAFC] overflow-hidden">
         <TopNav />
         <div className="flex-1 overflow-y-auto px-4 py-4 pb-28 space-y-4">
-          {/* Greeting placeholder */}
-          <div className="px-1 pt-1 space-y-2">
-            <div className="skeleton h-5 w-40" />
-            <div className="skeleton h-3 w-28" />
+          {/* Hero placeholder */}
+          <div className="skeleton h-44 rounded-[24px]" />
+          <div className="flex justify-center -mt-11">
+            <div className="skeleton w-16 h-16 rounded-full ring-4 ring-white" />
           </div>
           {/* Stats row placeholder */}
           <div className="grid grid-cols-2 gap-3">
@@ -254,21 +271,68 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-white overflow-hidden">
+    <div className="h-screen flex flex-col bg-[#FAFAFC] overflow-hidden">
       <TopNav />
 
       <div className="flex-1 overflow-y-auto px-4 py-4 pb-28 space-y-4 animate-fade-in">
 
-        {/* Greeting */}
+        {/* Hero — couple photo with greeting, mockup pastel style */}
         {(() => {
           const h = new Date().getHours()
           const greet = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
           return (
-            <div className="px-1 pt-1 pb-0.5">
-              <p className="text-base font-bold text-gray-800">{greet}{user?.full_name ? `, ${user.full_name.split(' ')[0]}` : ''} 👋</p>
-              <p className="text-[10px] text-gray-400 font-medium mt-0.5">
-                {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
-              </p>
+            <div>
+              <div className="relative rounded-[24px] overflow-hidden h-44 bg-gradient-to-br from-pink-100 to-pink-50">
+                <img src="/track/couple-hero.jpg" alt="" className="absolute inset-0 w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-pink-950/70 via-pink-900/10 to-transparent" />
+                <div className="absolute bottom-0 left-0 right-0 px-5 pb-4">
+                  <p className="text-lg font-extrabold text-white drop-shadow-sm">
+                    {greet}{user?.full_name ? `, ${user.full_name.split(' ')[0]}` : ''} 👋
+                  </p>
+                  <p className="text-[10px] text-white/80 font-semibold">
+                    {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
+                  </p>
+                </div>
+              </div>
+
+              {/* My circle overlapping the hero + teammate circles below */}
+              {team.length > 0 && (() => {
+                const me = team[0]?.id === user?.id ? team[0] : null
+                const others = me ? team.slice(1) : team
+                return (
+                  <div className="relative -mt-7 flex flex-col items-center">
+                    {me && (
+                      <>
+                        <div className="w-16 h-16 rounded-full ring-4 ring-white shadow-md overflow-hidden bg-pink-600 flex items-center justify-center">
+                          {me.profile_photo_url
+                            ? <img src={me.profile_photo_url} alt={me.full_name} className="w-full h-full object-cover" />
+                            : <span className="text-white text-xl font-bold">{me.full_name?.[0]}</span>}
+                        </div>
+                        <p className="text-xs font-bold text-gray-800 mt-1.5">{me.full_name}</p>
+                        <p className="text-[9px] font-bold text-pink-500 uppercase tracking-wide">
+                          {me.is_supervisor ? 'Sales Supervisor' : 'CRM Agent'}
+                        </p>
+                      </>
+                    )}
+                    {others.length > 0 && (
+                      <div className="flex justify-center gap-4 mt-3 flex-wrap px-2">
+                        {others.map(m => (
+                          <div key={m.id} className="flex flex-col items-center w-12">
+                            <div className="w-11 h-11 rounded-full ring-2 ring-pink-100 shadow-sm overflow-hidden bg-pink-100 flex items-center justify-center">
+                              {m.profile_photo_url
+                                ? <img src={m.profile_photo_url} alt={m.full_name} className="w-full h-full object-cover" />
+                                : <span className="text-pink-500 text-sm font-bold">{m.full_name?.[0]}</span>}
+                            </div>
+                            <p className="text-[8px] font-bold text-gray-500 mt-1 truncate w-full text-center">
+                              {m.full_name?.split(' ')[0]}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
             </div>
           )
         })()}
@@ -278,17 +342,21 @@ export default function DashboardPage() {
 
         {/* Stats row */}
         <div className="grid grid-cols-2 gap-3">
-          <div className="bg-pink-50 border border-pink-100 rounded-2xl p-3.5">
-            <div className="flex items-center justify-between mb-1">
-              <TrendingUp size={14} className="text-pink-400" />
+          <div className="bg-white border border-gray-100 rounded-[24px] p-4 shadow-sm">
+            <div className="flex items-center justify-between mb-2">
+              <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-pink-200 to-pink-50 flex items-center justify-center">
+                <TrendingUp size={15} className="text-pink-500" />
+              </div>
               <span className="text-[8px] font-bold text-pink-400 uppercase tracking-wide">Active</span>
             </div>
             <p className="text-2xl font-extrabold text-pink-600">{newWorks.length + inProgress.length}</p>
             <p className="text-[10px] text-gray-400 font-semibold mt-0.5">My assignments</p>
           </div>
-          <div className={`border rounded-2xl p-3.5 ${overdueCount > 0 ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100'}`}>
-            <div className="flex items-center justify-between mb-1">
-              <Clock size={14} className={overdueCount > 0 ? 'text-red-400' : 'text-gray-300'} />
+          <div className={`border rounded-[24px] p-4 shadow-sm ${overdueCount > 0 ? 'bg-red-50 border-red-100' : 'bg-white border-gray-100'}`}>
+            <div className="flex items-center justify-between mb-2">
+              <div className={`w-9 h-9 rounded-2xl flex items-center justify-center bg-gradient-to-br ${overdueCount > 0 ? 'from-red-200 to-red-50' : 'from-gray-100 to-gray-50'}`}>
+                <Clock size={15} className={overdueCount > 0 ? 'text-red-400' : 'text-gray-300'} />
+              </div>
               <span className={`text-[8px] font-bold uppercase tracking-wide ${overdueCount > 0 ? 'text-red-400' : 'text-gray-300'}`}>Overdue</span>
             </div>
             <p className={`text-2xl font-extrabold ${overdueCount > 0 ? 'text-red-500' : 'text-gray-300'}`}>{overdueCount}</p>

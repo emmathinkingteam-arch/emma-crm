@@ -10,13 +10,14 @@ import { supabase } from '@/lib/supabase'
 import { fmtDate } from '@/lib/utils'
 import Link from 'next/link'
 import { Search, X, Upload, Loader2, CheckCircle2, AlertTriangle, ExternalLink, ReceiptText } from 'lucide-react'
-import { slipExempt, hasValidSlip, needsSecondSlip, slipComplete } from '@/lib/slips'
+import { orderSlipExempt, isFreeOrder, hasValidSlip, needsSecondSlip, slipComplete } from '@/lib/slips'
 
 type Row = {
   id: string
   customer_id: string
   amount_paid: number
   payment_type: string | null
+  step_variant: string | null
   payment_slip_url: string | null
   payment_bank: string | null
   invoice_number: string | null
@@ -29,7 +30,8 @@ type Row = {
   created_by_user?: { full_name: string | null }
 }
 
-const isKoko = (r: Row) => slipExempt(r.payment_type)
+// Koko payments AND free orders owe no slip.
+const isExempt = (r: Row) => orderSlipExempt(r)
 // A slip counts as on-file only when present AND not a dead old-Supabase link.
 const hasSlip = (url: string | null | undefined) => hasValidSlip(url)
 // A "partial" installment order still owes a 2nd slip.
@@ -50,7 +52,7 @@ export default function SlipAuditPage() {
     setLoading(true)
     supabase
       .from('orders')
-      .select('id,customer_id,amount_paid,payment_type,payment_slip_url,payment_bank,invoice_number,installment_status,installment_2_amount,installment_2_slip_url,created_at, customer:customers(name,phone), package:packages(name), created_by_user:users!created_by(full_name)')
+      .select('id,customer_id,amount_paid,payment_type,step_variant,payment_slip_url,payment_bank,invoice_number,installment_status,installment_2_amount,installment_2_slip_url,created_at, customer:customers(name,phone), package:packages(name), created_by_user:users!created_by(full_name)')
       .order('created_at', { ascending: false })
       .then(({ data }) => {
         if (data) setOrders(data as any)
@@ -62,18 +64,18 @@ export default function SlipAuditPage() {
   // ── Is this order fully covered (all required slips present)? ──────────────
   const isComplete = (r: Row) => slipComplete(r)
 
-  // ── Summary (koko excluded from the "needs slip" universe) ─────────────────
+  // ── Summary (koko + free excluded from the "needs slip" universe) ──────────
   const stats = useMemo(() => {
-    const nonKoko = orders.filter(o => !isKoko(o))
-    const missing = nonKoko.filter(o => !isComplete(o))
-    const koko = orders.filter(isKoko)
-    return { total: nonKoko.length, uploaded: nonKoko.length - missing.length, missing: missing.length, koko: koko.length }
+    const needSlip = orders.filter(o => !isExempt(o))
+    const missing = needSlip.filter(o => !isComplete(o))
+    const exempt = orders.filter(isExempt)
+    return { total: needSlip.length, uploaded: needSlip.length - missing.length, missing: missing.length, koko: exempt.length }
   }, [orders])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return orders.filter(o => {
-      if (!includeKoko && isKoko(o)) return false
+      if (!includeKoko && isExempt(o)) return false
       const complete = isComplete(o)
       if (view === 'missing' && complete) return false
       if (view === 'uploaded' && !complete) return false
@@ -120,7 +122,7 @@ export default function SlipAuditPage() {
         {!loading && <span className="text-xs font-bold text-gray-400">{filtered.length} shown</span>}
       </div>
       <p className="text-xs text-gray-400 font-medium mb-6">
-        Every order needs its payment slip on file. Koko orders are exempt. Upload any that are missing — files are stored privately in Backblaze.
+        Every paid order needs its payment slip on file. Koko and free orders are exempt. Upload any that are missing — files are stored privately in Backblaze.
       </p>
 
       {/* ── Summary cards ── */}
@@ -129,7 +131,7 @@ export default function SlipAuditPage() {
           <StatCard label="Need a slip" value={stats.total} tone="gray" />
           <StatCard label="Uploaded" value={stats.uploaded} tone="green" />
           <StatCard label="Missing" value={stats.missing} tone={stats.missing > 0 ? 'red' : 'green'} />
-          <StatCard label="Koko (exempt)" value={stats.koko} tone="gray" />
+          <StatCard label="Koko / Free (exempt)" value={stats.koko} tone="gray" />
         </div>
       )}
 
@@ -164,7 +166,7 @@ export default function SlipAuditPage() {
           </div>
           <label className="inline-flex items-center gap-1.5 py-2 px-3 text-xs font-semibold rounded-xl border border-gray-200 text-gray-600 bg-white cursor-pointer select-none">
             <input type="checkbox" checked={includeKoko} onChange={e => setIncludeKoko(e.target.checked)} className="accent-pink-600" />
-            Show Koko
+            Show exempt (Koko / Free)
           </label>
           {hasFilter && (
             <button onClick={clearAll} className="inline-flex items-center gap-1 py-2 px-3 text-xs font-bold rounded-xl bg-pink-50 text-pink-600 hover:bg-pink-100 transition-all">
@@ -193,7 +195,7 @@ export default function SlipAuditPage() {
                 </td></tr>
               )}
               {filtered.map(o => {
-                const koko = isKoko(o)
+                const koko = isExempt(o)
                 const slip1 = hasSlip(o.payment_slip_url)
                 const slip2Needed = needsInst2(o)
                 const slip2 = hasSlip(o.installment_2_slip_url)
@@ -216,7 +218,9 @@ export default function SlipAuditPage() {
                     {/* Slip status */}
                     <td className="px-4 py-3">
                       {koko ? (
-                        <span className="text-[8px] font-bold px-2 py-1 rounded-full bg-gray-100 text-gray-400">NOT REQUIRED</span>
+                        <span className="text-[8px] font-bold px-2 py-1 rounded-full bg-gray-100 text-gray-400">
+                          {isFreeOrder(o) ? 'FREE — NOT REQUIRED' : 'NOT REQUIRED'}
+                        </span>
                       ) : (
                         <div className="space-y-1">
                           <SlipBadge ok={slip1} label={slip2Needed ? '1st slip' : 'slip'} />

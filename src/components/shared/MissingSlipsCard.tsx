@@ -15,6 +15,7 @@ type SlipOrderRow = {
   id: string
   customer_id: string
   payment_type: string | null
+  step_variant: string | null
   payment_slip_url: string | null
   installment_status: string | null
   installment_2_slip_url: string | null
@@ -35,7 +36,7 @@ export default function MissingSlipsCard({ userId }: { userId: string }) {
     if (!userId) return
     supabase
       .from('orders')
-      .select('id,customer_id,payment_type,payment_slip_url,installment_status,installment_2_slip_url, customer:customers(name,phone)')
+      .select('id,customer_id,payment_type,step_variant,payment_slip_url,installment_status,installment_2_slip_url, customer:customers(name,phone)')
       .eq('created_by', userId)
       .then(({ data }) => {
         if (data) setOrders(data as any)

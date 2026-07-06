@@ -26,6 +26,16 @@ export function slipExempt(paymentType?: string | null): boolean {
   return (paymentType || '').toLowerCase() === 'koko'
 }
 
+// Free Post campaign orders have no payment at all — no slip to chase.
+export function isFreeOrder(o: { step_variant?: string | null }): boolean {
+  return o.step_variant === 'free'
+}
+
+// An order that owes no slips by its nature (Koko payment or a free order).
+export function orderSlipExempt(o: { payment_type?: string | null; step_variant?: string | null }): boolean {
+  return slipExempt(o.payment_type) || isFreeOrder(o)
+}
+
 // A "partial" installment order still owes its 2nd-installment slip.
 export function needsSecondSlip(installmentStatus?: string | null): boolean {
   return installmentStatus === 'partial'
@@ -34,6 +44,7 @@ export function needsSecondSlip(installmentStatus?: string | null): boolean {
 // Minimal shape needed to judge an order's slip completeness.
 export interface SlipOrder {
   payment_type?: string | null
+  step_variant?: string | null
   payment_slip_url?: string | null
   installment_status?: string | null
   installment_2_slip_url?: string | null
@@ -42,7 +53,7 @@ export interface SlipOrder {
 // Which slip slots are still outstanding for this order (1 = main, 2 = 2nd
 // installment). Empty array means nothing is owed.
 export function missingSlipSlots(o: SlipOrder): (1 | 2)[] {
-  if (slipExempt(o.payment_type)) return []
+  if (orderSlipExempt(o)) return []
   const out: (1 | 2)[] = []
   if (!hasValidSlip(o.payment_slip_url)) out.push(1)
   if (needsSecondSlip(o.installment_status) && !hasValidSlip(o.installment_2_slip_url)) out.push(2)

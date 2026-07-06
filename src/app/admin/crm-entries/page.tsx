@@ -1,14 +1,27 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+// ============================================================================
+// /admin/crm-entries — entry-per-day work log (matches the agents' Clients tab)
+// ============================================================================
+// One row per customer per day worked: if an agent updates an old number
+// today, it appears again under today with that day's status buttons + note.
+// The same number can appear many times across a date range — that's the
+// point, it's the daily work log, not a duplicate.
+//
+// Filters: date range · agent · status-button chips · order status · search
+// (name / number / agent / button keyword / note). Export copies the visible
+// rows as CSV. Click a row for the full interaction history.
+// ============================================================================
+
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { fmtDate, fmtTime, normalisePhone } from '@/lib/utils'
 import { detectCountryFromPaste } from '@/lib/country-codes'
-import { CRM_TAG_MAP, effectiveTags } from '@/lib/crm-tags'
+import { CRM_TAGS, CRM_TAG_MAP, effectiveTags, toCsv, type CrmTagKey } from '@/lib/crm-tags'
 import {
   ChevronDown, ChevronUp, MessageCircle, PhoneCall,
   ThumbsUp, ShoppingCart, Phone, Search, Loader2,
-  Star, Package, Filter, Pencil, Check, X, AlertCircle
+  Star, Pencil, Check, X, AlertCircle, Copy, CalendarDays,
 } from 'lucide-react'
 
 interface Interaction {
@@ -20,18 +33,30 @@ interface Interaction {
   created_by_user?: { full_name: string }
 }
 
-interface CustomerRow {
+interface CustomerLite {
   id: string
   phone: string
-  name?: string
+  name?: string | null
   is_priority: boolean
   willing_to_buy_date?: string | null
   created_at: string
-  created_by_user?: { full_name: string }
+  created_by?: string | null
+  created_by_user?: { full_name: string } | null
   orders?: { id: string }[]
 }
 
-const TODAY_STR = new Date().toISOString().split('T')[0]
+// One table row = one customer × one day of activity.
+interface EntryRow {
+  key: string
+  customer: CustomerLite
+  day: string          // YYYY-MM-DD (local)
+  latestAt: string     // latest activity that day
+  tags: CrmTagKey[]
+  note: string
+  count: number        // updates that day (0 = created only)
+  agentIds: string[]   // who worked it that day
+  agentNames: string[]
+}
 
 const TYPE_CONFIG = {
   message: { icon: MessageCircle, bg: 'bg-blue-50', text: 'text-blue-600', badge: 'bg-blue-50 text-blue-500', label: 'Message' },
@@ -40,20 +65,23 @@ const TYPE_CONFIG = {
   order: { icon: ShoppingCart, bg: 'bg-green-50', text: 'text-green-600', badge: 'bg-green-50 text-green-600', label: 'Order' },
 }
 
-// ── Phone input → clean international digits ─────────────────
-// Accepts any format the admin types or pastes:
-//   "+94 72 309 2676"  → "94723092676"   (explicit + → detect country)
-//   "0094 72 309 2676" → "94723092676"   (00 prefix → detect country)
-//   "0723092676"       → "94723092676"   (leading 0 → assume SL)
-//   "723092676"        → "94723092676"   (bare local → assume SL)
-//   "+1 234 567 8901"  → "12345678901"   (US, detected via +)
-// Returns '' if the digits are too short to be a real phone number.
+function localDay(iso: string): string {
+  const d = new Date(iso)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function daysAgo(n: number): string {
+  return localDay(new Date(Date.now() - n * 86400000).toISOString())
+}
+
+const TODAY = daysAgo(0)
+
+// ── Phone input → clean international digits (unchanged behaviour) ──────────
 function cleanPhoneInput(input: string): string {
   const trimmed = input.trim()
   const digitsRaw = trimmed.replace(/\D/g, '')
   if (digitsRaw.length < 7) return ''
 
-  // Explicit international prefix → try country auto-detect
   const hasPlus = /^\s*\+/.test(trimmed)
   if (hasPlus) {
     const detected = detectCountryFromPaste(trimmed)
@@ -61,21 +89,25 @@ function cleanPhoneInput(input: string): string {
   }
   if (digitsRaw.startsWith('00')) return digitsRaw.slice(2)
 
-  // No international prefix → default to Sri Lanka (94)
   return normalisePhone(digitsRaw, '94')
 }
 
 export default function CRMEntriesPage() {
-  const [entries, setEntries] = useState<CustomerRow[]>([])
+  const [rows, setRows] = useState<EntryRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [agents, setAgents] = useState<{ id: string; full_name: string }[]>([])
+
+  // Filters
+  const [fromDate, setFromDate] = useState(TODAY)
+  const [toDate, setToDate] = useState(TODAY)
   const [filterAgent, setFilterAgent] = useState('')
-  const [filterDate, setFilterDate] = useState('')
   const [filterHasOrder, setFilterHasOrder] = useState('')
+  const [tagFilter, setTagFilter] = useState<CrmTagKey | null>(null)
   const [search, setSearch] = useState('')
-  const [agents, setAgents] = useState<any[]>([])
+  const [copied, setCopied] = useState(false)
 
   // Expanded row state
-  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [interactions, setInteractions] = useState<Interaction[]>([])
   const [interactionsLoading, setInteractionsLoading] = useState(false)
   const [typeFilter, setTypeFilter] = useState<'all' | 'message' | 'call' | 'feedback' | 'order'>('all')
@@ -87,46 +119,156 @@ export default function CRMEntriesPage() {
   const [phoneError, setPhoneError] = useState('')
 
   useEffect(() => {
-    supabase.from('users').select('id,full_name').eq('role', 'crm_agent').eq('is_active', true)
-      .then(({ data }) => { if (data) setAgents(data) })
-    fetchEntries()
+    supabase.from('users').select('id,full_name').eq('role', 'crm_agent').eq('is_active', true).order('full_name')
+      .then(({ data }) => { if (data) setAgents(data as any) })
   }, [])
 
-  const fetchEntries = async () => {
+  const fetchEntries = useCallback(async () => {
     setLoading(true)
-    let q = supabase
-      .from('customers')
-      .select('*, created_by_user:users!created_by(full_name), orders(id)')
-      .order('created_at', { ascending: false })
+    const startISO = new Date(`${fromDate}T00:00:00`).toISOString()
+    const endISO = new Date(new Date(`${toDate}T00:00:00`).getTime() + 86400000).toISOString()
 
-    if (filterAgent) q = q.eq('created_by', filterAgent)
-    if (filterDate) q = q.gte('created_at', filterDate)
+    // 1. All interactions in the range (drives the entry-per-day rows).
+    // 2. Customers CREATED in the range with no note yet still get a row.
+    const [{ data: interactionsData }, { data: newCustomers }] = await Promise.all([
+      supabase
+        .from('interactions')
+        .select('id, customer_id, description, tags, created_at, created_by, created_by_user:users!created_by(full_name), customer:customers(id, phone, name, is_priority, willing_to_buy_date, created_at, created_by, created_by_user:users!created_by(full_name), orders(id))')
+        .gte('created_at', startISO)
+        .lt('created_at', endISO)
+        .order('created_at', { ascending: false })
+        .limit(5000),
+      supabase
+        .from('customers')
+        .select('id, phone, name, is_priority, willing_to_buy_date, created_at, created_by, created_by_user:users!created_by(full_name), orders(id)')
+        .gte('created_at', startISO)
+        .lt('created_at', endISO)
+        .order('created_at', { ascending: false })
+        .limit(2000),
+    ])
 
-    const { data } = await q
-    if (!data) { setLoading(false); return }
+    const byKey = new Map<string, EntryRow>()
 
-    let filtered = data as CustomerRow[]
-    if (filterHasOrder === 'yes') filtered = filtered.filter(e => (e.orders?.length || 0) > 0)
-    if (filterHasOrder === 'no') filtered = filtered.filter(e => (e.orders?.length || 0) === 0)
-    if (filterHasOrder === 'priority') filtered = filtered.filter(e => e.is_priority)
-    if (filterHasOrder === 'willing_today') filtered = filtered.filter(e => e.willing_to_buy_date === TODAY_STR)
+    ;(interactionsData as any[] | null)?.forEach((i) => {
+      const cust = i.customer as CustomerLite | null
+      if (!cust) return
+      const day = localDay(i.created_at)
+      const key = `${cust.id}|${day}`
+      const tags = effectiveTags(i)
+      const agentName = i.created_by_user?.full_name || '—'
+      const existing = byKey.get(key)
+      if (existing) {
+        existing.count += 1
+        for (const t of tags) if (!existing.tags.includes(t)) existing.tags.push(t)
+        if (i.created_by && !existing.agentIds.includes(i.created_by)) {
+          existing.agentIds.push(i.created_by)
+          existing.agentNames.push(agentName)
+        }
+        // newest-first: first one seen already holds latestAt + note
+      } else {
+        byKey.set(key, {
+          key,
+          customer: cust,
+          day,
+          latestAt: i.created_at,
+          tags: [...tags],
+          note: (i.description || '').replace(/ \| (Invoice|Slip): https?:\/\/\S+/g, ''),
+          count: 1,
+          agentIds: i.created_by ? [i.created_by] : [],
+          agentNames: [agentName],
+        })
+      }
+    })
 
-    setEntries(filtered)
+    ;(newCustomers as any[] | null)?.forEach((c) => {
+      const day = localDay(c.created_at)
+      const key = `${c.id}|${day}`
+      if (!byKey.has(key)) {
+        byKey.set(key, {
+          key,
+          customer: c,
+          day,
+          latestAt: c.created_at,
+          tags: [],
+          note: '',
+          count: 0,
+          agentIds: c.created_by ? [c.created_by] : [],
+          agentNames: [c.created_by_user?.full_name || '—'],
+        })
+      }
+    })
+
+    setRows(Array.from(byKey.values()).sort((a, b) => (a.latestAt < b.latestAt ? 1 : -1)))
     setLoading(false)
+  }, [fromDate, toDate])
+
+  useEffect(() => { fetchEntries() }, [fetchEntries])
+
+  // ── Client-side filters ─────────────────────────────────────
+  const agentRows = useMemo(
+    () => (filterAgent ? rows.filter(r => r.agentIds.includes(filterAgent)) : rows),
+    [rows, filterAgent]
+  )
+
+  const tagCounts = useMemo(() => {
+    const counts = new Map<CrmTagKey, number>()
+    agentRows.forEach(r => r.tags.forEach(t => counts.set(t, (counts.get(t) || 0) + 1)))
+    return counts
+  }, [agentRows])
+
+  const displayed = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return agentRows.filter(r => {
+      if (tagFilter && !r.tags.includes(tagFilter)) return false
+
+      const hasOrder = (r.customer.orders?.length || 0) > 0
+      if (filterHasOrder === 'yes' && !hasOrder) return false
+      if (filterHasOrder === 'no' && hasOrder) return false
+      if (filterHasOrder === 'priority' && !r.customer.is_priority) return false
+      if (filterHasOrder === 'willing_today' && r.customer.willing_to_buy_date !== TODAY) return false
+
+      if (!q) return true
+      return (
+        r.customer.phone.includes(q) ||
+        (r.customer.name?.toLowerCase() || '').includes(q) ||
+        r.agentNames.some(n => n.toLowerCase().includes(q)) ||
+        r.note.toLowerCase().includes(q) ||
+        r.tags.some(t => CRM_TAG_MAP[t].label.toLowerCase().includes(q))
+      )
+    })
+  }, [agentRows, tagFilter, filterHasOrder, search])
+
+  // ── Export: copy visible rows as CSV ────────────────────────
+  const exportCsv = async () => {
+    const header = ['Date', 'Time', 'Phone', 'Name', 'Agent', 'Status buttons', 'Note', 'Updates']
+    const body = displayed.map(r => [
+      r.day,
+      new Date(r.latestAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      '+' + r.customer.phone,
+      r.customer.name || '',
+      r.agentNames.join(' | '),
+      r.tags.map(t => CRM_TAG_MAP[t].label).join(' | '),
+      r.note,
+      String(r.count),
+    ])
+    try {
+      await navigator.clipboard.writeText(toCsv(header, body))
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2500)
+    } catch {
+      alert('Could not copy — please try again.')
+    }
   }
 
-  const toggleExpand = async (customerId: string) => {
-    // Don't toggle while editing this row's phone
-    if (editingPhoneId === customerId) return
-
-    // Collapse if same row
-    if (expandedId === customerId) {
-      setExpandedId(null)
+  // ── Expand → full customer history ──────────────────────────
+  const toggleExpand = async (row: EntryRow) => {
+    if (editingPhoneId === row.customer.id) return
+    if (expandedKey === row.key) {
+      setExpandedKey(null)
       setInteractions([])
       return
     }
-
-    setExpandedId(customerId)
+    setExpandedKey(row.key)
     setTypeFilter('all')
     setInteractionsLoading(true)
     setInteractions([])
@@ -134,17 +276,17 @@ export default function CRMEntriesPage() {
     const { data } = await supabase
       .from('interactions')
       .select('*, created_by_user:users!created_by(full_name)')
-      .eq('customer_id', customerId)
+      .eq('customer_id', row.customer.id)
       .order('created_at', { ascending: true })
 
     if (data) setInteractions(data as Interaction[])
     setInteractionsLoading(false)
   }
 
-  // ── Phone editing handlers ──────────────────────────────────
-  const startEditPhone = (entry: CustomerRow) => {
-    setEditingPhoneId(entry.id)
-    setPhoneDraft('+' + entry.phone)
+  // ── Phone editing (unchanged behaviour) ─────────────────────
+  const startEditPhone = (c: CustomerLite) => {
+    setEditingPhoneId(c.id)
+    setPhoneDraft('+' + c.phone)
     setPhoneError('')
   }
 
@@ -154,13 +296,13 @@ export default function CRMEntriesPage() {
     setPhoneError('')
   }
 
-  const savePhone = async (entry: CustomerRow) => {
+  const savePhone = async (c: CustomerLite) => {
     const newPhone = cleanPhoneInput(phoneDraft)
     if (!newPhone) {
       setPhoneError('Phone number is too short or invalid')
       return
     }
-    if (newPhone === entry.phone) {
+    if (newPhone === c.phone) {
       cancelEditPhone()
       return
     }
@@ -168,12 +310,11 @@ export default function CRMEntriesPage() {
     setPhoneSaving(true)
     setPhoneError('')
 
-    // Duplicate check — another customer must not already own this phone
     const { data: dupe } = await supabase
       .from('customers')
       .select('id')
       .eq('phone', newPhone)
-      .neq('id', entry.id)
+      .neq('id', c.id)
       .maybeSingle()
 
     if (dupe) {
@@ -185,7 +326,7 @@ export default function CRMEntriesPage() {
     const { error } = await supabase
       .from('customers')
       .update({ phone: newPhone })
-      .eq('id', entry.id)
+      .eq('id', c.id)
 
     if (error) {
       setPhoneError(error.message || 'Could not save')
@@ -193,22 +334,12 @@ export default function CRMEntriesPage() {
       return
     }
 
-    // Update local state so the UI reflects the change without a full refetch
-    setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, phone: newPhone } : e))
+    setRows(prev => prev.map(r => r.customer.id === c.id
+      ? { ...r, customer: { ...r.customer, phone: newPhone } }
+      : r))
     setPhoneSaving(false)
     cancelEditPhone()
   }
-
-  // Search filter
-  const displayed = entries.filter(e => {
-    if (!search.trim()) return true
-    const q = search.toLowerCase()
-    return (
-      e.phone.includes(q) ||
-      (e.name?.toLowerCase() || '').includes(q) ||
-      (e.created_by_user?.full_name?.toLowerCase() || '').includes(q)
-    )
-  })
 
   const filteredInteractions = interactions.filter(i =>
     typeFilter === 'all' ? true : i.type === typeFilter
@@ -225,20 +356,22 @@ export default function CRMEntriesPage() {
     <div className="p-8 max-w-7xl mx-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-800">CRM Entries</h1>
-        <p className="text-sm text-gray-400 mt-0.5">Click any row to see the full interaction history for that customer</p>
+        <p className="text-sm text-gray-400 mt-0.5">
+          One row per number per day worked — the same number appears again each day it gets an update. Click a row for the full history.
+        </p>
       </div>
 
-      {/* Filters */}
-      <div className="flex gap-3 mb-5 flex-wrap items-center">
+      {/* ── Filters ── */}
+      <div className="flex gap-3 mb-3 flex-wrap items-center">
         {/* Search */}
         <div className="relative">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" />
           <input
             type="text"
-            placeholder="Search phone, name, agent..."
+            placeholder="Search phone, name, agent, keyword..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="pl-9 pr-4 py-2 text-xs border border-gray-200 rounded-xl bg-white outline-none focus:border-pink-300 w-56"
+            className="pl-9 pr-4 py-2 text-xs border border-gray-200 rounded-xl bg-white outline-none focus:border-pink-300 w-64"
           />
         </div>
 
@@ -248,8 +381,23 @@ export default function CRMEntriesPage() {
           {agents.map(a => <option key={a.id} value={a.id}>{a.full_name}</option>)}
         </select>
 
-        <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)}
-          className="text-xs border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-pink-300" />
+        {/* Date range */}
+        <div className="flex items-center gap-1.5">
+          <CalendarDays size={13} className="text-gray-300" />
+          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
+            className="text-xs border border-gray-200 rounded-xl px-2.5 py-2 outline-none focus:border-pink-300" />
+          <span className="text-[10px] text-gray-300 font-bold">→</span>
+          <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
+            className="text-xs border border-gray-200 rounded-xl px-2.5 py-2 outline-none focus:border-pink-300" />
+        </div>
+        <button onClick={() => { setFromDate(TODAY); setToDate(TODAY) }}
+          className={`rounded-xl px-3 py-2 text-xs font-semibold transition-colors ${fromDate === TODAY && toDate === TODAY ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+          Today
+        </button>
+        <button onClick={() => { setFromDate(daysAgo(6)); setToDate(TODAY) }}
+          className={`rounded-xl px-3 py-2 text-xs font-semibold transition-colors ${fromDate === daysAgo(6) && toDate === TODAY ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+          7 days
+        </button>
 
         <select value={filterHasOrder} onChange={e => setFilterHasOrder(e.target.value)}
           className="text-xs border border-gray-200 rounded-xl px-3 py-2 bg-white outline-none">
@@ -260,23 +408,44 @@ export default function CRMEntriesPage() {
           <option value="willing_today">🔥 Willing to buy today</option>
         </select>
 
-        <button onClick={fetchEntries}
-          className="bg-pink-600 text-white rounded-xl px-4 py-2 text-xs font-semibold hover:bg-pink-700 transition-colors">
-          Apply Filter
-        </button>
-        <button onClick={() => { setFilterAgent(''); setFilterDate(''); setFilterHasOrder(''); setSearch('') }}
-          className="bg-gray-100 text-gray-500 rounded-xl px-4 py-2 text-xs font-semibold hover:bg-gray-200 transition-colors">
-          Clear
+        <button onClick={exportCsv}
+          className={`flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-semibold transition-colors ${copied ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+          {copied ? <Check size={12} /> : <Copy size={12} />}
+          {copied ? 'Copied!' : 'Export CSV'}
         </button>
 
         <span className="ml-auto text-xs text-gray-400 font-medium">{displayed.length} entries</span>
       </div>
 
-      {/* Table */}
+      {/* Status-button chips — click to filter */}
+      <div className="flex flex-wrap gap-1.5 mb-5">
+        <button
+          onClick={() => setTagFilter(null)}
+          className={`px-3 py-1.5 rounded-full text-[10px] font-bold transition-all ${!tagFilter ? 'bg-gray-800 text-white' : 'bg-white border border-gray-200 text-gray-500 hover:border-gray-400'}`}
+        >
+          All {agentRows.length}
+        </button>
+        {CRM_TAGS.map(t => {
+          const n = tagCounts.get(t.key) || 0
+          if (n === 0 && tagFilter !== t.key) return null
+          const on = tagFilter === t.key
+          return (
+            <button
+              key={t.key}
+              onClick={() => setTagFilter(on ? null : t.key)}
+              className={`px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all ${on ? t.btnOn : t.btn}`}
+            >
+              {t.label} <span className="opacity-70">{n}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* ── Table ── */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         {/* Header */}
-        <div className="grid grid-cols-[2fr_2fr_2fr_1.5fr_1fr_1fr_40px] gap-0 bg-gray-50 border-b border-gray-100">
-          {['Phone', 'Name', 'CRM Agent', 'Added', 'Status', 'Priority', ''].map(h => (
+        <div className="grid grid-cols-[1.8fr_1.4fr_1.2fr_1.1fr_2.5fr_40px] gap-0 bg-gray-50 border-b border-gray-100">
+          {['Phone', 'Name', 'Agent', 'When', 'Status buttons · note', ''].map(h => (
             <div key={h} className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wide">
               {h}
             </div>
@@ -290,21 +459,22 @@ export default function CRMEntriesPage() {
         ) : displayed.length === 0 ? (
           <div className="text-center py-16">
             <Phone size={28} className="text-gray-200 mx-auto mb-2" />
-            <p className="text-sm text-gray-400 font-medium">No entries found</p>
+            <p className="text-sm text-gray-400 font-medium">No entries for these filters</p>
           </div>
         ) : (
           <div className="divide-y divide-gray-50">
-            {displayed.map(entry => {
-              const isExpanded = expandedId === entry.id
-              const hasOrder = (entry.orders?.length || 0) > 0
+            {displayed.map(row => {
+              const entry = row.customer
+              const isExpanded = expandedKey === row.key
               const isEditingPhone = editingPhoneId === entry.id
+              const hasOrder = (entry.orders?.length || 0) > 0
 
               return (
-                <div key={entry.id}>
-                  {/* ── Customer Row ── */}
+                <div key={row.key}>
+                  {/* ── Entry Row ── */}
                   <div
-                    onClick={() => toggleExpand(entry.id)}
-                    className={`grid grid-cols-[2fr_2fr_2fr_1.5fr_1fr_1fr_40px] gap-0 transition-colors ${isEditingPhone ? 'cursor-default' : 'cursor-pointer'} ${isExpanded
+                    onClick={() => toggleExpand(row)}
+                    className={`grid grid-cols-[1.8fr_1.4fr_1.2fr_1.1fr_2.5fr_40px] gap-0 transition-colors ${isEditingPhone ? 'cursor-default' : 'cursor-pointer'} ${isExpanded
                       ? 'bg-pink-50 border-l-4 border-l-pink-500'
                       : 'hover:bg-gray-50/80 border-l-4 border-l-transparent'
                       }`}
@@ -317,7 +487,6 @@ export default function CRMEntriesPage() {
                       </div>
 
                       {isEditingPhone ? (
-                        // Edit mode — input + Save / Cancel
                         <div className="flex-1 flex items-center gap-1" onClick={e => e.stopPropagation()}>
                           <input
                             type="tel"
@@ -348,7 +517,6 @@ export default function CRMEntriesPage() {
                           </button>
                         </div>
                       ) : (
-                        // View mode — phone text + pencil edit button
                         <>
                           <span className="text-xs font-semibold text-gray-800">+{entry.phone}</span>
                           <button
@@ -364,23 +532,33 @@ export default function CRMEntriesPage() {
                       <span className="text-xs font-medium text-gray-600">{entry.name || '—'}</span>
                     </div>
                     <div className="px-4 py-3.5 flex items-center">
-                      <span className="text-xs text-gray-500">{entry.created_by_user?.full_name || '—'}</span>
+                      <span className="text-xs text-gray-500">{row.agentNames.join(', ') || '—'}</span>
                     </div>
-                    <div className="px-4 py-3.5 flex items-center">
-                      <span className="text-xs text-gray-400">{fmtDate(entry.created_at)}</span>
-                    </div>
-                    <div className="px-4 py-3.5 flex items-center gap-1 flex-wrap">
-                      <span className={`text-[9px] font-bold px-2 py-1 rounded-full ${hasOrder ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
-                        {hasOrder ? 'Has order' : 'No order'}
+                    <div className="px-4 py-3.5 flex flex-col justify-center">
+                      <span className="text-xs text-gray-500 font-medium">
+                        {row.day === TODAY ? 'Today' : fmtDate(row.latestAt)}
                       </span>
-                      {entry.willing_to_buy_date === TODAY_STR && (
-                        <span className="text-[9px] font-bold px-2 py-1 rounded-full bg-red-50 text-red-600">🔥 Buys today</span>
-                      )}
+                      <span className="text-[10px] text-gray-400">
+                        {fmtTime(row.latestAt)}{row.count > 1 ? ` · ${row.count} updates` : row.count === 0 ? ' · new entry' : ''}
+                      </span>
                     </div>
-                    <div className="px-4 py-3.5 flex items-center">
-                      {entry.is_priority
-                        ? <span className="text-[9px] font-bold bg-red-50 text-red-500 px-2 py-1 rounded-full">Priority</span>
-                        : <span className="text-gray-300 text-xs">—</span>}
+                    <div className="px-4 py-3.5 flex flex-col justify-center gap-1 min-w-0">
+                      <div className="flex items-center gap-1 flex-wrap">
+                        {row.tags.map(t => (
+                          <span key={t} className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${CRM_TAG_MAP[t].chip}`}>
+                            {CRM_TAG_MAP[t].label}
+                          </span>
+                        ))}
+                        {hasOrder && (
+                          <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-green-50 text-green-600">Has order</span>
+                        )}
+                        {entry.willing_to_buy_date === TODAY && (
+                          <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-red-50 text-red-600">🔥 Buys today</span>
+                        )}
+                      </div>
+                      {row.note && (
+                        <p className="text-[10px] text-gray-400 font-medium truncate">{row.note.split('\n').pop()}</p>
+                      )}
                     </div>
                     <div className="flex items-center justify-center pr-3">
                       {isExpanded
@@ -459,7 +637,7 @@ export default function CRMEntriesPage() {
                             <div className="absolute left-[19px] top-2 bottom-2 w-px bg-gray-200" />
 
                             <div className="space-y-2.5">
-                              {filteredInteractions.map((interaction, idx) => {
+                              {filteredInteractions.map((interaction) => {
                                 const cfg = TYPE_CONFIG[interaction.type] || TYPE_CONFIG.order
                                 const Icon = cfg.icon
 

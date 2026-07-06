@@ -8,10 +8,23 @@ import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import { CalendarSlot, FeedbackPost, TimeSlot, TIME_SLOT_LABELS, getSlotLabel } from '@/types'
 import { generatePostId } from '@/lib/utils'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Search, Loader2, Sparkles, Package as PackageIcon } from 'lucide-react'
 import { PACKAGE_TONE, packageTone } from '@/lib/package-colors'
 
 const SLOTS: TimeSlot[] = ['W', 'X', 'Y', 'Z']
+
+// One repost candidate — an existing order (old or new) found by the search.
+type RepostResult = {
+  orderId: string
+  customerId: string
+  name: string
+  phone: string
+  packageName: string | null
+  invoiceNumber: string | null
+  agentCode: string | null
+  hasPost: boolean
+  createdAt: string
+}
 
 // Tiers shown in the calendar legend — the packages actually sold.
 const LEGEND_TIERS = ['princess', 'silver', 'gold', 'platinum', 'vip'] as const
@@ -24,6 +37,28 @@ export default function CalendarPage() {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [selectedCell, setSelectedCell] = useState<{ date: string; slot: TimeSlot } | null>(null)
   const canEdit = role === 'designer' || role === 'back_office' || role === 'admin'
+
+  // ── Repost search (inside the empty-slot modal) ────────────
+  const [search, setSearch] = useState('')
+  const [searching, setSearching] = useState(false)
+  const [searched, setSearched] = useState(false)
+  const [results, setResults] = useState<RepostResult[]>([])
+  const [planningId, setPlanningId] = useState<string | null>(null)
+  const [modalMsg, setModalMsg] = useState<string | null>(null)
+  // "Fake" hack — searching the keyword Fake opens the filler-post creator
+  const [fakeMode, setFakeMode] = useState(false)
+  const [fakeDesc, setFakeDesc] = useState('')
+  const [fakeLink, setFakeLink] = useState('')
+  const [fakePkg, setFakePkg] = useState('')
+  const [packages, setPackages] = useState<{ id: string; name: string }[]>([])
+  const [creatingFake, setCreatingFake] = useState(false)
+
+  const resetModal = () => {
+    setSearch(''); setSearching(false); setSearched(false); setResults([])
+    setPlanningId(null); setModalMsg(null)
+    setFakeMode(false); setFakeDesc(''); setFakeLink('')
+    setCreatingFake(false)
+  }
 
   useEffect(() => { fetchSlots() }, [currentDate])
 
@@ -46,6 +81,150 @@ export default function CalendarPage() {
       .gte('slot_date', firstDay)
       .lte('slot_date', lastDay)
     if (fb) setFeedbacks(fb as any)
+  }
+
+  // ── Repost: search old customers / orders / post codes ──────────────────
+  // Typing the keyword "Fake" flips into the filler-post creator instead.
+  const runRepostSearch = async (e?: React.FormEvent) => {
+    e?.preventDefault()
+    const term = search.trim()
+    if (!term) return
+    setModalMsg(null)
+
+    if (term.toLowerCase() === 'fake') {
+      setFakeMode(true)
+      setResults([])
+      setSearched(false)
+      if (packages.length === 0) {
+        const { data } = await supabase.from('packages').select('id,name').eq('is_active', true).order('price')
+        if (data?.length) {
+          setPackages(data as any)
+          setFakePkg(prev => prev || (data[0] as any).id)
+        }
+      }
+      return
+    }
+
+    setFakeMode(false)
+    setSearching(true)
+    setSearched(true)
+    const safe = term.replace(/[(),]/g, '')
+
+    const [custRes, slotRes] = await Promise.all([
+      supabase.from('customers').select('id').or(`phone.ilike.%${safe}%,name.ilike.%${safe}%`).limit(25),
+      supabase.from('calendar_slots').select('order_id').ilike('post_id_code', `%${safe}%`).limit(25),
+    ])
+
+    const orderIds = new Set<string>()
+    slotRes.data?.forEach((s: any) => { if (s.order_id) orderIds.add(s.order_id) })
+    if (custRes.data?.length) {
+      const { data: custOrders } = await supabase
+        .from('orders').select('id').in('customer_id', custRes.data.map((c: any) => c.id))
+      custOrders?.forEach((o: any) => orderIds.add(o.id))
+    }
+
+    const ids = Array.from(orderIds).slice(0, 40)
+    if (!ids.length) { setResults([]); setSearching(false); return }
+
+    const { data: orders } = await supabase
+      .from('orders')
+      .select('id, customer_id, invoice_number, created_at, post_image_url, package:packages(name), customer:customers(name, phone), created_by_user:users!created_by(agent_code)')
+      .in('id', ids)
+      .order('created_at', { ascending: false })
+      .limit(15)
+
+    setResults(((orders as any[]) || []).map(o => ({
+      orderId: o.id,
+      customerId: o.customer_id,
+      name: o.customer?.name || o.customer?.phone || 'Unknown',
+      phone: o.customer?.phone || '',
+      packageName: o.package?.name || null,
+      invoiceNumber: o.invoice_number || null,
+      agentCode: o.created_by_user?.agent_code || null,
+      hasPost: !!o.post_image_url,
+      createdAt: o.created_at,
+    })))
+    setSearching(false)
+  }
+
+  // Plan the picked old order into the selected slot (a repost).
+  const planRepost = async (r: RepostResult) => {
+    if (!selectedCell || planningId) return
+    const { date, slot } = selectedCell
+    setPlanningId(r.orderId)
+    setModalMsg(null)
+
+    // Someone may have taken the slot while the modal was open.
+    const [{ data: taken }, { data: fbTaken }] = await Promise.all([
+      supabase.from('calendar_slots').select('id').eq('slot_date', date).eq('slot_time', slot).limit(1),
+      supabase.from('feedback_posts').select('id').eq('slot_date', date).eq('slot_time', slot).limit(1),
+    ])
+    if (taken?.length || fbTaken?.length) {
+      setModalMsg('This slot was just taken — pick another cell.')
+      setPlanningId(null)
+      fetchSlots()
+      return
+    }
+
+    const code = generatePostId(r.agentCode || (user as any)?.agent_code || 'X', new Date(date), slot)
+    const { error } = await supabase.from('calendar_slots').insert({
+      order_id: r.orderId,
+      slot_date: date,
+      slot_time: slot,
+      post_id_code: code,
+      assigned_to: user?.id,
+      planned_at: new Date().toISOString(),
+    })
+    if (error) {
+      setModalMsg('Could not plan: ' + error.message)
+      setPlanningId(null)
+      return
+    }
+
+    await supabase.from('orders').update({ planned_post_date: new Date(date).toISOString() }).eq('id', r.orderId)
+    await supabase.from('interactions').insert({
+      customer_id: r.customerId,
+      type: 'feedback',
+      description: `♻️ Repost planned from FR Plan — ${date} · ${getSlotLabel(slot, date)} | Post ID: ${code}`,
+      created_by: user?.id,
+    })
+
+    setSelectedCell(null)
+    resetModal()
+    fetchSlots()
+  }
+
+  // "Fake" hack — creates the hidden customer/order/slot then drops the user
+  // straight into the customer page where Build-with-AI is prefilled.
+  const createFakePost = async () => {
+    if (!selectedCell || !fakeDesc.trim() || !fakePkg || creatingFake) return
+    setCreatingFake(true)
+    setModalMsg(null)
+    try {
+      const res = await fetch('/api/fake-post/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: selectedCell.date,
+          slot: selectedCell.slot,
+          description: fakeDesc.trim(),
+          websiteLink: fakeLink.trim(),
+          packageId: fakePkg,
+        }),
+      })
+      const j = await res.json()
+      if (!j.ok) {
+        setModalMsg(j.error === 'slot_already_taken'
+          ? 'This slot was just taken — pick another cell.'
+          : 'Could not create: ' + (j.error || 'unknown'))
+        setCreatingFake(false)
+        return
+      }
+      router.push(`/dashboard/customers/${j.customerId}`)
+    } catch {
+      setModalMsg('Network error — please try again.')
+      setCreatingFake(false)
+    }
   }
 
   const getDaysInMonth = () => {
@@ -91,7 +270,7 @@ export default function CalendarPage() {
       if (cid) router.push(`/dashboard/customers/${cid}`)
       return
     }
-    if (canEdit) setSelectedCell({ date, slot })
+    if (canEdit) { resetModal(); setSelectedCell({ date, slot }) }
   }
 
   const days = getDaysInMonth()
@@ -218,20 +397,127 @@ export default function CalendarPage() {
         </div>
       </div>
 
-      {/* Empty-cell modal — explains where to plan from */}
+      {/* Empty-cell modal — repost search, fake hack, feedback + assignments */}
       {selectedCell && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-end justify-center px-4 pb-8"
           onClick={() => setSelectedCell(null)}>
-          <div className="bg-white w-full max-w-sm rounded-3xl p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
+          <div className="bg-white w-full max-w-sm rounded-3xl p-5 shadow-2xl max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <h3 className="text-sm font-bold text-gray-800 mb-1">Empty slot</h3>
-            <p className="text-xs text-gray-400 font-medium mb-4">
+            <p className="text-xs text-gray-400 font-medium mb-3">
               {new Date(selectedCell.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })} · {getSlotLabel(selectedCell.slot, selectedCell.date)}
             </p>
-            <p className="text-[10px] text-gray-500 font-medium mb-4 leading-relaxed">
-              To plan a customer in this slot, open the customer's page from your assignments
-              and use the <span className="font-bold">Plan + lock expiry</span> action there.
-              That's also where the WhatsApp confirmation is sent.
-            </p>
+
+            {/* ── Repost search ── */}
+            <form onSubmit={runRepostSearch} className="flex gap-1.5 mb-2">
+              <div className="relative flex-1">
+                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" />
+                <input
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Repost — name, number or post code…"
+                  className="w-full pl-8 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium outline-none focus:border-pink-300"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={searching || !search.trim()}
+                className="bg-pink-600 text-white rounded-xl px-3.5 text-xs font-bold disabled:opacity-40"
+              >
+                {searching ? <Loader2 size={13} className="animate-spin" /> : 'Find'}
+              </button>
+            </form>
+
+            {modalMsg && (
+              <div className="mb-2 bg-red-50 border border-red-100 rounded-xl px-3 py-2 text-[10px] font-bold text-red-600">
+                {modalMsg}
+              </div>
+            )}
+
+            {/* Search results — tap a customer to plan the repost here */}
+            {!fakeMode && searched && !searching && (
+              results.length === 0 ? (
+                <p className="text-[10px] text-gray-400 font-semibold text-center py-3">
+                  No orders found — try the phone number or post code
+                </p>
+              ) : (
+                <div className="space-y-1.5 mb-2">
+                  {results.map(r => (
+                    <button
+                      key={r.orderId}
+                      onClick={() => planRepost(r)}
+                      disabled={!!planningId}
+                      className="w-full text-left bg-gray-50 border border-gray-100 rounded-xl px-3 py-2.5 hover:border-pink-200 hover:bg-pink-50/50 active:scale-[0.98] transition-all disabled:opacity-50"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-bold text-gray-800 truncate">{r.name}</p>
+                        {planningId === r.orderId
+                          ? <Loader2 size={12} className="animate-spin text-pink-500 flex-shrink-0" />
+                          : <span className="text-[9px] font-bold text-pink-600 flex-shrink-0">Plan here →</span>}
+                      </div>
+                      <p className="text-[9px] text-gray-400 font-semibold font-mono">+{r.phone}</p>
+                      <div className="flex items-center gap-1 mt-1 flex-wrap">
+                        {r.packageName && (
+                          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-600 border border-purple-100">{r.packageName}</span>
+                        )}
+                        {r.invoiceNumber && (
+                          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">{r.invoiceNumber}</span>
+                        )}
+                        <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full ${r.hasPost ? 'bg-green-50 text-green-600' : 'bg-amber-50 text-amber-600'}`}>
+                          {r.hasPost ? 'Has artwork' : 'Needs AI build'}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )
+            )}
+
+            {/* ── "Fake" filler-post creator ── */}
+            {fakeMode && (
+              <div className="mb-2 bg-violet-50/60 border border-violet-100 rounded-2xl p-3 space-y-2">
+                <p className="text-[9px] font-bold text-violet-600 uppercase tracking-wide flex items-center gap-1">
+                  <Sparkles size={11} /> Fake filler post
+                </p>
+                <textarea
+                  value={fakeDesc}
+                  onChange={e => setFakeDesc(e.target.value)}
+                  rows={4}
+                  placeholder="Paste the profile description here…"
+                  className="w-full bg-white border border-violet-100 rounded-xl px-3 py-2 text-xs font-medium outline-none focus:border-violet-300 resize-none leading-relaxed"
+                />
+                <input
+                  value={fakeLink}
+                  onChange={e => setFakeLink(e.target.value)}
+                  placeholder="Website link (optional) — https://…"
+                  className="w-full bg-white border border-violet-100 rounded-xl px-3 py-2 text-xs font-medium outline-none focus:border-violet-300"
+                />
+                <div className="flex items-center gap-1.5">
+                  <PackageIcon size={12} className="text-violet-400 flex-shrink-0" />
+                  <select
+                    value={fakePkg}
+                    onChange={e => setFakePkg(e.target.value)}
+                    className="flex-1 bg-white border border-violet-100 rounded-xl px-2 py-2 text-xs font-semibold outline-none"
+                  >
+                    {packages.length === 0 && <option value="">Loading packages…</option>}
+                    {packages.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+                <button
+                  onClick={createFakePost}
+                  disabled={creatingFake || !fakeDesc.trim() || !fakePkg}
+                  className="w-full bg-violet-600 text-white rounded-xl py-2.5 text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-40"
+                >
+                  {creatingFake ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                  {creatingFake ? 'Creating…' : 'Create & open AI builder →'}
+                </button>
+                <p className="text-[9px] text-violet-400 font-medium leading-snug">
+                  Plans this slot and opens the post page — the AI builder comes prefilled with your description and link.
+                </p>
+              </div>
+            )}
+
+            <div className="border-t border-gray-100 my-3" />
+
             <button
               onClick={() => { setSelectedCell(null); router.push('/dashboard') }}
               className="w-full bg-pink-600 text-white rounded-2xl py-3 text-xs font-bold">

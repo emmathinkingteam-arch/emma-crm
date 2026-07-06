@@ -73,13 +73,13 @@ export default function TeamEntriesPage() {
 
     const { data } = await supabase
       .from('interactions')
-      .select('id, created_at, type, description, tags, created_by, customer:customers(phone, name), created_by_user:users!created_by(id, full_name, role)')
+      .select('id, created_at, type, description, tags, created_by, customer:customers(phone, name, is_fake), created_by_user:users!created_by(id, full_name, role)')
       .gte('created_at', startISO)
       .lt('created_at', endISO)
       .order('created_at', { ascending: false })
       .limit(2000)
 
-    const mapped: EntryRow[] = (data || []).map((i: any) => ({
+    const mapped: EntryRow[] = (data || []).filter((i: any) => !i.customer?.is_fake).map((i: any) => ({
       id: i.id,
       created_at: i.created_at,
       type: i.type,

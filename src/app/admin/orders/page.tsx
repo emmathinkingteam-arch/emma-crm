@@ -13,7 +13,7 @@ export default function AdminOrdersPage() {
   const [crm, setCrm] = useState('all')
   const [pkg, setPkg] = useState('all')
   useEffect(() => {
-    supabase.from('orders').select('*, customer:customers(name,phone), package:packages(name), created_by_user:users!created_by(full_name)').order('created_at', { ascending: false })
+    supabase.from('orders').select('*, customer:customers(name,phone), package:packages(name), created_by_user:users!created_by(full_name)').eq('is_fake', false).order('created_at', { ascending: false })
       .then(({ data }) => { if (data) setOrders(data); setLoading(false) })
   }, [])
   const statusColor = (s: string) => s === 'active' ? 'bg-green-50 text-green-600' : s === 'expired' ? 'bg-gray-100 text-gray-400' : 'bg-red-50 text-red-500'

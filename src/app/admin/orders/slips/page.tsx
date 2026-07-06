@@ -53,6 +53,7 @@ export default function SlipAuditPage() {
     supabase
       .from('orders')
       .select('id,customer_id,amount_paid,payment_type,step_variant,payment_slip_url,payment_bank,invoice_number,installment_status,installment_2_amount,installment_2_slip_url,created_at, customer:customers(name,phone), package:packages(name), created_by_user:users!created_by(full_name)')
+      .eq('is_fake', false)
       .order('created_at', { ascending: false })
       .then(({ data }) => {
         if (data) setOrders(data as any)

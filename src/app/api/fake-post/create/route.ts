@@ -79,6 +79,7 @@ export async function POST(req: Request) {
             name: `FP · ${code}`,
             notes: 'Fake filler post — created from the FR Plan calendar',
             created_by: me.id,
+            is_fake: true,               // hidden from every list except the calendar
         })
         .select('id')
         .single()
@@ -100,6 +101,7 @@ export async function POST(req: Request) {
             installment_status: 'complete',
             planned_post_date: new Date(date).toISOString(),
             created_by: me.id,
+            is_fake: true,               // hidden from every list except the calendar
         })
         .select('id')
         .single()

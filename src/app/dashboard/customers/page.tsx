@@ -83,6 +83,7 @@ export default function CustomersPage() {
     let query = supabase
       .from('customers')
       .select('*, created_by_user:users!created_by(full_name)')
+      .eq('is_fake', false)          // fake filler posts live only on the calendar
       .order('created_at', { ascending: false })
 
     if (role === 'crm_agent') {

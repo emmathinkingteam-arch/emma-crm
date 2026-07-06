@@ -2884,7 +2884,16 @@ export default function CustomerDetailPage() {
           defaultProfileUrl={savedProfileLink}
           orderId={postBuilderTarget?.id || ''}
           initialImageUrl={(postBuilderTarget as any)?.post_image_url || ''}
-          packageName={(postBuilderTarget as any)?.step_variant === 'free' ? 'Princess Pass' : ((postBuilderTarget as any)?.package?.name || '')}
+          packageName={(() => {
+            // Free-campaign orders point at the zero-price "Free Post" package and
+            // render as Princess Pass. Fake filler posts are also step_variant
+            // 'free' but carry a REAL package (VIP, Platinum…) — use that name so
+            // the AI designs the right tier, not Princess.
+            const t = postBuilderTarget as any
+            const pkgName = t?.package?.name || ''
+            if (t?.step_variant === 'free' && (!pkgName || t?.package?.flow_variant === 'free')) return 'Princess Pass'
+            return pkgName
+          })()}
           initialPlatinumCountry={(postBuilderTarget as any)?.platinum_country || ''}
           initialPlatinumTemplate={(postBuilderTarget as any)?.platinum_template || ''}
           plannedDate={

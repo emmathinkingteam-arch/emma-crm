@@ -133,7 +133,7 @@ export default function CRMEntriesPage() {
     const [{ data: interactionsData }, { data: newCustomers }] = await Promise.all([
       supabase
         .from('interactions')
-        .select('id, customer_id, description, tags, created_at, created_by, created_by_user:users!created_by(full_name), customer:customers(id, phone, name, is_priority, willing_to_buy_date, created_at, created_by, created_by_user:users!created_by(full_name), orders(id))')
+        .select('id, customer_id, description, tags, created_at, created_by, created_by_user:users!created_by(full_name), customer:customers(id, phone, name, is_fake, is_priority, willing_to_buy_date, created_at, created_by, created_by_user:users!created_by(full_name), orders(id))')
         .gte('created_at', startISO)
         .lt('created_at', endISO)
         .order('created_at', { ascending: false })
@@ -141,6 +141,7 @@ export default function CRMEntriesPage() {
       supabase
         .from('customers')
         .select('id, phone, name, is_priority, willing_to_buy_date, created_at, created_by, created_by_user:users!created_by(full_name), orders(id)')
+        .eq('is_fake', false)
         .gte('created_at', startISO)
         .lt('created_at', endISO)
         .order('created_at', { ascending: false })
@@ -150,8 +151,8 @@ export default function CRMEntriesPage() {
     const byKey = new Map<string, EntryRow>()
 
     ;(interactionsData as any[] | null)?.forEach((i) => {
-      const cust = i.customer as CustomerLite | null
-      if (!cust) return
+      const cust = i.customer as (CustomerLite & { is_fake?: boolean }) | null
+      if (!cust || cust.is_fake) return   // fake filler posts live only on the calendar
       const day = localDay(i.created_at)
       const key = `${cust.id}|${day}`
       const tags = effectiveTags(i)

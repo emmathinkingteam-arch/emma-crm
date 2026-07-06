@@ -227,6 +227,32 @@ export default function CalendarPage() {
     }
   }
 
+  // ── Admin: remove a planned post from the grid ───────────────────────────
+  // Fake filler posts are swept away completely (their hidden order/customer
+  // too); real customers keep their order — only the slot is freed.
+  const [removingSlotId, setRemovingSlotId] = useState<string | null>(null)
+  const removeSlot = async (s: CalendarSlot, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (removingSlotId) return
+    const who = (s as any).order?.customer?.name || (s as any).order?.customer?.phone || s.post_id_code
+    if (!confirm(`Remove ${who} from this slot?\n\nThe slot becomes free again.`)) return
+    setRemovingSlotId(s.id)
+    try {
+      const res = await fetch('/api/calendar/unplan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slotId: s.id }),
+      })
+      const j = await res.json()
+      if (!j.ok) alert('Could not remove: ' + (j.error || 'unknown'))
+    } catch {
+      alert('Network error — please try again.')
+    } finally {
+      setRemovingSlotId(null)
+      fetchSlots()
+    }
+  }
+
   const getDaysInMonth = () => {
     const year = currentDate.getFullYear()
     const month = currentDate.getMonth()
@@ -342,8 +368,19 @@ export default function CalendarPage() {
                     <div key={d} className="w-[88px] flex-shrink-0 p-1">
                       <div
                         onClick={() => handleCellClick(s, fb, d, slot)}
-                        className={`h-full min-h-[76px] rounded-2xl p-2.5 transition-all active:scale-[0.97] ${fb ? 'bg-fuchsia-50 border border-fuchsia-200 shadow-sm cursor-pointer hover:shadow-md hover:-translate-y-0.5' : cellClass(s)}`}
+                        className={`relative h-full min-h-[76px] rounded-2xl p-2.5 transition-all active:scale-[0.97] ${fb ? 'bg-fuchsia-50 border border-fuchsia-200 shadow-sm cursor-pointer hover:shadow-md hover:-translate-y-0.5' : cellClass(s)}`}
                       >
+                        {/* Admin: free this slot (fakes are swept away fully) */}
+                        {role === 'admin' && s && !fb && (
+                          <button
+                            onClick={e => removeSlot(s, e)}
+                            disabled={removingSlotId === s.id}
+                            title="Remove from calendar"
+                            className="absolute top-1 right-1 w-4 h-4 rounded-full bg-white/90 border border-gray-200 text-gray-400 hover:text-red-500 hover:border-red-200 flex items-center justify-center text-[9px] font-bold leading-none z-10 disabled:opacity-40"
+                          >
+                            {removingSlotId === s.id ? '…' : '✕'}
+                          </button>
+                        )}
                         {showDayTime && (
                           <p className={`text-[8px] font-bold leading-none mb-1 ${s && !expired && tone ? `${tone.text} opacity-70` : 'text-pink-400'}`}>{dayTime}</p>
                         )}

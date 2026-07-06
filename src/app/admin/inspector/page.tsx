@@ -41,7 +41,9 @@ const ROLE_COLORS: Record<string, string> = {
 
 export default function InspectorPage() {
     const router = useRouter()
-    const { startInspect } = useAuthStore()
+    const { startInspect, role } = useAuthStore()
+    // The Team Leader may only inspect CRM agents.
+    const crmOnly = role === 'team_leader'
     const [workers, setWorkers] = useState<User[]>([])
     const [loading, setLoading] = useState(true)
     const [search, setSearch] = useState('')
@@ -49,11 +51,14 @@ export default function InspectorPage() {
     const [secondsToday, setSecondsToday] = useState<Record<string, number>>({})
 
     useEffect(() => {
-        supabase
+        const base = supabase
             .from('users')
             .select('*')
             .eq('is_active', true)
-            .not('role', 'in', '(admin,accountant)')
+        const query = crmOnly
+            ? base.eq('role', 'crm_agent')
+            : base.not('role', 'in', '(admin,accountant)')
+        query
             .then(({ data }) => {
                 const sorted = ((data as User[]) || []).sort(
                     (a, b) =>

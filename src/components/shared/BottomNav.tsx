@@ -63,6 +63,13 @@ const NAV_CONFIG = {
     { href: '/dashboard/profile', icon: Award, label: 'Profile' },
     { href: '/dashboard/chat', icon: MessageCircle, label: 'Chat' },
   ],
+  // Team Leader lives in the admin panel; on her personal pages the bottom nav
+  // just points back to Admin plus her Wallet & Profile.
+  team_leader: [
+    { href: '/admin', icon: LayoutDashboard, label: 'Admin' },
+    { href: '/dashboard/wallet', icon: Wallet, label: 'Wallet' },
+    { href: '/dashboard/profile', icon: Award, label: 'Profile' },
+  ],
 }
 
 export default function BottomNav() {

@@ -59,6 +59,9 @@ export default function DashboardPage() {
     // CEO goes straight to accounts
     if (role === 'ceo') { router.replace('/admin/accounts'); return }
 
+    // Team Leader's home is the admin panel, not the worker feed.
+    if (role === 'team_leader') { router.replace('/admin'); return }
+
     // Capture GPS on load
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(async (pos) => {

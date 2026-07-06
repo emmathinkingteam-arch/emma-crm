@@ -52,7 +52,7 @@ export default function LoginPage() {
         // Only confirmed admins go to /admin. Every other role — and any
         // case where the role is missing/unexpected — goes to /dashboard.
         // We never default an unknown user into the admin panel.
-        if (profile.role === 'admin') {
+        if (profile.role === 'admin' || profile.role === 'team_leader') {
           router.replace('/admin')
         } else {
           router.replace('/dashboard')

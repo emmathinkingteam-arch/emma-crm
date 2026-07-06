@@ -1,6 +1,24 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+// The /admin sub-trees a Team Leader may open. Each is matched as a full path
+// or a sub-path (prefix + '/'). '/admin' itself (the dashboard) is handled
+// separately as an EXACT match so it never swallows the rest of the panel.
+const TEAM_LEADER_ADMIN_PREFIXES = [
+  '/admin/inspector',  // Inspector (CRM only — enforced in the page)
+  '/admin/alerts',     // Overdue Alerts
+  '/admin/crm-entries',
+  '/admin/leads',      // Lead Distribution
+  '/admin/orders',
+  '/admin/approvals',
+  '/admin/complaints',
+  '/admin/attendance',
+  '/admin/tasks',
+  '/admin/calendar',
+  '/admin/locations',
+  '/admin/add-worker', // add workers + team leaders
+]
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
   let response = NextResponse.next({ request })
@@ -60,7 +78,16 @@ export async function middleware(request: NextRequest) {
         role === 'back_office' &&
         pathname.startsWith('/admin/orders') &&
         !pathname.startsWith('/admin/orders/slips')
-      if (!accountantOk && !backOfficeOk) {
+      // Team Leader gets a phone-friendly slice of the admin panel: the CRM
+      // overview, alerts, entries, leads, orders, approvals/complaints, and
+      // the team tools (attendance/tasks/calendar/locations/add-worker).
+      // Everything else under /admin (accounts, finance, config, e-sign,
+      // packages, whatsapp, notifications, settings) stays admin-only.
+      const teamLeaderOk =
+        role === 'team_leader' &&
+        (pathname === '/admin' ||
+          TEAM_LEADER_ADMIN_PREFIXES.some(p => pathname === p || pathname.startsWith(p + '/')))
+      if (!accountantOk && !backOfficeOk && !teamLeaderOk) {
         return NextResponse.redirect(new URL('/dashboard', request.url))
       }
     }
@@ -70,7 +97,7 @@ export async function middleware(request: NextRequest) {
     //    to /dashboard, admins to /admin, accountants to /admin/accounts.
     if (pathname === '/auth/login') {
       const dest =
-        role === 'admin'
+        role === 'admin' || role === 'team_leader'
           ? '/admin'
           : role === 'accountant'
             ? '/admin/accounts'

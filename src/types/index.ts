@@ -11,6 +11,7 @@ export type UserRole =
   | 'designer'
   | 'accountant'
   | 'ceo'
+  | 'team_leader'
 
 export type OrderStatus = 'draft' | 'active' | 'expired' | 'cancelled'
 export type StepStatus = 'pending' | 'in_progress' | 'done' | 'overdue' | 'rejected'

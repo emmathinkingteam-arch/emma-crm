@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Loader2 } from 'lucide-react'
 
-const ROLES = ['crm_agent', 'back_office', 'counselor', 'manager', 'designer', 'accountant', 'ceo']
+const ROLES = ['crm_agent', 'back_office', 'counselor', 'manager', 'designer', 'accountant', 'ceo', 'team_leader']
 
 export default function AddWorkerPage() {
   const router = useRouter()

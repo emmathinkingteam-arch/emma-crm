@@ -194,6 +194,7 @@ export const ROLE_LABELS: Record<string, string> = {
   counselor: 'Counselor',
   manager: 'Manager',
   designer: 'Designer',
+  team_leader: 'Team Leader',
 }
 
 // ── LKR formatter ────────────────────────────────────────────

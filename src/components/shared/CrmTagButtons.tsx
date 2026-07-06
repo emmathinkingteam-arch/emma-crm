@@ -5,12 +5,11 @@
 // ============================================================================
 // Multi-select: the agent can tap several ("Package details sent" + "Call back
 // later"). Selecting any negative tag (Not answer / Not interest / Reject /
-// Fake) reveals a required reason box — that reason goes to the admin's
-// Rejected CRM tab.
+// Fake) reveals an OPTIONAL reason box — if filled, it goes to the admin's
+// Rejected CRM tab. Agents can skip it.
 // ============================================================================
 
 import { CRM_TAGS, negativeOf, type CrmTagKey } from '@/lib/crm-tags'
-import { AlertTriangle } from 'lucide-react'
 
 interface Props {
     selected: CrmTagKey[]
@@ -45,16 +44,16 @@ export default function CrmTagButtons({ selected, onChange, reason, onReasonChan
             </div>
 
             {negatives.length > 0 && (
-                <div className="mt-2 bg-red-50 border border-red-100 rounded-xl p-2.5">
-                    <p className="text-[9px] font-bold text-red-500 uppercase tracking-wide mb-1.5 flex items-center gap-1">
-                        <AlertTriangle size={10} /> Reason (required — goes to admin)
+                <div className="mt-2 bg-gray-50 border border-gray-100 rounded-xl p-2.5">
+                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1.5">
+                        Reason (optional — can skip)
                     </p>
                     <textarea
                         value={reason}
                         onChange={(e) => onReasonChange(e.target.value)}
                         rows={2}
-                        placeholder="Why? e.g. said too expensive / already married / wrong number..."
-                        className="w-full bg-white border border-red-200 rounded-xl px-3 py-2 text-xs font-medium outline-none focus:border-red-400 resize-none leading-relaxed"
+                        placeholder="Why? e.g. said too expensive / wrong number... (optional)"
+                        className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs font-medium outline-none focus:border-gray-400 resize-none leading-relaxed"
                     />
                 </div>
             )}

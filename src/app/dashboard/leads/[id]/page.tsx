@@ -19,7 +19,7 @@ import BottomNav from '@/components/shared/BottomNav'
 import { formatPhoneDisplay } from '@/lib/country-codes'
 import { leadCountdown, type Lead } from '@/lib/leads'
 import CrmTagButtons from '@/components/shared/CrmTagButtons'
-import { negativeOf, type CrmTagKey } from '@/lib/crm-tags'
+import { type CrmTagKey } from '@/lib/crm-tags'
 import {
     Loader2,
     ArrowLeft,
@@ -67,10 +67,6 @@ export default function LeadResponsePage() {
 
     async function handleSave() {
         if (!user || !lead) return
-        if (negativeOf(tags).length > 0 && !reason.trim()) {
-            alert('Please add the reason — it goes to admin with this number.')
-            return
-        }
         setSaving(true)
 
         try {

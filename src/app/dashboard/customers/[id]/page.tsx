@@ -3060,10 +3060,6 @@ function LogInteractionForm({ customerId, userId, onSaved, phone, customerName }
   const save = async () => {
     if (!notes.trim() && tags.length === 0) return
     const negatives = negativeOf(tags)
-    if (negatives.length > 0 && !reason.trim()) {
-      alert('Please add the reason — it goes to admin with this number.')
-      return
-    }
     setSaving(true)
     await supabase.from('interactions').insert({
       customer_id: customerId,
@@ -3079,7 +3075,7 @@ function LogInteractionForm({ customerId, userId, onSaved, phone, customerName }
         customer_name: customerName,
         agent_id: userId,
         tags: negatives,
-        reason: reason.trim(),
+        reason: reason.trim() || null,
         note: notes.trim() || null,
       })
       if (rejError) console.error('Failed to file rejection:', rejError)

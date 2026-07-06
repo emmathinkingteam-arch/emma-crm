@@ -65,10 +65,6 @@ function ProcessContent() {
     if (!user) { alert('Your session expired. Please log in again.'); return }
     if (loading) return
     const negatives = negativeOf(tags)
-    if (negatives.length > 0 && !reason.trim()) {
-      alert('Please add the reason — it goes to admin with this number.')
-      return
-    }
     setLoading(true)
 
     try {
@@ -121,7 +117,7 @@ function ProcessContent() {
           customer_name: customerName || null,
           agent_id: user.id,
           tags: negatives,
-          reason: reason.trim(),
+          reason: reason.trim() || null,
           note: notes.trim() || null,
         })
         if (rejError) console.error('Failed to file rejection:', rejError)

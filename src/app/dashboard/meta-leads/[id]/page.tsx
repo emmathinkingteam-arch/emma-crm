@@ -46,9 +46,9 @@ export default function MetaLeadPage() {
     const [reason, setReason] = useState('')
     const [err, setErr] = useState<string | null>(null)
 
-    // These land in the admin's Rejected CRM queue — a reason is required.
+    // These land in the admin's Rejected CRM queue — reason is optional.
     const NEGATIVE_META: MetaLeadStatus[] = ['no_answer', 'rejected', 'fake']
-    const needsReason = selected !== null && NEGATIVE_META.includes(selected)
+    const showReason = selected !== null && NEGATIVE_META.includes(selected)
 
     useEffect(() => {
         if (!leadId) return
@@ -65,10 +65,6 @@ export default function MetaLeadPage() {
 
     async function commit() {
         if (!user || !lead || saving || !selected) return
-        if (needsReason && !reason.trim()) {
-            setErr('Please add the reason — it goes to admin with this number.')
-            return
-        }
         setSaving(true)
         setErr(null)
         try {
@@ -193,18 +189,18 @@ export default function MetaLeadPage() {
                         })}
                     </div>
 
-                    {/* Reason — required for No answer / Rejected / Fake */}
-                    {needsReason && (
-                        <div className="mt-3 bg-red-50 border border-red-100 rounded-xl p-2.5">
-                            <p className="text-[9px] font-bold text-red-500 uppercase tracking-wide mb-1.5">
-                                Reason (required — goes to admin)
+                    {/* Reason — optional for No answer / Rejected / Fake */}
+                    {showReason && (
+                        <div className="mt-3 bg-gray-50 border border-gray-100 rounded-xl p-2.5">
+                            <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1.5">
+                                Reason (optional — can skip)
                             </p>
                             <textarea
                                 value={reason}
                                 onChange={(e) => setReason(e.target.value)}
                                 rows={2}
-                                placeholder="Why? e.g. said too expensive / wrong number..."
-                                className="w-full bg-white border border-red-200 rounded-xl px-3 py-2 text-xs font-medium outline-none focus:border-red-400 resize-none leading-relaxed"
+                                placeholder="Why? e.g. said too expensive / wrong number... (optional)"
+                                className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs font-medium outline-none focus:border-gray-400 resize-none leading-relaxed"
                             />
                         </div>
                     )}

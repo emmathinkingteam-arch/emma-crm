@@ -39,6 +39,15 @@ html.dark {
 html {
   scroll-behavior: smooth;
   -webkit-text-size-adjust: 100%;
+  /* Fit the device screen exactly — nothing may push the page wider and
+     force the phone to shrink/zoom the whole layout. */
+  width: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  width: 100%;
+  overflow-x: hidden;
 }
 
 body {

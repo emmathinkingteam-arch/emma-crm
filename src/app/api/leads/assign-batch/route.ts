@@ -38,9 +38,9 @@ export async function POST(req: Request) {
         const { data: profile } = await sb
             .from('users')
             .select('role')
-            .eq('id', user.id)
+            .eq('auth_user_id', user.id)
             .single()
-        if (!profile || profile.role !== 'admin') {
+        if (!profile || (profile.role !== 'admin' && profile.role !== 'team_leader')) {
             return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 })
         }
     } catch {

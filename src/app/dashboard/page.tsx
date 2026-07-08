@@ -60,8 +60,8 @@ export default function DashboardPage() {
     // CEO goes straight to accounts
     if (role === 'ceo') { router.replace('/admin/accounts'); return }
 
-    // Team Leader's home is the admin panel, not the worker feed.
-    if (role === 'team_leader') { router.replace('/admin'); return }
+    // Team Leader is hybrid (team lead + CRM): she's allowed to stay on the
+    // worker dashboard and use the full CRM workspace, so no redirect here.
 
     // Capture GPS on load
     if (navigator.geolocation) {

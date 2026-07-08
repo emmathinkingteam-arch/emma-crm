@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Users, CalendarRange,
   PlusCircle, Wallet, Award, ClipboardList, Search, MessageCircle,
-  ArrowDownToLine, ListOrdered, Landmark, Receipt, DollarSign
+  ArrowDownToLine, ListOrdered, Landmark, Receipt, DollarSign, ShieldCheck
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 
@@ -63,11 +63,14 @@ const NAV_CONFIG = {
     { href: '/dashboard/profile', icon: Award, label: 'Profile' },
     { href: '/dashboard/chat', icon: MessageCircle, label: 'Chat' },
   ],
-  // Team Leader lives in the admin panel; on her personal pages the bottom nav
-  // just points back to Admin plus her Wallet & Profile.
+  // Team Leader is hybrid (team lead + CRM): she gets the full CRM workspace
+  // nav plus a shortcut back to the Admin panel.
   team_leader: [
-    { href: '/admin', icon: LayoutDashboard, label: 'Admin' },
-    { href: '/dashboard/wallet', icon: Wallet, label: 'Wallet' },
+    { href: '/admin', icon: ShieldCheck, label: 'Admin' },
+    { href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
+    { href: '/entry', icon: PlusCircle, label: 'Entry' },
+    { href: '/dashboard/customers', icon: Users, label: 'Clients' },
+    { href: '/dashboard/chat', icon: MessageCircle, label: 'Chat' },
     { href: '/dashboard/profile', icon: Award, label: 'Profile' },
   ],
 }

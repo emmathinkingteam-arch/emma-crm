@@ -22,7 +22,8 @@ export default function EntryPage() {
   const [pasteError, setPasteError] = useState('')
 
   useEffect(() => {
-    if (role && role !== 'crm_agent') {
+    // CRM agents and the hybrid Team Leader may add entries; everyone else out.
+    if (role && role !== 'crm_agent' && role !== 'team_leader') {
       router.replace('/dashboard')
     }
     fetchDailyCount()

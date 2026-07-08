@@ -9,7 +9,7 @@ import {
   CalendarRange, ShieldCheck, Settings, LogOut,
   Bell, DollarSign, Target, Archive, MessageSquare, MessageCircle, MessagesSquare, AlertOctagon,
   Wallet, Megaphone, Eye, Headphones, FileSignature, Facebook, ReceiptText, Sparkles,
-  UserCircle2, Menu, X,
+  UserCircle2, Menu, X, PlusCircle,
 } from 'lucide-react'
 
 import { supabase } from '@/lib/supabase'
@@ -96,6 +96,19 @@ const TEAM_LEADER_ALLOWED = new Set<string>([
   '/admin/add-worker',
 ])
 
+// The Team Leader is hybrid (team lead + CRM), so she also gets the CRM
+// worker workspace — her own dashboard, entry form, clients and chat — right
+// inside the admin panel, exactly like a CRM agent has.
+const TEAM_LEADER_CRM: Section = {
+  title: 'CRM Workspace',
+  items: [
+    { href: '/dashboard', icon: LayoutDashboard, label: 'CRM Dashboard' },
+    { href: '/entry', icon: PlusCircle, label: 'New Entry' },
+    { href: '/dashboard/customers', icon: Users, label: 'My Clients' },
+    { href: '/dashboard/chat', icon: MessageCircle, label: 'Chat' },
+  ],
+}
+
 // Extra section appended for the Team Leader — the "like others" personal pages.
 const TEAM_LEADER_ACCOUNT: Section = {
   title: 'My Account',
@@ -111,6 +124,7 @@ const ACTIVE_PREFIXES = [
   '/admin/workers', '/admin/documents', '/admin/crm-entries', '/admin/attendance',
   '/admin/tasks', '/admin/calendar', '/dashboard/legacy-history',
   '/dashboard/profile', '/dashboard/wallet',
+  '/dashboard/customers', '/dashboard/chat', '/entry',
 ]
 
 function isActive(href: string, pathname: string): boolean {
@@ -139,6 +153,7 @@ export default function AdminSidebar() {
         ...SECTIONS
           .map(s => ({ ...s, items: s.items.filter(t => TEAM_LEADER_ALLOWED.has(t.href)) }))
           .filter(s => s.items.length > 0),
+        TEAM_LEADER_CRM,
         TEAM_LEADER_ACCOUNT,
       ]
     : restricted

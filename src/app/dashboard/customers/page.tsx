@@ -86,7 +86,8 @@ export default function CustomersPage() {
       .eq('is_fake', false)          // fake filler posts live only on the calendar
       .order('created_at', { ascending: false })
 
-    if (role === 'crm_agent') {
+    // CRM agents and the hybrid Team Leader only see their own clients.
+    if (role === 'crm_agent' || role === 'team_leader') {
       query = query.eq('created_by', user.id)
     }
 
@@ -101,7 +102,7 @@ export default function CustomersPage() {
       .select('customer_id, description, tags, created_at')
       .order('created_at', { ascending: false })
       .limit(5000)
-    if (role === 'crm_agent') iq = iq.eq('created_by', user.id)
+    if (role === 'crm_agent' || role === 'team_leader') iq = iq.eq('created_by', user.id)
 
     const [{ data: interactionsData }, { data: ordersData }] = await Promise.all([
       iq,
@@ -366,8 +367,8 @@ export default function CustomersPage() {
           </div>
         )}
 
-        {/* Info banner for non-CRM */}
-        {role !== 'crm_agent' && role !== 'admin' && (
+        {/* Info banner for view-only roles (Team Leader is a full CRM participant) */}
+        {role !== 'crm_agent' && role !== 'admin' && role !== 'team_leader' && (
           <div className="bg-blue-50 border border-blue-100 rounded-2xl px-4 py-2.5 mb-4 text-xs text-blue-600 font-medium">
             View only — you can see history but cannot create customers or orders
           </div>

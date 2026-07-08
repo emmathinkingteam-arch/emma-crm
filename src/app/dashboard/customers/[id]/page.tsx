@@ -3249,7 +3249,14 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
   const [desc, setDesc] = useState(initialDesc)
   const [profileUrl, setProfileUrl] = useState(defaultProfileUrl || 'https://www.emmathinking.com/profile/')
   const [copiedId, setCopiedId] = useState<string | null>(null)
-  const isPlatinum = (packageName || '').toLowerCase().includes('platinum')
+  // Princess wins over platinum: a "Princess Platinum" (or Princess Silver/
+  // Gold/VIP) is a PINK Princess Pass, NOT a platinum pass with a template
+  // photo. This mirrors the Python generator's _PKG_ORDER (princess first),
+  // so we must NOT show the platinum country/template picker or pass a
+  // platinum template — otherwise opts.template overrides the package and
+  // forces the platinum photo template instead of the pink princess design.
+  const isPrincess = (packageName || '').toLowerCase().includes('princess')
+  const isPlatinum = !isPrincess && (packageName || '').toLowerCase().includes('platinum')
   const [platinumList, setPlatinumList] = useState<string[]>([])
   const [platinumCountry, setPlatinumCountry] = useState(initialPlatinumCountry)
   const [platinumTemplate, setPlatinumTemplate] = useState(initialPlatinumTemplate)

@@ -10,6 +10,7 @@ import { Order, OrderStep } from '@/types'
 import { Bell, ChevronRight, ChevronLeft, CheckCircle2, Sparkles, Clock, Phone, TrendingUp, Users, UserPlus, Briefcase } from 'lucide-react'
 import CrmLeaderboard from '@/components/shared/CrmLeaderboard'
 import MissingSlipsCard from '@/components/shared/MissingSlipsCard'
+import LowInterestAlert from '@/components/shared/LowInterestAlert'
 import CountUp from '@/components/shared/CountUp'
 import Link from 'next/link'
 import { type Lead, leadCountdown, leadPenaltySoFar } from '@/lib/leads'
@@ -343,6 +344,9 @@ export default function DashboardPage() {
 
         {/* Missing payment slips — pinned to the very top, red, until cleared */}
         {user?.id && <MissingSlipsCard userId={user.id} />}
+
+        {/* Active posts getting too little website interest — red until cleared */}
+        <LowInterestAlert limit={8} viewAllHref="/dashboard/customers" />
 
         {/* Stats row */}
         <div className="grid grid-cols-2 gap-3">

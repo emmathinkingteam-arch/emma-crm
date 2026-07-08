@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import LowInterestAlert from '@/components/shared/LowInterestAlert'
 import {
   Building2, CheckCircle2, AlertTriangle,
   ClipboardList, UserPlus, AlertOctagon, Users2,
@@ -179,6 +180,8 @@ export default function AdminDashboardPage() {
         <h1 className="text-2xl font-bold text-gray-800">{greeting} 👋</h1>
         <p className="text-sm text-gray-400 font-medium mt-0.5">{dateStr}</p>
       </div>
+
+      <LowInterestAlert />
 
       <BankReminder />
 

@@ -345,8 +345,8 @@ export default function DashboardPage() {
         {/* Missing payment slips — pinned to the very top, red, until cleared */}
         {user?.id && <MissingSlipsCard userId={user.id} />}
 
-        {/* Active posts getting too little website interest — red until cleared */}
-        <LowInterestAlert limit={8} viewAllHref="/dashboard/customers" />
+        {/* Active posts getting too little website interest — Back Office only */}
+        {role === 'back_office' && <LowInterestAlert limit={8} viewAllHref="/dashboard/customers" />}
 
         {/* Stats row */}
         <div className="grid grid-cols-2 gap-3">

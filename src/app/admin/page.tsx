@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useAuthStore } from '@/store/auth'
 import LowInterestAlert from '@/components/shared/LowInterestAlert'
 import {
   Building2, CheckCircle2, AlertTriangle,
@@ -75,6 +76,7 @@ function BankReminder() {
 }
 
 export default function AdminDashboardPage() {
+  const { role } = useAuthStore()
   const [stats, setStats] = useState({ activeOrders: 0, newToday: 0, overdue: 0, punchedIn: 0, monthCommission: 0, leavePending: 0, totalCustomers: 0, livePosts: 0 })
   const [overdueItems, setOverdueItems] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -181,7 +183,7 @@ export default function AdminDashboardPage() {
         <p className="text-sm text-gray-400 font-medium mt-0.5">{dateStr}</p>
       </div>
 
-      <LowInterestAlert />
+      {role === 'admin' && <LowInterestAlert />}
 
       <BankReminder />
 

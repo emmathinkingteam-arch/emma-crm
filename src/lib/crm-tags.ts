@@ -18,6 +18,7 @@ export type CrmTagKey =
     | 'follow_up'
     | 'will_inform'
     | 'check_inform'
+    | 'chatting'
     | 'not_answer'
     | 'not_interested'
     | 'rejected'
@@ -45,6 +46,7 @@ export const CRM_TAGS: CrmTagDef[] = [
     { key: 'follow_up', label: 'Follow up', chip: 'bg-sky-50 text-sky-600 border border-sky-100', btn: 'bg-sky-50 text-sky-600 border-sky-100', btnOn: 'bg-sky-600 text-white border-sky-600', negative: false },
     { key: 'will_inform', label: 'Will inform later', chip: 'bg-amber-50 text-amber-600 border border-amber-100', btn: 'bg-amber-50 text-amber-600 border-amber-100', btnOn: 'bg-amber-500 text-white border-amber-500', negative: false },
     { key: 'check_inform', label: "I'll check & let you know", chip: 'bg-teal-50 text-teal-600 border border-teal-100', btn: 'bg-teal-50 text-teal-600 border-teal-100', btnOn: 'bg-teal-600 text-white border-teal-600', negative: false },
+    { key: 'chatting', label: 'Chatting', chip: 'bg-cyan-50 text-cyan-600 border border-cyan-100', btn: 'bg-cyan-50 text-cyan-600 border-cyan-100', btnOn: 'bg-cyan-600 text-white border-cyan-600', negative: false },
     { key: 'not_answer', label: 'Not answer', chip: 'bg-orange-50 text-orange-600 border border-orange-100', btn: 'bg-orange-50 text-orange-600 border-orange-100', btnOn: 'bg-orange-500 text-white border-orange-500', negative: true },
     { key: 'not_interested', label: 'Not interest', chip: 'bg-rose-50 text-rose-600 border border-rose-100', btn: 'bg-rose-50 text-rose-600 border-rose-100', btnOn: 'bg-rose-600 text-white border-rose-600', negative: true },
     { key: 'rejected', label: 'Reject', chip: 'bg-red-50 text-red-600 border border-red-100', btn: 'bg-red-50 text-red-600 border-red-100', btnOn: 'bg-red-600 text-white border-red-600', negative: true },

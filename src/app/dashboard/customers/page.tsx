@@ -118,15 +118,22 @@ export default function CustomersPage() {
       if (d && !willBuyMap.has(i.customer_id)) willBuyMap.set(i.customer_id, d)
     })
     const installmentMap = new Map<string, boolean>()
+    // Customers who already made a *fully paid* order have done the task —
+    // drop them from the Clients list. Partial-installment orders stay so the
+    // agent still gets the "pending 2nd installment" follow-up nudge.
+    const paidCustomerIds = new Set<string>()
     ordersData?.forEach((o: any) => {
       if (o.installment_status === 'partial') installmentMap.set(o.customer_id, true)
+      else paidCustomerIds.add(o.customer_id)
     })
 
-    const enriched: EnrichedCustomer[] = custData.map((c: any) => ({
-      ...c,
-      willBuyOnDate: willBuyMap.get(c.id) ?? null,
-      installmentPending: installmentMap.get(c.id) ?? false,
-    }))
+    const enriched: EnrichedCustomer[] = custData
+      .filter((c: any) => !paidCustomerIds.has(c.id))
+      .map((c: any) => ({
+        ...c,
+        willBuyOnDate: willBuyMap.get(c.id) ?? null,
+        installmentPending: installmentMap.get(c.id) ?? false,
+      }))
     const custMap = new Map(enriched.map(c => [c.id, c]))
 
     // ── Build entry rows: customer × day ─────────────────────────
@@ -141,8 +148,11 @@ export default function CustomersPage() {
       const existing = byKey.get(key)
       if (existing) {
         existing.count += 1
-        for (const t of tags) if (!existing.tags.includes(t)) existing.tags.push(t)
-        // interactions arrive newest-first, so the first one seen is the latest
+        // Interactions arrive newest-first, so the first one seen is the latest.
+        // Show ONLY the latest status the agent set — not the whole day's union.
+        // (If the very latest update carried no tags, fall back to the most
+        // recent one that did, so the card never goes blank.)
+        if (existing.tags.length === 0 && tags.length) existing.tags = [...tags]
       } else {
         byKey.set(key, {
           key,

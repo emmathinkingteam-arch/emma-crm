@@ -57,7 +57,7 @@ export default function MetaAdsPage() {
     const [spreadsheet, setSpreadsheet] = useState('')
     const [tabs, setTabs] = useState<Tab[]>([])
     const [sheetTitle, setSheetTitle] = useState('')
-    const [ttl, setTtl] = useState(60)
+    const [ttl, setTtl] = useState(120)
     const [penalty, setPenalty] = useState(30)
     const [ratio, setRatio] = useState<Record<string, number>>({})
     const [isActive, setIsActive] = useState(true)

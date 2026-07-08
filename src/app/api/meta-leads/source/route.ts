@@ -50,7 +50,7 @@ export async function POST(req: Request) {
         spreadsheet_id: spreadsheetId,
         sheet_title: body.sheetTitle,
         sheet_gid: body.sheetGid ?? null,
-        ttl_minutes: Math.max(1, Math.floor(body.ttlMinutes || 60)),
+        ttl_minutes: Math.max(1, Math.floor(body.ttlMinutes || 120)),
         penalty_lkr: Math.max(0, Math.floor(body.penaltyLkr ?? 30)),
         ratio,
         is_active: body.isActive !== false,

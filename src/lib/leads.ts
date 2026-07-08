@@ -25,7 +25,7 @@ export const DEFAULT_METER: BatchMeter = {
     release_mode: 'drip',
     drip_count: 2,
     drip_interval_minutes: 30,
-    lead_ttl_minutes: 60,
+    lead_ttl_minutes: 120,
     penalty_lkr: 30,
 }
 

@@ -238,7 +238,7 @@ export async function releaseMetaLeadsForWorker(
     let started = 0
     for (const r of (rows as NewLeadRow[]) || []) {
         const src = Array.isArray(r.source) ? r.source[0] : r.source
-        const ttl = src?.ttl_minutes ?? 60
+        const ttl = src?.ttl_minutes ?? 120
         const dueAt = new Date(now.getTime() + ttl * 60_000).toISOString()
         const { data: claimed } = await sb
             .from('meta_leads')

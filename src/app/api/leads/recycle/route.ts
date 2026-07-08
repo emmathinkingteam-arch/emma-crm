@@ -81,7 +81,7 @@ export async function POST(req: Request) {
             release_mode: 'all_at_once',
             drip_count: 1,
             drip_interval_minutes: 30,
-            lead_ttl_minutes: 60,
+            lead_ttl_minutes: 120,
             penalty_lkr: 30,
             total_count: 1,
             status: 'active',

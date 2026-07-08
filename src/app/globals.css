@@ -40,14 +40,19 @@ html {
   scroll-behavior: smooth;
   -webkit-text-size-adjust: 100%;
   /* Fit the device screen exactly — nothing may push the page wider and
-     force the phone to shrink/zoom the whole layout. */
+     force the phone to shrink/zoom the whole layout.
+     Use `clip`, NOT `hidden`: `overflow-x: hidden` forces overflow-y to
+     compute to `auto`, which turns <html> into its own scroll container and
+     breaks normal page scrolling (pages in plain min-h-screen flow — e.g. the
+     feedback detail — silently stop scrolling on mobile). `clip` still hides
+     horizontal overflow but never creates a scroll container. */
   width: 100%;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 body {
   width: 100%;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 body {

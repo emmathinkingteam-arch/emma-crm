@@ -37,13 +37,18 @@ type LeadRow = Lead & {
     penalty_lkr?: number
 }
 
-const STATUS_OPTIONS = [
-    { value: 'all', label: 'All statuses' },
-    { value: 'queued', label: 'Queued' },
+// Top-level grouping tabs. "Active" = still being worked (queued/active),
+// "Completed" = finished (responded/skipped).
+const TABS = [
+    { value: 'all', label: 'All' },
     { value: 'active', label: 'Active' },
-    { value: 'responded', label: 'Responded' },
-    { value: 'skipped', label: 'Skipped' },
+    { value: 'completed', label: 'Completed' },
 ] as const
+
+type TabValue = (typeof TABS)[number]['value']
+
+const ACTIVE_STATUSES = new Set(['queued', 'active'])
+const COMPLETED_STATUSES = new Set(['responded', 'skipped'])
 
 function fmt(iso: string | null): string {
     if (!iso) return '—'
@@ -68,7 +73,7 @@ export default function LeadHistoryPage() {
 
     // filters
     const [workerId, setWorkerId] = useState('all')
-    const [status, setStatus] = useState<string>('all')
+    const [tab, setTab] = useState<TabValue>('all')
     const [from, setFrom] = useState('')
     const [to, setTo] = useState('')
     const [search, setSearch] = useState('')
@@ -102,7 +107,6 @@ export default function LeadHistoryPage() {
             .limit(1000)
 
         if (workerId !== 'all') q = q.eq('assigned_to', workerId)
-        if (status !== 'all') q = q.eq('status', status)
         if (from) q = q.gte('created_at', new Date(from).toISOString())
         if (to) {
             const end = new Date(to)
@@ -118,7 +122,7 @@ export default function LeadHistoryPage() {
         }))
         setLeads(rows)
         setLoading(false)
-    }, [workerId, status, from, to])
+    }, [workerId, from, to])
 
     useEffect(() => {
         load()
@@ -126,8 +130,20 @@ export default function LeadHistoryPage() {
 
     const filtered = useMemo(() => {
         const s = search.trim().replace(/\D/g, '')
-        if (!s) return leads
-        return leads.filter((l) => l.phone.includes(s))
+        return leads.filter((l) => {
+            if (tab === 'active' && !ACTIVE_STATUSES.has(l.status)) return false
+            if (tab === 'completed' && !COMPLETED_STATUSES.has(l.status)) return false
+            if (s && !l.phone.includes(s)) return false
+            return true
+        })
+    }, [leads, search, tab])
+
+    // "Where is it?" — when searching, summarise which agents hold the matches.
+    const searchHits = useMemo(() => {
+        const s = search.trim().replace(/\D/g, '')
+        if (!s) return null
+        const matches = leads.filter((l) => l.phone.includes(s))
+        return { count: matches.length, matches }
     }, [leads, search])
 
     const stats = useMemo(() => {
@@ -160,6 +176,61 @@ export default function LeadHistoryPage() {
                 />
             </div>
 
+            {/* Active / Completed / All tabs */}
+            <div className="bg-white rounded-2xl border border-gray-100 p-1.5 inline-flex gap-1 shadow-sm">
+                {TABS.map((t) => (
+                    <button
+                        key={t.value}
+                        onClick={() => setTab(t.value)}
+                        className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${tab === t.value
+                            ? 'bg-pink-600 text-white shadow-sm'
+                            : 'text-gray-400 hover:text-gray-700 hover:bg-gray-50'
+                            }`}
+                    >
+                        {t.label}
+                    </button>
+                ))}
+            </div>
+
+            {/* Search result — where is this number? */}
+            {searchHits && (
+                <div
+                    className={`rounded-2xl border px-4 py-3 text-xs font-semibold ${searchHits.count > 0
+                        ? 'bg-pink-50/60 border-pink-100 text-gray-700'
+                        : 'bg-gray-50 border-gray-100 text-gray-400'
+                        }`}
+                >
+                    {searchHits.count === 0 ? (
+                        <>No number matching “{search.trim()}” has been distributed.</>
+                    ) : (
+                        <div className="space-y-1">
+                            <p className="font-bold text-pink-700">
+                                Found {searchHits.count} match{searchHits.count === 1 ? '' : 'es'}:
+                            </p>
+                            {searchHits.matches.slice(0, 6).map((l) => {
+                                const meta = LEAD_STATUS_META[l.status]
+                                return (
+                                    <p key={l.id} className="flex items-center gap-2">
+                                        <span className="font-mono font-bold text-gray-700">
+                                            {l.phone_display || l.phone}
+                                        </span>
+                                        <span className="text-gray-400">→</span>
+                                        <span className="font-bold text-gray-700">{l.worker_name}</span>
+                                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${meta.cls}`}>
+                                            {meta.label}
+                                        </span>
+                                        <span className="text-[10px] text-gray-400">{fmt(l.created_at)}</span>
+                                    </p>
+                                )
+                            })}
+                            {searchHits.count > 6 && (
+                                <p className="text-gray-400">+{searchHits.count - 6} more below</p>
+                            )}
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* Filter bar */}
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-wrap items-center gap-2">
                 <FilterIcon size={14} className="text-gray-300" />
@@ -172,17 +243,6 @@ export default function LeadHistoryPage() {
                     {workers.map((w) => (
                         <option key={w.id} value={w.id}>
                             {w.full_name} · {ROLE_LABELS[w.role] ?? w.role}
-                        </option>
-                    ))}
-                </select>
-                <select
-                    value={status}
-                    onChange={(e) => setStatus(e.target.value)}
-                    className="bg-gray-50 border border-gray-100 rounded-lg px-2.5 py-1.5 text-xs font-semibold outline-none focus:border-pink-300"
-                >
-                    {STATUS_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                            {o.label}
                         </option>
                     ))}
                 </select>

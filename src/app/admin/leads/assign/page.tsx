@@ -10,8 +10,11 @@ import { ROLE_LABELS } from '@/lib/utils'
 import {
     parseBulkLeads,
     DEFAULT_METER,
+    LEAD_STATUS_META,
+    leadCountdown,
     type ReleaseMode,
     type LeadBatch,
+    type Lead,
 } from '@/lib/leads'
 import {
     Loader2,
@@ -26,6 +29,9 @@ import {
     Timer,
     Pause,
     Play,
+    ChevronDown,
+    Trash2,
+    Phone as PhoneIcon,
 } from 'lucide-react'
 
 interface WorkerRow {
@@ -57,6 +63,12 @@ export default function AssignLeadsPage() {
     const [loading, setLoading] = useState(true)
     const [assigning, setAssigning] = useState(false)
     const [done, setDone] = useState<string | null>(null)
+
+    // expanded batch detail state
+    const [openBatch, setOpenBatch] = useState<string | null>(null)
+    const [batchLeads, setBatchLeads] = useState<Lead[]>([])
+    const [leadsLoading, setLeadsLoading] = useState(false)
+    const [busyId, setBusyId] = useState<string | null>(null)
 
     // form state
     const [workerId, setWorkerId] = useState('')
@@ -192,6 +204,72 @@ export default function AssignLeadsPage() {
     async function toggleBatch(b: BatchWithProgress) {
         const next = b.status === 'paused' ? 'active' : 'paused'
         await supabase.from('lead_batches').update({ status: next }).eq('id', b.id)
+        load()
+    }
+
+    // Open / close a batch and lazy-load its numbers.
+    const openBatchDetail = useCallback(async (batchId: string) => {
+        if (openBatch === batchId) {
+            setOpenBatch(null)
+            setBatchLeads([])
+            return
+        }
+        setOpenBatch(batchId)
+        setBatchLeads([])
+        setLeadsLoading(true)
+        const { data } = await supabase
+            .from('leads')
+            .select('*')
+            .eq('batch_id', batchId)
+            .order('position', { ascending: true })
+        setBatchLeads((data as Lead[]) || [])
+        setLeadsLoading(false)
+    }, [openBatch])
+
+    // Delete one number out of the open batch.
+    async function deleteLead(leadId: string) {
+        if (!confirm('Delete this number from the batch? This cannot be undone.')) return
+        setBusyId(leadId)
+        const res = await fetch('/api/leads/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ leadId }),
+        })
+        const json = await res.json()
+        setBusyId(null)
+        if (!json.ok) {
+            alert('Failed to delete: ' + (json.error || 'unknown'))
+            return
+        }
+        setBatchLeads((prev) => prev.filter((l) => l.id !== leadId))
+        load()
+    }
+
+    // Delete an entire batch (all its numbers + the batch row).
+    async function deleteBatch(b: BatchWithProgress) {
+        const total = (b.queued || 0) + (b.active || 0) + (b.responded || 0)
+        if (
+            !confirm(
+                `Delete this entire batch for ${b.worker_name} (${total} number${total === 1 ? '' : 's'})? This cannot be undone.`
+            )
+        )
+            return
+        setBusyId(b.id)
+        const res = await fetch('/api/leads/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ batchId: b.id }),
+        })
+        const json = await res.json()
+        setBusyId(null)
+        if (!json.ok) {
+            alert('Failed to delete batch: ' + (json.error || 'unknown'))
+            return
+        }
+        if (openBatch === b.id) {
+            setOpenBatch(null)
+            setBatchLeads([])
+        }
         load()
     }
 
@@ -412,26 +490,39 @@ export default function AssignLeadsPage() {
                         {batches.map((b) => {
                             const total = (b.queued || 0) + (b.active || 0) + (b.responded || 0)
                             const pct = total ? Math.round(((b.responded || 0) / total) * 100) : 0
+                            const isOpen = openBatch === b.id
                             return (
                                 <div
                                     key={b.id}
-                                    className="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm"
+                                    className={`bg-white border rounded-2xl p-4 shadow-sm transition-colors ${isOpen ? 'border-pink-200' : 'border-gray-100'
+                                        }`}
                                 >
+                                    {/* Clickable header — tap to open the numbers inside */}
                                     <div className="flex items-center justify-between mb-2">
-                                        <div className="min-w-0">
-                                            <p className="text-sm font-bold text-gray-800 truncate">
-                                                {b.worker_name}
-                                                {b.note && (
-                                                    <span className="text-gray-400 font-medium"> · {b.note}</span>
-                                                )}
-                                            </p>
-                                            <p className="text-[10px] text-gray-400 font-semibold">
-                                                {b.release_mode === 'drip'
-                                                    ? `${b.drip_count} / ${b.drip_interval_minutes}min`
-                                                    : 'All at once'}
-                                                {' · '}due {b.lead_ttl_minutes}min · LKR {b.penalty_lkr}/hr
-                                            </p>
-                                        </div>
+                                        <button
+                                            onClick={() => openBatchDetail(b.id)}
+                                            className="flex items-center gap-2 min-w-0 text-left flex-1"
+                                        >
+                                            <ChevronDown
+                                                size={15}
+                                                className={`text-gray-300 flex-shrink-0 transition-transform ${isOpen ? 'rotate-180 text-pink-500' : ''
+                                                    }`}
+                                            />
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-bold text-gray-800 truncate">
+                                                    {b.worker_name}
+                                                    {b.note && (
+                                                        <span className="text-gray-400 font-medium"> · {b.note}</span>
+                                                    )}
+                                                </p>
+                                                <p className="text-[10px] text-gray-400 font-semibold">
+                                                    {b.release_mode === 'drip'
+                                                        ? `${b.drip_count} / ${b.drip_interval_minutes}min`
+                                                        : 'All at once'}
+                                                    {' · '}due {b.lead_ttl_minutes}min · LKR {b.penalty_lkr}/hr
+                                                </p>
+                                            </div>
+                                        </button>
                                         <div className="flex items-center gap-2 flex-shrink-0 ml-2">
                                             <span
                                                 className={`text-[8px] font-bold px-2 py-1 rounded-full ${b.status === 'active'
@@ -456,6 +547,18 @@ export default function AssignLeadsPage() {
                                                     )}
                                                 </button>
                                             )}
+                                            <button
+                                                onClick={() => deleteBatch(b)}
+                                                disabled={busyId === b.id}
+                                                className="text-gray-300 hover:text-red-500 disabled:opacity-40"
+                                                title="Delete whole batch"
+                                            >
+                                                {busyId === b.id ? (
+                                                    <Loader2 size={14} className="animate-spin" />
+                                                ) : (
+                                                    <Trash2 size={14} />
+                                                )}
+                                            </button>
                                         </div>
                                     </div>
 
@@ -472,12 +575,147 @@ export default function AssignLeadsPage() {
                                         <span className="text-green-600">{b.responded} responded</span>
                                         <span className="ml-auto text-gray-300">of {total}</span>
                                     </div>
+
+                                    {/* Expanded detail — the actual numbers in this batch */}
+                                    {isOpen && (
+                                        <BatchDetail
+                                            leads={batchLeads}
+                                            loading={leadsLoading}
+                                            busyId={busyId}
+                                            onDeleteLead={deleteLead}
+                                        />
+                                    )}
                                 </div>
                             )
                         })}
                     </div>
                 )}
             </div>
+        </div>
+    )
+}
+
+// ── Expanded batch detail: the numbers inside, split by progress ────────────
+
+function fmtShort(iso: string | null): string {
+    if (!iso) return '—'
+    try {
+        return new Date(iso).toLocaleString('en-GB', {
+            timeZone: 'Asia/Colombo',
+            day: '2-digit',
+            month: 'short',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+        })
+    } catch {
+        return iso
+    }
+}
+
+function BatchDetail({
+    leads,
+    loading,
+    busyId,
+    onDeleteLead,
+}: {
+    leads: Lead[]
+    loading: boolean
+    busyId: string | null
+    onDeleteLead: (id: string) => void
+}) {
+    const [tab, setTab] = useState<'progress' | 'completed'>('progress')
+
+    if (loading) {
+        return (
+            <div className="mt-3 pt-3 border-t border-gray-100 flex justify-center py-4">
+                <Loader2 size={18} className="animate-spin text-pink-500" />
+            </div>
+        )
+    }
+
+    const inProgress = leads.filter((l) => l.status === 'queued' || l.status === 'active')
+    const completed = leads.filter((l) => l.status === 'responded' || l.status === 'skipped')
+    const shown = tab === 'progress' ? inProgress : completed
+
+    return (
+        <div className="mt-3 pt-3 border-t border-gray-100">
+            {/* In-progress / Completed sub-tabs */}
+            <div className="flex gap-1 mb-2">
+                <button
+                    onClick={() => setTab('progress')}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-colors ${tab === 'progress'
+                        ? 'bg-pink-100 text-pink-700'
+                        : 'bg-gray-50 text-gray-400 hover:text-gray-600'
+                        }`}
+                >
+                    In progress · {inProgress.length}
+                </button>
+                <button
+                    onClick={() => setTab('completed')}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-colors ${tab === 'completed'
+                        ? 'bg-green-100 text-green-700'
+                        : 'bg-gray-50 text-gray-400 hover:text-gray-600'
+                        }`}
+                >
+                    Completed · {completed.length}
+                </button>
+            </div>
+
+            {shown.length === 0 ? (
+                <p className="text-[10px] font-semibold text-gray-300 py-3 text-center">
+                    {tab === 'progress' ? 'Nothing in progress' : 'Nothing completed yet'}
+                </p>
+            ) : (
+                <div className="space-y-1 max-h-72 overflow-y-auto">
+                    {shown.map((l) => {
+                        const meta = LEAD_STATUS_META[l.status]
+                        const cd = l.status === 'active' ? leadCountdown(l.due_at) : null
+                        return (
+                            <div
+                                key={l.id}
+                                className="flex items-center gap-2 bg-gray-50 rounded-lg px-2.5 py-1.5"
+                            >
+                                <PhoneIcon size={11} className="text-gray-300 flex-shrink-0" />
+                                <span className="text-[11px] font-mono font-bold text-gray-700 flex-shrink-0">
+                                    {l.phone_display || l.phone}
+                                </span>
+                                <span
+                                    className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full ${meta.cls}`}
+                                >
+                                    {meta.label}
+                                </span>
+                                {cd && (
+                                    <span
+                                        className={`text-[9px] font-bold ${cd.overdue ? 'text-red-500' : 'text-gray-400'
+                                            }`}
+                                    >
+                                        {cd.label}
+                                    </span>
+                                )}
+                                {l.status === 'responded' && (
+                                    <span className="text-[9px] font-semibold text-green-600 truncate">
+                                        {fmtShort(l.responded_at)}
+                                        {l.response_type ? ` · ${l.response_type}` : ''}
+                                    </span>
+                                )}
+                                <button
+                                    onClick={() => onDeleteLead(l.id)}
+                                    disabled={busyId === l.id}
+                                    className="ml-auto text-gray-300 hover:text-red-500 disabled:opacity-40 flex-shrink-0"
+                                    title="Delete this number"
+                                >
+                                    {busyId === l.id ? (
+                                        <Loader2 size={12} className="animate-spin" />
+                                    ) : (
+                                        <Trash2 size={12} />
+                                    )}
+                                </button>
+                            </div>
+                        )
+                    })}
+                </div>
+            )}
         </div>
     )
 }

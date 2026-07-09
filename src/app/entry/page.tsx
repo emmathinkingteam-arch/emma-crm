@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
-import { Loader2, ChevronRight, ClipboardCheck, ClipboardPaste } from 'lucide-react'
+import { Loader2, ChevronRight, ClipboardCheck, ClipboardPaste, History } from 'lucide-react'
 import { normalisePhone } from '@/lib/utils'
 import { COUNTRY_CODES, detectCountryFromPaste, formatPhoneDisplay } from '@/lib/country-codes'
 
@@ -20,6 +20,17 @@ export default function EntryPage() {
   const [pasted, setPasted] = useState(false)
   const [detectedFlag, setDetectedFlag] = useState('')
   const [pasteError, setPasteError] = useState('')
+
+  // Old-order (legacy) lookup — is this an existing pre-CRM customer?
+  interface OldOrder {
+    customer_name: string | null
+    package_name: string | null
+    invoice_date: string | null
+    total_amount: number | null
+    invoice_number: string | null
+  }
+  const [oldOrder, setOldOrder] = useState<{ count: number; orders: OldOrder[] } | null>(null)
+  const [checkingOld, setCheckingOld] = useState(false)
 
   useEffect(() => {
     // CRM agents and the hybrid Team Leader may add entries; everyone else out.
@@ -39,6 +50,39 @@ export default function EntryPage() {
       .gte('created_at', today)
     setDailyCount(count ?? 0)
   }
+
+  // Live "old order" check — debounced so we don't hit the server on every
+  // keystroke. Runs whenever the number (or its country) changes.
+  useEffect(() => {
+    if (phone.length < 7) {
+      setOldOrder(null)
+      setCheckingOld(false)
+      return
+    }
+    const fullPhone = normalisePhone(phone, countryDial)
+    let ignore = false
+    setCheckingOld(true)
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch('/api/legacy/lookup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: fullPhone }),
+        })
+        const json = await res.json()
+        if (ignore) return
+        setOldOrder(json.ok && json.match ? { count: json.count, orders: json.orders } : null)
+      } catch {
+        if (!ignore) setOldOrder(null)
+      } finally {
+        if (!ignore) setCheckingOld(false)
+      }
+    }, 450)
+    return () => {
+      ignore = true
+      clearTimeout(t)
+    }
+  }, [phone, countryDial])
 
   const handleSmartPaste = async () => {
     setPasteError('')
@@ -126,6 +170,14 @@ export default function EntryPage() {
     ? formatPhoneDisplay(normalisePhone(phone, countryDial))
     : ''
 
+  const fmtLegacyDate = (d: string) => {
+    try {
+      return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+    } catch {
+      return d
+    }
+  }
+
   return (
     <div className="h-screen flex flex-col bg-white overflow-hidden">
       <TopNav />
@@ -203,6 +255,46 @@ export default function EntryPage() {
             <div className="bg-green-50 border border-green-200 rounded-2xl px-4 py-2.5 mb-3 flex items-center justify-between">
               <span className="text-[10px] font-bold text-green-600 uppercase tracking-wide">Will save as</span>
               <span className="text-sm font-bold text-green-700 tracking-wide">{fullPhonePreview}</span>
+            </div>
+          )}
+
+          {/* Checking the old records */}
+          {checkingOld && !oldOrder && phone.length >= 7 && (
+            <div className="flex items-center gap-2 px-4 py-2 mb-3 text-[11px] font-semibold text-gray-400">
+              <Loader2 size={13} className="animate-spin" /> Checking old records…
+            </div>
+          )}
+
+          {/* OLD ORDER — this number bought before (pre-CRM legacy customer) */}
+          {oldOrder && (
+            <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl px-4 py-3 mb-3">
+              <div className="flex items-center gap-2 mb-1.5">
+                <History size={15} className="text-amber-600 flex-shrink-0" />
+                <span className="text-xs font-extrabold text-amber-700 uppercase tracking-wide">
+                  Old order · existing customer
+                </span>
+              </div>
+              <p className="text-[11px] font-semibold text-amber-800 mb-1.5">
+                This number is in our old records
+                {oldOrder.count > 1 ? ` (${oldOrder.count} invoices)` : ''} — they bought before:
+              </p>
+              <div className="space-y-1">
+                {oldOrder.orders.slice(0, 3).map((o, i) => (
+                  <div
+                    key={i}
+                    className="bg-white/70 border border-amber-200 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-amber-900"
+                  >
+                    <span className="font-bold">{o.customer_name || 'Unknown'}</span>
+                    {o.package_name ? ` · ${o.package_name}` : ''}
+                    {o.invoice_date ? ` · ${fmtLegacyDate(o.invoice_date)}` : ''}
+                  </div>
+                ))}
+                {oldOrder.count > 3 && (
+                  <p className="text-[10px] font-semibold text-amber-600">
+                    +{oldOrder.count - 3} more in Search History
+                  </p>
+                )}
+              </div>
             </div>
           )}
 

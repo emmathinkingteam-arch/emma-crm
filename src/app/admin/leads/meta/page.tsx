@@ -78,7 +78,9 @@ export default function MetaAdsPage() {
                 .from('users')
                 .select('id, full_name')
                 .eq('is_active', true)
-                .eq('role', 'crm_agent')
+                // CRM agents + Team Leaders (the Team Leader is a hybrid role
+                // with a full CRM workspace, so she can be in the ratio too).
+                .in('role', ['crm_agent', 'team_leader'])
                 .order('full_name'),
             supabase.from('meta_lead_sources').select('*').order('created_at', { ascending: false }),
             supabase.from('meta_leads').select('*').order('created_at', { ascending: false }).limit(150),

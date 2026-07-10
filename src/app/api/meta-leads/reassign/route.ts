@@ -64,13 +64,14 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: false, error: 'same_agent' }, { status: 400 })
     }
 
-    // The destination must be an active CRM agent.
+    // The destination must be an active CRM agent (or a Team Leader, who has a
+    // full CRM workspace and can carry leads too).
     const { data: agent } = await sb
         .from('users')
         .select('id, full_name')
         .eq('id', toUserId)
         .eq('is_active', true)
-        .eq('role', 'crm_agent')
+        .in('role', ['crm_agent', 'team_leader'])
         .maybeSingle()
     if (!agent) {
         return NextResponse.json({ ok: false, error: 'invalid_agent' }, { status: 400 })

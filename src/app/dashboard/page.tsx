@@ -7,7 +7,7 @@ import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import { Order, OrderStep } from '@/types'
-import { Bell, ChevronRight, ChevronLeft, CheckCircle2, Sparkles, Clock, Phone, TrendingUp, Users, UserPlus, Briefcase } from 'lucide-react'
+import { Bell, ChevronRight, ChevronLeft, CheckCircle2, Sparkles, Clock, Phone, TrendingUp, Users, UserPlus, Briefcase, ArrowLeftRight, Loader2, X } from 'lucide-react'
 import CrmLeaderboard from '@/components/shared/CrmLeaderboard'
 import MissingSlipsCard from '@/components/shared/MissingSlipsCard'
 import LowInterestAlert from '@/components/shared/LowInterestAlert'
@@ -34,7 +34,7 @@ function isCurrentMonth(d: Date) {
 
 export default function DashboardPage() {
   const router = useRouter()
-  const { user, role } = useAuthStore()
+  const { user, role, inspecting } = useAuthStore()
   const [loading, setLoading] = useState(true)
   const [newWorks, setNewWorks] = useState<StepWithOrder[]>([])
   const [inProgress, setInProgress] = useState<StepWithOrder[]>([])
@@ -53,6 +53,12 @@ export default function DashboardPage() {
   const [metaLeads, setMetaLeads] = useState<MetaLead[]>([])
   // CRM agents shown as photo circles under the hero (me first, then the rest)
   const [team, setTeam] = useState<{ id: string; full_name: string; profile_photo_url?: string; is_supervisor?: boolean }[]>([])
+  // ── Inspector: bulk-move "Leads to call" → another agent's CRM ──────────────
+  // Only active while an admin/team-leader is inspecting this worker's dashboard.
+  const [moveTargets, setMoveTargets] = useState<{ id: string; full_name: string }[]>([])
+  const [movePicking, setMovePicking] = useState(false)
+  const [moveBusy, setMoveBusy] = useState(false)
+  const [moveMsg, setMoveMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
 
   useEffect(() => {
     if (!user) { router.replace('/auth/login'); return }
@@ -78,6 +84,8 @@ export default function DashboardPage() {
     fetchSecondPosts()
     refreshLeads()
     fetchTeam()
+    // Only the inspector needs the list of agents to hand this bulk over to.
+    if (inspecting) fetchMoveTargets()
 
     // Poll every 60s: ask the server to release any due leads (respecting
     // punch-in + the meter), then re-read what's now active.
@@ -145,6 +153,50 @@ export default function DashboardPage() {
       list.sort((a, b) => (a.id === user?.id ? -1 : b.id === user?.id ? 1 : 0))
       setTeam(list)
     }
+  }
+
+  // Inspector move-picker: active CRM agents + Team Leaders, minus the worker
+  // currently being inspected (you can't move a bulk onto its own owner).
+  const fetchMoveTargets = async () => {
+    if (!user) return
+    const { data } = await supabase
+      .from('users')
+      .select('id, full_name')
+      .in('role', ['crm_agent', 'team_leader'])
+      .eq('is_active', true)
+      .neq('id', user.id)
+      .order('full_name')
+    setMoveTargets((data as { id: string; full_name: string }[]) || [])
+  }
+
+  // Push the whole "Leads to call" bulk (every active lead) onto another agent.
+  const moveAllLeads = async (toUserId: string) => {
+    if (!user || !toUserId) return
+    setMoveBusy(true)
+    setMoveMsg(null)
+    try {
+      const res = await fetch('/api/leads/reassign-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fromUserId: user.id, toUserId }),
+      })
+      const j = await res.json()
+      if (j.ok) {
+        setMoveMsg({ kind: 'ok', text: `Moved ${j.moved} lead${j.moved === 1 ? '' : 's'} to ${j.agentName}.` })
+        setMovePicking(false)
+        refreshLeads()
+      } else {
+        const reasons: Record<string, string> = {
+          invalid_agent: 'Pick an active CRM agent.',
+          same_agent: 'That is the same agent.',
+          forbidden: 'You are not allowed to move leads.',
+        }
+        setMoveMsg({ kind: 'err', text: reasons[j.error] || j.error || 'Move failed.' })
+      }
+    } catch {
+      setMoveMsg({ kind: 'err', text: 'Network error moving leads.' })
+    }
+    setMoveBusy(false)
   }
 
   const fetchSecondPosts = async () => {
@@ -411,8 +463,49 @@ export default function DashboardPage() {
             <div className="px-4 py-2.5 bg-pink-600 flex items-center gap-2">
               <Phone size={14} className="text-white" />
               <p className="text-xs font-bold text-white uppercase tracking-wide">Leads to call</p>
-              <span className="ml-auto text-[9px] font-bold bg-white/25 text-white px-2 py-0.5 rounded-full">{leads.length}</span>
+              <span className="text-[9px] font-bold bg-white/25 text-white px-2 py-0.5 rounded-full">{leads.length}</span>
+              {/* Inspector only: hand this whole bulk to another agent's CRM. */}
+              {inspecting && !movePicking && (
+                <button
+                  onClick={() => { setMovePicking(true); setMoveMsg(null) }}
+                  className="ml-auto flex items-center gap-1 text-[9px] font-bold bg-white/25 hover:bg-white/40 text-white px-2 py-1 rounded-full active:scale-95 transition-all"
+                >
+                  <ArrowLeftRight size={10} /> Move all
+                </button>
+              )}
             </div>
+
+            {/* Inspector move-picker: choose the agent to receive the whole bulk. */}
+            {inspecting && movePicking && (
+              <div className="px-3 py-2.5 bg-pink-50 border-b border-pink-100 flex items-center gap-2">
+                <span className="text-[10px] font-bold text-pink-700 flex-shrink-0">Push {leads.length} → </span>
+                <select
+                  defaultValue=""
+                  disabled={moveBusy}
+                  onChange={(e) => { if (e.target.value) moveAllLeads(e.target.value) }}
+                  className="flex-1 bg-white border border-pink-200 rounded-lg px-2 py-1.5 text-xs font-semibold outline-none focus:border-pink-400 disabled:opacity-50"
+                >
+                  <option value="" disabled>Pick an agent…</option>
+                  {moveTargets.map((a) => (
+                    <option key={a.id} value={a.id}>{a.full_name}</option>
+                  ))}
+                </select>
+                {moveBusy ? (
+                  <Loader2 size={15} className="animate-spin text-pink-600 flex-shrink-0" />
+                ) : (
+                  <button onClick={() => setMovePicking(false)} className="text-pink-300 hover:text-pink-500 p-1 flex-shrink-0">
+                    <X size={15} />
+                  </button>
+                )}
+              </div>
+            )}
+
+            {inspecting && moveMsg && (
+              <div className={`px-3 py-2 text-[11px] font-bold border-b ${moveMsg.kind === 'ok' ? 'bg-green-50 border-green-100 text-green-700' : 'bg-red-50 border-red-100 text-red-600'}`}>
+                {moveMsg.text}
+              </div>
+            )}
+
             <div className="p-2 space-y-2">
               {leads.map((lead) => {
                 const cd = leadCountdown(lead.due_at)

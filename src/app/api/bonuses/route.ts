@@ -40,9 +40,7 @@ export async function GET(req: NextRequest) {
     supabase.from('users').select('id, full_name, role').eq('is_active', true).not('role', 'in', '("admin","ceo")'),
     supabase.from('packages').select('id, name'),
     supabase.from('orders')
-      .select('created_by, package_id, amount_paid')
-      .eq('is_fake', false)
-      .not('invoice_number', 'is', null)
+      .select('created_by, package_id, amount_paid, is_fake, invoice_number, created_at')
       .not('created_by', 'is', null)
       .gte('created_at', start)
       .lt('created_at', end),
@@ -58,15 +56,29 @@ export async function GET(req: NextRequest) {
   const targetOf: Record<string, number> = {}
   for (const t of targetsRes.data || []) targetOf[t.user_id] = Number(t.target_amount || 0)
 
-  // Tally qualifying orders per agent (exclude Free Post)
+  // Tally qualifying orders per agent + keep a per-agent order breakdown for drill-down
   const tally: Record<string, { sales: number; revenue: number; platinum: number }> = {}
+  const detail: Record<string, any[]> = {}
   for (const o of ordersRes.data || []) {
-    if (freePostIds.has(o.package_id)) continue
+    const isFree = freePostIds.has(o.package_id)
+    const counted = !o.is_fake && !!o.invoice_number && !isFree
+    const reason = o.is_fake ? 'fake' : !o.invoice_number ? 'no invoice' : isFree ? 'free post' : ''
+    ;(detail[o.created_by] ||= []).push({
+      package: pkgName[o.package_id] || '—',
+      amount: Number(o.amount_paid || 0),
+      invoice_number: o.invoice_number,
+      is_platinum: platinumIds.has(o.package_id),
+      created_at: o.created_at,
+      counted,
+      reason,
+    })
+    if (!counted) continue
     const t = (tally[o.created_by] ||= { sales: 0, revenue: 0, platinum: 0 })
     t.sales += 1
     t.revenue += Number(o.amount_paid || 0)
     if (platinumIds.has(o.package_id)) t.platinum += 1
   }
+  for (const arr of Object.values(detail)) arr.sort((a, b) => a.created_at.localeCompare(b.created_at))
 
   // Top agent = single highest revenue (must be > 0)
   let topAgentId = ''
@@ -99,6 +111,7 @@ export async function GET(req: NextRequest) {
       top_agent_bonus,
       platinum_bonus,
       quality_bonus: QUALITY_BONUS, // eligible by default; admin toggles off
+      orders: detail[w.id] || [],
     }
   })
   // Sort: highest earners first, then by sales

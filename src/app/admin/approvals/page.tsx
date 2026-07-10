@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Fragment } from 'react'
 import { supabase } from '@/lib/supabase'
 import { fmtDate, fmtTime } from '@/lib/utils'
 import { CheckCircle2, XCircle, Sparkles, Wallet, FileText, ChevronDown, ChevronUp, Loader2, RefreshCw, CalendarCheck, ChevronLeft, ChevronRight, Trophy, Save } from 'lucide-react'
@@ -574,6 +574,7 @@ function BonusReview() {
 
   const [month, setMonth] = useState(currentMonth)
   const [rows, setRows] = useState<any[]>([])
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({}) // user_id → drill-down open
   const [qualityOff, setQualityOff] = useState<Record<string, boolean>>({}) // user_id → had complaint/refund
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -657,9 +658,14 @@ function BonusReview() {
                   {rows.map(r => {
                     const total = totalOf(r)
                     const hitTarget = r.target != null && r.target > 0 && r.revenue >= r.target
+                    const isOpen = !!expanded[r.user_id]
+                    const excluded = (r.orders || []).filter((o: any) => !o.counted)
                     return (
-                      <tr key={r.user_id} className={total > 0 ? 'hover:bg-amber-50/20' : 'opacity-60 hover:bg-gray-50/40'}>
+                      <Fragment key={r.user_id}>
+                      <tr onClick={() => setExpanded(p => ({ ...p, [r.user_id]: !p[r.user_id] }))}
+                        className={`cursor-pointer ${total > 0 ? 'hover:bg-amber-50/20' : 'opacity-60 hover:bg-gray-50/40'} ${isOpen ? 'bg-amber-50/30' : ''}`}>
                         <td className="px-3 py-2.5 font-bold text-gray-800 whitespace-nowrap">
+                          {isOpen ? <ChevronUp size={12} className="inline mr-1 text-gray-400" /> : <ChevronDown size={12} className="inline mr-1 text-gray-400" />}
                           {r.full_name}
                           {r.is_top_agent && <Trophy size={11} className="inline ml-1 text-amber-500" />}
                         </td>
@@ -673,7 +679,7 @@ function BonusReview() {
                         <td className="px-3 py-2.5">{r.revenue_target_bonus ? <span className="text-gray-700 font-semibold">{fmt(r.revenue_target_bonus)}</span> : <span className="text-gray-300">—</span>}</td>
                         <td className="px-3 py-2.5">{r.top_agent_bonus ? <span className="text-gray-700 font-semibold">{fmt(r.top_agent_bonus)}</span> : <span className="text-gray-300">—</span>}</td>
                         <td className="px-3 py-2.5">{r.platinum_bonus ? <span className="text-gray-700 font-semibold">{fmt(r.platinum_bonus)}</span> : <span className="text-gray-300">—</span>}</td>
-                        <td className="px-3 py-2.5">
+                        <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
                           <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Untick if this agent had a complaint or refund">
                             <input type="checkbox" checked={!qualityOff[r.user_id]}
                               onChange={e => setQualityOff(p => ({ ...p, [r.user_id]: !e.target.checked }))}
@@ -685,6 +691,52 @@ function BonusReview() {
                           <span className={`font-extrabold ${total > 0 ? 'text-amber-600' : 'text-gray-300'}`}>{total > 0 ? fmt(total) : '—'}</span>
                         </td>
                       </tr>
+
+                      {/* Drill-down: the orders behind the numbers */}
+                      {isOpen && (
+                        <tr className="bg-gray-50/60">
+                          <td colSpan={10} className="px-4 py-3">
+                            {(r.orders || []).length === 0
+                              ? <p className="text-[11px] text-gray-400">No orders this month.</p>
+                              : (
+                                <div className="rounded-xl border border-gray-100 bg-white overflow-hidden">
+                                  <table className="w-full text-[11px]">
+                                    <thead className="bg-gray-50 border-b border-gray-100">
+                                      <tr>{['#', 'Date', 'Package', 'Amount', 'Invoice', 'Counted?'].map(h =>
+                                        <th key={h} className="px-3 py-2 text-left text-[9px] font-bold text-gray-400 uppercase tracking-wide">{h}</th>)}</tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-50">
+                                      {r.orders.map((o: any, i: number) => (
+                                        <tr key={i} className={o.counted ? '' : 'bg-red-50/30'}>
+                                          <td className="px-3 py-1.5 text-gray-400">{o.counted ? (r.orders.slice(0, i + 1).filter((x: any) => x.counted).length) : '—'}</td>
+                                          <td className="px-3 py-1.5 text-gray-500 whitespace-nowrap">{new Date(o.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</td>
+                                          <td className="px-3 py-1.5 font-semibold text-gray-700">
+                                            {o.package}
+                                            {o.is_platinum && <span className="ml-1.5 text-[8px] font-bold bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded-full">PLAT</span>}
+                                          </td>
+                                          <td className="px-3 py-1.5 text-gray-600">{fmt(o.amount)}</td>
+                                          <td className="px-3 py-1.5 text-gray-400">{o.invoice_number || '—'}</td>
+                                          <td className="px-3 py-1.5">
+                                            {o.counted
+                                              ? <span className="text-[9px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">Counted</span>
+                                              : <span className="text-[9px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">Skipped · {o.reason}</span>}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                  <div className="px-3 py-2 bg-gray-50 border-t border-gray-100 text-[10px] font-bold text-gray-500 flex gap-4">
+                                    <span>{r.sales} counted sale{r.sales === 1 ? '' : 's'}</span>
+                                    {excluded.length > 0 && <span className="text-red-400">{excluded.length} skipped</span>}
+                                    <span className="text-gray-400">Revenue LKR {fmt(r.revenue)}</span>
+                                    <span className="text-purple-500">{r.platinum} Platinum</span>
+                                  </div>
+                                </div>
+                              )}
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
                     )
                   })}
                 </tbody>

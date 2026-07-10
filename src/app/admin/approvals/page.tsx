@@ -15,7 +15,7 @@ function SalarySheetEditor({ sheet, adminId, onDone }: { sheet: any; adminId: st
   const set = (k: string, v: string) => setS((p: any) => ({ ...p, [k]: v === '' ? 0 : Number(v) }))
   const setStr = (k: string, v: string) => setS((p: any) => ({ ...p, [k]: v }))
 
-  const gross = ['basic_salary', 'attendance_allowance', 'performance_allowance', 'data_allowance',
+  const gross = ['basic_salary',
     'ot_payment', 'sales_commission', 'monthly_bonus', 'special_allowance_01', 'special_allowance_02']
     .reduce((acc, k) => acc + Number(s[k] || 0), 0)
 
@@ -93,9 +93,6 @@ function SalarySheetEditor({ sheet, adminId, onDone }: { sheet: any; adminId: st
               <div className="space-y-1.5">
                 {[
                   { label: 'Basic Salary', key: 'basic_salary' },
-                  { label: 'Attendance Allowance', key: 'attendance_allowance' },
-                  { label: 'Performance Allowance', key: 'performance_allowance' },
-                  { label: 'Data Allowance', key: 'data_allowance' },
                   { label: 'OT Hours', key: 'ot_hours' },
                   { label: 'OT Payment', key: 'ot_payment' },
                   { label: 'Sales Commission', key: 'sales_commission' },
@@ -466,7 +463,7 @@ export default function ApprovalsPage() {
               : approvedSheets.map(s => {
                 const [yr, mo] = s.month_year.split('-')
                 const ml = new Date(Number(yr), Number(mo) - 1, 1).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
-                const gross = ['basic_salary', 'attendance_allowance', 'performance_allowance', 'data_allowance', 'ot_payment', 'sales_commission', 'monthly_bonus', 'special_allowance_01', 'special_allowance_02'].reduce((a, k) => a + Number(s[k] || 0), 0)
+                const gross = ['basic_salary', 'ot_payment', 'sales_commission', 'monthly_bonus', 'special_allowance_01', 'special_allowance_02'].reduce((a, k) => a + Number(s[k] || 0), 0)
                 const ded = ['epf_employee', 'no_pay_deduction', 'salary_advance', 'stamp_duty', 'meeting_absence', 'advance_deduction', 'late_deductions'].reduce((a, k) => a + Number(s[k] || 0), 0)
                 return (
                   <div key={s.id}>

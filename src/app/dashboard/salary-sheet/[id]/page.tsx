@@ -38,9 +38,6 @@ export default function SalarySheetViewPage() {
   )
 
   const gross = Number(sheet.basic_salary || 0)
-    + Number(sheet.attendance_allowance || 0)
-    + Number(sheet.performance_allowance || 0)
-    + Number(sheet.data_allowance || 0)
     + Number(sheet.ot_payment || 0)
     + Number(sheet.sales_commission || 0)
     + Number(sheet.special_allowance_01 || 0)
@@ -118,9 +115,6 @@ export default function SalarySheetViewPage() {
         <PayTable title="EARNINGS">
           <PayRow label="BASIC SALARY" value={sheet.basic_salary} bold />
           <PayRow label="" value={null} />
-          <PayRow label="ATTENDANCE ALLOWANCE" value={sheet.attendance_allowance} />
-          <PayRow label="PERFORMANCE ALLOWANCE" value={sheet.performance_allowance} />
-          <PayRow label="DATA ALLOWANCE" value={sheet.data_allowance} />
           <PayRow label="OT HOURS" value={sheet.ot_hours} plain />
           <PayRow label="OT PAYMENT" value={sheet.ot_payment} />
           <PayRow label="SALES COMMISSION" value={sheet.sales_commission} />

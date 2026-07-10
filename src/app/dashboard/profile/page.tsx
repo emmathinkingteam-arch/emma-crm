@@ -235,7 +235,7 @@ export default function ProfilePage() {
     if (!user) return
     const { data } = await supabase
       .from('salary_sheets')
-      .select('id, month_year, sales_commission, basic_salary, attendance_allowance, performance_allowance, data_allowance, ot_payment, special_allowance_01, special_allowance_02, epf_employee, no_pay_deduction, salary_advance, stamp_duty, meeting_absence, advance_deduction, late_deductions, approved_at')
+      .select('id, month_year, sales_commission, basic_salary, ot_payment, special_allowance_01, special_allowance_02, epf_employee, no_pay_deduction, salary_advance, stamp_duty, meeting_absence, advance_deduction, late_deductions, approved_at')
       .eq('user_id', user.id)
       .eq('status', 'approved')
       .order('month_year', { ascending: false })
@@ -482,7 +482,7 @@ export default function ProfilePage() {
               {approvedSheets.map(s => {
                 const [yr, mo] = s.month_year.split('-')
                 const label = new Date(Number(yr), Number(mo) - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
-                const gross = ['basic_salary','attendance_allowance','performance_allowance','data_allowance','ot_payment','sales_commission','special_allowance_01','special_allowance_02'].reduce((a, k) => a + Number(s[k] || 0), 0)
+                const gross = ['basic_salary','ot_payment','sales_commission','special_allowance_01','special_allowance_02'].reduce((a, k) => a + Number(s[k] || 0), 0)
                 const ded = ['epf_employee','no_pay_deduction','salary_advance','stamp_duty','meeting_absence','advance_deduction','late_deductions'].reduce((a, k) => a + Number(s[k] || 0), 0)
                 const net = gross - ded
                 return (

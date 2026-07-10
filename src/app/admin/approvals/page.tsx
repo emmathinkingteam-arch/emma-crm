@@ -2,9 +2,9 @@
 import { useEffect, useState, Fragment } from 'react'
 import { supabase } from '@/lib/supabase'
 import { fmtDate, fmtTime } from '@/lib/utils'
-import { CheckCircle2, XCircle, Sparkles, Wallet, FileText, ChevronDown, ChevronUp, Loader2, RefreshCw, CalendarCheck, ChevronLeft, ChevronRight, Trophy, Save } from 'lucide-react'
+import { CheckCircle2, XCircle, Sparkles, Wallet, FileText, ChevronDown, ChevronUp, Loader2, RefreshCw, CalendarCheck, ChevronLeft, ChevronRight, Trophy, Save, Tag } from 'lucide-react'
 
-type Tab = 'leave' | 'ot' | 'advance' | 'salary' | 'second_post' | 'attendance' | 'bonus'
+type Tab = 'leave' | 'ot' | 'advance' | 'salary' | 'second_post' | 'attendance' | 'bonus' | 'discount'
 
 // ── Salary sheet editor ────────────────────────────────────────────────────
 function SalarySheetEditor({ sheet, adminId, onDone }: { sheet: any; adminId: string; onDone: () => void }) {
@@ -309,6 +309,7 @@ export default function ApprovalsPage() {
     { key: 'second_post', label: '2nd Posts', count: pendingSP.length, color: 'indigo' },
     { key: 'attendance', label: 'Attendance', color: 'pink' },
     { key: 'bonus', label: 'Bonuses', color: 'amber' },
+    { key: 'discount', label: 'Discount top-ups', color: 'amber' },
   ]
 
   return (
@@ -328,6 +329,7 @@ export default function ApprovalsPage() {
               {t.key === 'second_post' && <Sparkles size={12} />}
               {t.key === 'attendance' && <CalendarCheck size={12} />}
               {t.key === 'bonus' && <Trophy size={12} />}
+              {t.key === 'discount' && <Tag size={12} />}
               {t.label}
               {(t.count ?? 0) > 0 && (
                 <span className={`px-1.5 py-0.5 rounded-full text-[8px] font-bold ${active ? 'bg-white/30' : 'bg-red-100 text-red-500'}`}>{t.count}</span>
@@ -559,6 +561,9 @@ export default function ApprovalsPage() {
 
         {/* ── Bonuses ── */}
         {tab === 'bonus' && <BonusReview />}
+
+        {/* ── Discount top-ups ── */}
+        {tab === 'discount' && <DiscountTopupReview />}
       </div>
     </div>
   )
@@ -746,6 +751,193 @@ function BonusReview() {
         5 Platinum incl. Princess Platinum (6.5k) are auto-calculated from invoiced non-fake orders (Free Posts excluded).
         Quality bonus (3k) defaults on — untick agents who had a complaint or refund. <b>Apply</b> writes the total into each
         agent&apos;s salary sheet for the month, where you approve it as usual.
+      </p>
+    </div>
+  )
+}
+
+// ── Discount top-ups — give agents back commission lost to discounts ────────
+function DiscountTopupReview() {
+  const now = new Date()
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+
+  const [month, setMonth] = useState(currentMonth)
+  const [rows, setRows] = useState<any[]>([])
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const [rateOverride, setRateOverride] = useState<Record<string, string>>({}) // order_id → rate%
+  const [override, setOverride] = useState<Record<string, 'on' | 'off'>>({}) // order_id → manual include/drop
+  const [cap, setCap] = useState(25) // discounts above this % are treated as installments → auto-dropped
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [savedMsg, setSavedMsg] = useState('')
+
+  const load = async (my: string) => {
+    setLoading(true); setSavedMsg(''); setRateOverride({}); setOverride({})
+    const res = await fetch(`/api/discount-topups?month_year=${my}`).then(r => r.json())
+    setRows(res.rows || [])
+    setLoading(false)
+  }
+  useEffect(() => { load(month) }, [month])
+
+  const shiftMonth = (delta: number) => {
+    const [y, m] = month.split('-').map(Number)
+    const d = new Date(y, m - 1 + delta, 1)
+    setMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+  }
+  const [y, m] = month.split('-').map(Number)
+  const monthLabel = new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+  const isCurrentMonth = month === currentMonth
+
+  const autoOn = (o: any) => o.counted && o.discount_pct <= cap
+  const isOn = (o: any) => override[o.order_id] === 'on' ? o.counted : override[o.order_id] === 'off' ? false : autoOn(o)
+  const effRate = (o: any) => rateOverride[o.order_id] !== undefined ? Number(rateOverride[o.order_id] || 0) : o.rate
+  const effShortage = (o: any) => isOn(o) ? o.discount * effRate(o) / 100 : 0
+  const agentTotal = (r: any) => (r.orders || []).reduce((s: number, o: any) => s + effShortage(o), 0)
+  const agentDiscCount = (r: any) => (r.orders || []).filter(isOn).length
+  const agentDiscTotal = (r: any) => (r.orders || []).filter(isOn).reduce((s: number, o: any) => s + o.discount, 0)
+
+  const grandTotal = rows.reduce((s, r) => s + agentTotal(r), 0)
+  const eligibleCount = rows.filter(r => agentTotal(r) > 0).length
+  const fmt = (n: number) => Math.round(Number(n || 0)).toLocaleString()
+
+  const apply = async () => {
+    setSaving(true); setSavedMsg('')
+    const payload = rows.map(r => ({ user_id: r.user_id, amount: Math.round(agentTotal(r)) }))
+    const res = await fetch('/api/discount-topups', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ month_year: month, rows: payload }),
+    }).then(r => r.json())
+    setSaving(false)
+    setSavedMsg(res.ok ? `Saved to ${monthLabel} salary sheets (Special Allowance 02) ✓` : (res.error || 'Failed to save'))
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Controls */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-full px-1 py-1">
+          <button onClick={() => shiftMonth(-1)} className="w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-white transition"><ChevronLeft size={14} /></button>
+          <span className="text-xs font-bold text-gray-700 px-2 min-w-[110px] text-center">
+            {monthLabel}
+            {isCurrentMonth && <span className="ml-1.5 text-[8px] font-bold text-pink-500 bg-pink-50 px-1.5 py-0.5 rounded-full">LIVE</span>}
+          </span>
+          <button onClick={() => !isCurrentMonth && shiftMonth(1)} disabled={isCurrentMonth} className="w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-white disabled:opacity-30 transition"><ChevronRight size={14} /></button>
+        </div>
+        <label className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-full px-3 py-1.5" title="Discounts above this % are treated as installments / part-payments and auto-dropped. Re-tick an order to include it anyway.">
+          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Max disc%</span>
+          <input type="number" value={cap} onChange={e => setCap(Number(e.target.value) || 0)}
+            className="w-12 bg-white border border-gray-200 rounded-lg px-1.5 py-0.5 text-xs font-bold text-gray-700 text-right outline-none focus:border-amber-400" />
+        </label>
+        <div className="flex-1" />
+        {savedMsg && <span className="text-[11px] font-bold text-green-600">{savedMsg}</span>}
+        <button onClick={apply} disabled={saving || loading || rows.length === 0}
+          className="flex items-center gap-1.5 bg-amber-500 text-white rounded-xl px-4 py-2 text-xs font-bold shadow-sm hover:bg-amber-600 disabled:opacity-40">
+          {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+          Apply to salary sheets
+        </button>
+      </div>
+
+      {/* Totals banner */}
+      <div className="bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3 flex items-center justify-between">
+        <span className="text-xs font-bold text-amber-700">{eligibleCount} agent{eligibleCount === 1 ? '' : 's'} owed a top-up</span>
+        <span className="text-sm font-extrabold text-amber-700">Total to pay back: LKR {fmt(grandTotal)}</span>
+      </div>
+
+      {loading
+        ? <div className="p-10 text-center"><Loader2 size={20} className="animate-spin text-amber-500 mx-auto" /></div>
+        : rows.length === 0
+          ? <Empty text="No discounted orders this month" />
+          : (
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 border-b border-gray-100">
+                  <tr>{['Agent', 'Discounted orders', 'Total discount', 'Top-up owed'].map(h =>
+                    <th key={h} className="px-3 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>)}</tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {rows.map(r => {
+                    const total = agentTotal(r)
+                    const isOpen = !!expanded[r.user_id]
+                    return (
+                      <Fragment key={r.user_id}>
+                      <tr onClick={() => setExpanded(p => ({ ...p, [r.user_id]: !p[r.user_id] }))}
+                        className={`cursor-pointer ${total > 0 ? 'hover:bg-amber-50/20' : 'opacity-60 hover:bg-gray-50/40'} ${isOpen ? 'bg-amber-50/30' : ''}`}>
+                        <td className="px-3 py-2.5 font-bold text-gray-800 whitespace-nowrap">
+                          {isOpen ? <ChevronUp size={12} className="inline mr-1 text-gray-400" /> : <ChevronDown size={12} className="inline mr-1 text-gray-400" />}
+                          {r.full_name}
+                        </td>
+                        <td className="px-3 py-2.5 text-gray-600 font-semibold">{agentDiscCount(r)}</td>
+                        <td className="px-3 py-2.5 text-gray-500">LKR {fmt(agentDiscTotal(r))}</td>
+                        <td className="px-3 py-2.5">
+                          <span className={`font-extrabold ${total > 0 ? 'text-amber-600' : 'text-gray-300'}`}>{total > 0 ? `LKR ${fmt(total)}` : '—'}</span>
+                        </td>
+                      </tr>
+
+                      {/* Drill-down: the discounted orders behind the number */}
+                      {isOpen && (
+                        <tr className="bg-gray-50/60">
+                          <td colSpan={4} className="px-4 py-3">
+                            <div className="rounded-xl border border-gray-100 bg-white overflow-hidden overflow-x-auto">
+                              <table className="w-full text-[11px]">
+                                <thead className="bg-gray-50 border-b border-gray-100">
+                                  <tr>{['Date', 'Package', 'Full price', 'Collected', 'Discount', 'Disc %', 'Rate %', 'Top-up', 'Use?'].map(h =>
+                                    <th key={h} className="px-3 py-2 text-left text-[9px] font-bold text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>)}</tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-50">
+                                  {r.orders.map((o: any) => {
+                                    const on = isOn(o)
+                                    return (
+                                    <tr key={o.order_id} className={on ? '' : 'bg-red-50/20 text-gray-400'}>
+                                      <td className="px-3 py-1.5 text-gray-500 whitespace-nowrap">{new Date(o.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</td>
+                                      <td className="px-3 py-1.5 font-semibold text-gray-700 whitespace-nowrap">{o.package}</td>
+                                      <td className="px-3 py-1.5 text-gray-500">{fmt(o.price)}</td>
+                                      <td className="px-3 py-1.5 text-gray-500">{fmt(o.collected)}</td>
+                                      <td className="px-3 py-1.5 text-gray-700 font-semibold">{fmt(o.discount)}</td>
+                                      <td className="px-3 py-1.5">
+                                        <span className={`font-semibold ${o.discount_pct > cap ? 'text-red-500' : 'text-gray-600'}`}>{Math.round(o.discount_pct)}%</span>
+                                      </td>
+                                      <td className="px-3 py-1.5" onClick={e => e.stopPropagation()}>
+                                        {o.counted
+                                          ? <input type="number" value={effRate(o)}
+                                              onChange={e => setRateOverride(p => ({ ...p, [o.order_id]: e.target.value }))}
+                                              className="w-14 px-1.5 py-1 border border-gray-200 rounded-lg text-[11px] font-semibold text-right outline-none focus:border-amber-400 bg-white disabled:bg-gray-50" disabled={!on} />
+                                          : <span className="text-gray-300">{o.rate || '—'}</span>}
+                                      </td>
+                                      <td className="px-3 py-1.5 font-bold text-amber-600">{on ? fmt(effShortage(o)) : '—'}</td>
+                                      <td className="px-3 py-1.5" onClick={e => e.stopPropagation()}>
+                                        {o.counted
+                                          ? <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Untick if this is really an installment / part-payment, not a discount">
+                                              <input type="checkbox" checked={on}
+                                                onChange={e => setOverride(p => ({ ...p, [o.order_id]: e.target.checked ? 'on' : 'off' }))}
+                                                className="accent-amber-500" />
+                                              {!on && <span className="text-[9px] font-bold text-gray-400">{o.discount_pct > cap ? 'over cap' : 'skipped'}</span>}
+                                            </label>
+                                          : <span className="text-[9px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">{o.reason}</span>}
+                                      </td>
+                                    </tr>
+                                    )
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+      <p className="text-[10px] text-gray-400 leading-relaxed px-1">
+        Top-up = (full price − amount collected) × the agent&apos;s commission rate for that package (from Commission Rates).
+        Amount collected includes both installments, so a part-paid order isn&apos;t mistaken for a discount; orders with a
+        2nd installment still pending are skipped automatically. Only invoiced, non-fake, non-Free-Post orders count.
+        Discounts above <b>Max disc%</b> (red) are treated as installments / part-payments and auto-dropped (“over cap”) —
+        re-tick “Use?” to include one anyway, untick to drop a genuine one, or edit a rate inline.
+        <b>Apply</b> writes each agent&apos;s total into their salary sheet as Special Allowance 02, where you approve it as usual.
       </p>
     </div>
   )

@@ -2,9 +2,9 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { fmtDate, fmtTime } from '@/lib/utils'
-import { CheckCircle2, XCircle, Sparkles, Wallet, FileText, ChevronDown, ChevronUp, Loader2, RefreshCw } from 'lucide-react'
+import { CheckCircle2, XCircle, Sparkles, Wallet, FileText, ChevronDown, ChevronUp, Loader2, RefreshCw, CalendarCheck, ChevronLeft, ChevronRight } from 'lucide-react'
 
-type Tab = 'leave' | 'ot' | 'advance' | 'salary' | 'second_post'
+type Tab = 'leave' | 'ot' | 'advance' | 'salary' | 'second_post' | 'attendance'
 
 // ── Salary sheet editor ────────────────────────────────────────────────────
 function SalarySheetEditor({ sheet, adminId, onDone }: { sheet: any; adminId: string; onDone: () => void }) {
@@ -195,6 +195,7 @@ function SalarySheetEditor({ sheet, adminId, onDone }: { sheet: any; adminId: st
 export default function ApprovalsPage() {
   const [tab, setTab] = useState<Tab>('leave')
   const [leaves, setLeaves] = useState<any[]>([])
+  const [leaveHistory, setLeaveHistory] = useState<any[]>([])
   const [ots, setOts] = useState<any[]>([])
   const [advances, setAdvances] = useState<any[]>([])
   const [advanceHistory, setAdvanceHistory] = useState<any[]>([])
@@ -214,6 +215,7 @@ export default function ApprovalsPage() {
 
   const fetchAll = () => {
     supabase.from('leave_requests').select('*, user:users!user_id(full_name)').eq('status', 'pending').order('created_at').then(({ data }) => { if (data) setLeaves(data) })
+    supabase.from('leave_requests').select('*, user:users!user_id(full_name), reviewer:users!reviewed_by(full_name)').neq('status', 'pending').order('reviewed_at', { ascending: false }).limit(50).then(({ data }) => { if (data) setLeaveHistory(data) })
     supabase.from('ot_requests').select('*, user:users!user_id(full_name)').eq('status', 'pending').order('created_at').then(({ data }) => { if (data) setOts(data) })
     supabase.from('advance_requests').select('*, user:users!user_id(full_name)').eq('status', 'pending').order('requested_at').then(({ data }) => { if (data) setAdvances(data) })
     supabase.from('advance_requests').select('*, user:users!user_id(full_name)').neq('status', 'pending').order('requested_at', { ascending: false }).limit(30).then(({ data }) => { if (data) setAdvanceHistory(data) })
@@ -307,6 +309,7 @@ export default function ApprovalsPage() {
     { key: 'advance', label: 'Advance', count: advances.length, color: 'amber' },
     { key: 'salary', label: 'Salary Sheets', count: pendingSheets.length, color: 'pink' },
     { key: 'second_post', label: '2nd Posts', count: pendingSP.length, color: 'indigo' },
+    { key: 'attendance', label: 'Attendance', color: 'pink' },
   ]
 
   return (
@@ -324,6 +327,7 @@ export default function ApprovalsPage() {
               {t.key === 'advance' && <Wallet size={12} />}
               {t.key === 'salary' && <FileText size={12} />}
               {t.key === 'second_post' && <Sparkles size={12} />}
+              {t.key === 'attendance' && <CalendarCheck size={12} />}
               {t.label}
               {(t.count ?? 0) > 0 && (
                 <span className={`px-1.5 py-0.5 rounded-full text-[8px] font-bold ${active ? 'bg-white/30' : 'bg-red-100 text-red-500'}`}>{t.count}</span>
@@ -336,19 +340,44 @@ export default function ApprovalsPage() {
       <div className="space-y-3">
 
         {/* ── Leave ── */}
-        {tab === 'leave' && (leaves.length === 0
-          ? <Empty text="No pending leave requests" />
-          : leaves.map(l => (
-            <div key={l.id} className="bg-white border border-gray-100 rounded-2xl px-5 py-4 shadow-sm">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm font-bold text-gray-800">{l.user?.full_name} — {l.leave_type} leave</p>
-                  <p className="text-xs text-gray-400 font-medium mt-0.5">{fmtDate(l.leave_date)} · "{l.reason}"</p>
+        {tab === 'leave' && (
+          <>
+            <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Pending ({leaves.length})</p>
+            {leaves.length === 0
+              ? <Empty text="No pending leave requests" />
+              : leaves.map(l => (
+                <div key={l.id} className="bg-white border border-gray-100 rounded-2xl px-5 py-4 shadow-sm">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="text-sm font-bold text-gray-800">{l.user?.full_name} — {l.leave_type} leave</p>
+                      <p className="text-xs text-gray-400 font-medium mt-0.5">{fmtDate(l.leave_date)} · "{l.reason}"</p>
+                    </div>
+                    <ApproveReject onApprove={() => approveLeave(l.id)} onReject={() => rejectLeave(l.id)} />
+                  </div>
                 </div>
-                <ApproveReject onApprove={() => approveLeave(l.id)} onReject={() => rejectLeave(l.id)} />
-              </div>
-            </div>
-          ))
+              ))
+            }
+
+            <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wide pt-4">History ({leaveHistory.length})</p>
+            {leaveHistory.length === 0
+              ? <Empty text="No history yet" />
+              : leaveHistory.map(l => (
+                <div key={l.id} className="bg-white border border-gray-100 rounded-2xl px-5 py-3 shadow-sm flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-bold text-gray-700">{l.user?.full_name} — {l.leave_type} leave</p>
+                    <p className="text-[10px] text-gray-400 font-medium mt-0.5">
+                      {fmtDate(l.leave_date)} · "{l.reason}"
+                      {l.reviewer?.full_name ? ` · by ${l.reviewer.full_name}` : ''}
+                      {l.reviewed_at ? ` · ${fmtDate(l.reviewed_at)}` : ''}
+                    </p>
+                  </div>
+                  <span className={`text-[9px] font-bold px-2.5 py-1 rounded-full flex-shrink-0 ${l.status === 'approved' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500'}`}>
+                    {l.status === 'approved' ? 'Approved' : 'Rejected'}
+                  </span>
+                </div>
+              ))
+            }
+          </>
         )}
 
         {/* ── OT ── */}
@@ -524,6 +553,165 @@ export default function ApprovalsPage() {
             }
           </>
         )}
+
+        {/* ── Attendance ── */}
+        {tab === 'attendance' && <AttendanceReview />}
+      </div>
+    </div>
+  )
+}
+
+// ── Attendance review (read-only monthly sheet per worker) ──────────────────
+function AttendanceReview() {
+  const now = new Date()
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+
+  const [workers, setWorkers] = useState<any[]>([])
+  const [workerId, setWorkerId] = useState('')
+  const [month, setMonth] = useState(currentMonth)
+  const [rows, setRows] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    supabase.from('users').select('id, full_name').neq('role', 'admin').eq('is_active', true).order('full_name')
+      .then(({ data }) => {
+        if (data) {
+          setWorkers(data)
+          if (data.length) setWorkerId(data[0].id)
+        }
+      })
+  }, [])
+
+  useEffect(() => {
+    if (!workerId) return
+    setLoading(true)
+    const start = `${month}-01`
+    const [y, m] = month.split('-').map(Number)
+    const daysInMonth = new Date(y, m, 0).getDate()
+    const end = `${month}-${String(daysInMonth).padStart(2, '0')}`
+    supabase.from('attendance').select('date, punch_in, punch_out, hours_worked, status, note')
+      .eq('user_id', workerId).gte('date', start).lte('date', end).order('date')
+      .then(({ data }) => { setRows(data || []); setLoading(false) })
+  }, [workerId, month])
+
+  const shiftMonth = (delta: number) => {
+    const [y, m] = month.split('-').map(Number)
+    const d = new Date(y, m - 1 + delta, 1)
+    setMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+  }
+
+  const [y, m] = month.split('-').map(Number)
+  const monthLabel = new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+  const isCurrentMonth = month === currentMonth
+  const canGoNext = !isCurrentMonth
+
+  const attMap: Record<string, any> = {}
+  for (const r of rows) attMap[r.date] = r
+
+  const daysInMonth = new Date(y, m, 0).getDate()
+  const today = now.toISOString().split('T')[0]
+  const allDays: string[] = []
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = `${month}-${String(d).padStart(2, '0')}`
+    if (!isCurrentMonth || ds <= today) allDays.push(ds)
+  }
+
+  let totalHours = 0, present = 0, late = 0, absent = 0, leave = 0
+  for (const d of allDays) {
+    const a = attMap[d]
+    if (!a) continue
+    totalHours += Number(a.hours_worked || 0)
+    if (a.status === 'present') present++
+    else if (a.status === 'late') { late++; present++ }
+    else if (a.status === 'absent') absent++
+    else if (a.status === 'approved_leave') leave++
+  }
+
+  const fmtT = (ts: string | null) => ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'
+  const dayName = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short' })
+  const statusColor = (s: string) => ({ present: 'bg-green-50 text-green-600', late: 'bg-amber-50 text-amber-600', absent: 'bg-red-50 text-red-500', approved_leave: 'bg-gray-100 text-gray-500', half_day: 'bg-purple-50 text-purple-600' } as Record<string, string>)[s] || 'bg-gray-100 text-gray-400'
+  const statusLabel = (s: string) => ({ present: 'Present', late: 'Late', absent: 'Absent', approved_leave: 'Leave', half_day: 'Half Day' } as Record<string, string>)[s] || s
+
+  const worker = workers.find(w => w.id === workerId)
+
+  return (
+    <div className="space-y-4">
+      {/* Controls */}
+      <div className="flex flex-wrap items-center gap-3">
+        <select value={workerId} onChange={e => setWorkerId(e.target.value)}
+          className="text-xs font-semibold border border-gray-200 rounded-xl px-3 py-2 bg-white outline-none focus:border-pink-400">
+          {workers.map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
+        </select>
+        <div className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-full px-1 py-1">
+          <button onClick={() => shiftMonth(-1)}
+            className="w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-white transition">
+            <ChevronLeft size={14} />
+          </button>
+          <span className="text-xs font-bold text-gray-700 px-2 min-w-[110px] text-center">
+            {monthLabel}
+            {isCurrentMonth && <span className="ml-1.5 text-[8px] font-bold text-pink-500 bg-pink-50 px-1.5 py-0.5 rounded-full">LIVE</span>}
+          </span>
+          <button onClick={() => canGoNext && shiftMonth(1)} disabled={!canGoNext}
+            className="w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-white disabled:opacity-30 transition">
+            <ChevronRight size={14} />
+          </button>
+        </div>
+      </div>
+
+      {/* Summary boxes */}
+      <div className="grid grid-cols-5 gap-2">
+        {[
+          { label: 'Present', value: present, color: 'text-green-600' },
+          { label: 'Late', value: late, color: 'text-amber-600' },
+          { label: 'Absent', value: absent, color: 'text-red-500' },
+          { label: 'Leave', value: leave, color: 'text-gray-500' },
+          { label: 'Hours', value: `${totalHours.toFixed(1)}h`, color: 'text-pink-600' },
+        ].map(b => (
+          <div key={b.label} className="bg-white border border-gray-100 rounded-2xl px-3 py-3 text-center shadow-sm">
+            <div className={`text-lg font-extrabold ${b.color}`}>{b.value}</div>
+            <div className="text-[8px] font-bold text-gray-400 uppercase tracking-wide mt-0.5">{b.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Sheet */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="px-5 py-3 border-b border-gray-100">
+          <p className="text-sm font-bold text-gray-800">{worker?.full_name || '—'}</p>
+          <p className="text-[10px] text-gray-400 font-medium">{monthLabel} · attendance sheet</p>
+        </div>
+        {loading
+          ? <div className="p-10 text-center"><Loader2 size={20} className="animate-spin text-pink-500 mx-auto" /></div>
+          : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 border-b border-gray-100">
+                  <tr>{['Date', 'Day', 'Status', 'In', 'Out', 'Hours', 'Note'].map(h =>
+                    <th key={h} className="px-3 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wide">{h}</th>)}</tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {allDays.map(d => {
+                    const a = attMap[d]
+                    const weekend = [0, 6].includes(new Date(d + 'T00:00:00').getDay())
+                    return (
+                      <tr key={d} className={weekend ? 'bg-amber-50/30' : 'hover:bg-pink-50/20'}>
+                        <td className="px-3 py-2.5 text-gray-500">{new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</td>
+                        <td className={`px-3 py-2.5 text-[9px] ${weekend ? 'text-amber-600 font-bold' : 'text-gray-400'}`}>{dayName(d)}</td>
+                        <td className="px-3 py-2.5">{a?.status
+                          ? <span className={`text-[8px] font-bold px-2 py-1 rounded-full ${statusColor(a.status)}`}>{statusLabel(a.status)}</span>
+                          : <span className="text-gray-300">—</span>}</td>
+                        <td className="px-3 py-2.5 font-medium">{fmtT(a?.punch_in || null)}</td>
+                        <td className="px-3 py-2.5 text-gray-500">{fmtT(a?.punch_out || null)}</td>
+                        <td className="px-3 py-2.5 text-gray-500">{a?.hours_worked ? `${Number(a.hours_worked).toFixed(1)}h` : '—'}</td>
+                        <td className="px-3 py-2.5 text-gray-400 text-[10px]">{a?.note || ''}</td>
+                      </tr>
+                    )
+                  })}
+                  {allDays.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-xs text-gray-300 font-medium">No days in range</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          )}
       </div>
     </div>
   )

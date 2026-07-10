@@ -1197,6 +1197,11 @@ export default function CustomerDetailPage() {
   // Uploaded posts (designer artwork on Backblaze) shown in history with an
   // auto-filled "Boosting" panel. Back office / admin only.
   const isBoss = role === 'back_office' || role === 'admin'
+  // Team Leader is a hybrid role: she runs a full CRM workspace just like a
+  // crm_agent, so every CRM-agent feature on this page (name edit, priority,
+  // create order, log interaction) is opened to her too. Her DB writes are
+  // already covered by the *_admin_all RLS policies.
+  const isCrmWorker = role === 'crm_agent' || role === 'team_leader'
   const orderPosts = isBoss ? allOrders.filter(o => (o as any).post_image_url) : []
   // Orders that never got a post image — back office builds these with AI (the
   // active order already has its own Post Builder button above, so skip it).
@@ -1284,7 +1289,7 @@ export default function CustomerDetailPage() {
                       <p className={`text-sm font-bold truncate ${customer.is_priority ? 'text-red-700' : 'text-gray-800'}`}>
                         {customer.name || formatPhoneDisplay(customer.phone)}
                       </p>
-                      {(role === 'crm_agent' || role === 'admin') && (
+                      {(isCrmWorker || role === 'admin') && (
                         <button
                           onClick={() => { setNameDraft(customer.name || ''); setEditingName(true) }}
                           title="Edit customer name"
@@ -1301,7 +1306,7 @@ export default function CustomerDetailPage() {
                 )}
               </div>
             </div>
-            {role === 'crm_agent' && !editingName && (
+            {isCrmWorker && !editingName && (
               <button onClick={async () => {
                 const newPriority = !customer.is_priority
                 await supabase.from('customers').update({ is_priority: newPriority }).eq('id', customer.id)
@@ -1352,7 +1357,7 @@ export default function CustomerDetailPage() {
           )}
 
           {/* ── 2ND INSTALLMENT PAYMENT PANEL ─────────────── */}
-          {isInstallmentPending && (role === 'back_office' || role === 'admin' || role === 'crm_agent') && (
+          {isInstallmentPending && (role === 'back_office' || role === 'admin' || isCrmWorker) && (
             <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl overflow-hidden shadow-sm">
               <div className="px-4 py-3 bg-amber-500 flex items-center gap-2.5">
                 <CreditCard size={18} className="text-white" />
@@ -1417,7 +1422,7 @@ export default function CustomerDetailPage() {
           )}
 
           {/* ── 2ND INSTALLMENT INVOICE (after 2nd payment confirmed) ─── */}
-          {!isInstallmentPending && activeOrder && (activeOrder as any)?.installment_1_amount && (activeOrder as any)?.installment_2_amount && (role === 'crm_agent' || role === 'back_office' || role === 'admin') && (
+          {!isInstallmentPending && activeOrder && (activeOrder as any)?.installment_1_amount && (activeOrder as any)?.installment_2_amount && (isCrmWorker || role === 'back_office' || role === 'admin') && (
             <div className="bg-green-50 border-2 border-green-200 rounded-2xl p-4 space-y-3">
               <div className="flex items-center gap-2">
                 <CheckCircle size={16} className="text-green-600" />
@@ -2272,7 +2277,7 @@ export default function CustomerDetailPage() {
           )}
 
           {/* ── UPGRADE PACKAGE (existing order) ──────────── */}
-          {role === 'crm_agent' && activeOrder && !isUpgrade && !showOrderForm && (
+          {isCrmWorker && activeOrder && !isUpgrade && !showOrderForm && (
             <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center justify-between gap-3">
               <div>
                 <p className="text-xs font-bold text-amber-700">Customer has an active package</p>
@@ -2288,7 +2293,7 @@ export default function CustomerDetailPage() {
           )}
 
           {/* ── CREATE ORDER ──────────────────────────────── */}
-          {role === 'crm_agent' && (!activeOrder || isUpgrade) && (
+          {isCrmWorker && (!activeOrder || isUpgrade) && (
             <div>
               {!showOrderForm ? (
                 <div className="space-y-2">
@@ -2675,7 +2680,7 @@ export default function CustomerDetailPage() {
               ))}
             </div>
 
-            {role === 'crm_agent' && (
+            {isCrmWorker && (
               <LogInteractionForm customerId={id} userId={user!.id} onSaved={fetchAll} phone={customer?.phone || ''} customerName={customer?.name || null} />
             )}
 

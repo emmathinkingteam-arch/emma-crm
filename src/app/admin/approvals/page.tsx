@@ -2,9 +2,9 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { fmtDate, fmtTime } from '@/lib/utils'
-import { CheckCircle2, XCircle, Sparkles, Wallet, FileText, ChevronDown, ChevronUp, Loader2, RefreshCw, CalendarCheck, ChevronLeft, ChevronRight } from 'lucide-react'
+import { CheckCircle2, XCircle, Sparkles, Wallet, FileText, ChevronDown, ChevronUp, Loader2, RefreshCw, CalendarCheck, ChevronLeft, ChevronRight, Trophy, Save } from 'lucide-react'
 
-type Tab = 'leave' | 'ot' | 'advance' | 'salary' | 'second_post' | 'attendance'
+type Tab = 'leave' | 'ot' | 'advance' | 'salary' | 'second_post' | 'attendance' | 'bonus'
 
 // ── Salary sheet editor ────────────────────────────────────────────────────
 function SalarySheetEditor({ sheet, adminId, onDone }: { sheet: any; adminId: string; onDone: () => void }) {
@@ -16,7 +16,7 @@ function SalarySheetEditor({ sheet, adminId, onDone }: { sheet: any; adminId: st
   const setStr = (k: string, v: string) => setS((p: any) => ({ ...p, [k]: v }))
 
   const gross = ['basic_salary', 'attendance_allowance', 'performance_allowance', 'data_allowance',
-    'ot_payment', 'sales_commission', 'special_allowance_01', 'special_allowance_02']
+    'ot_payment', 'sales_commission', 'monthly_bonus', 'special_allowance_01', 'special_allowance_02']
     .reduce((acc, k) => acc + Number(s[k] || 0), 0)
 
   const totalDed = ['epf_employee', 'no_pay_deduction', 'salary_advance', 'stamp_duty',
@@ -99,6 +99,7 @@ function SalarySheetEditor({ sheet, adminId, onDone }: { sheet: any; adminId: st
                   { label: 'OT Hours', key: 'ot_hours' },
                   { label: 'OT Payment', key: 'ot_payment' },
                   { label: 'Sales Commission', key: 'sales_commission' },
+                  { label: 'Monthly Bonus', key: 'monthly_bonus' },
                   { label: 'Special Allowance 01', key: 'special_allowance_01' },
                   { label: 'Special Allowance 02', key: 'special_allowance_02' },
                 ].map(f => (
@@ -310,6 +311,7 @@ export default function ApprovalsPage() {
     { key: 'salary', label: 'Salary Sheets', count: pendingSheets.length, color: 'pink' },
     { key: 'second_post', label: '2nd Posts', count: pendingSP.length, color: 'indigo' },
     { key: 'attendance', label: 'Attendance', color: 'pink' },
+    { key: 'bonus', label: 'Bonuses', color: 'amber' },
   ]
 
   return (
@@ -328,6 +330,7 @@ export default function ApprovalsPage() {
               {t.key === 'salary' && <FileText size={12} />}
               {t.key === 'second_post' && <Sparkles size={12} />}
               {t.key === 'attendance' && <CalendarCheck size={12} />}
+              {t.key === 'bonus' && <Trophy size={12} />}
               {t.label}
               {(t.count ?? 0) > 0 && (
                 <span className={`px-1.5 py-0.5 rounded-full text-[8px] font-bold ${active ? 'bg-white/30' : 'bg-red-100 text-red-500'}`}>{t.count}</span>
@@ -463,7 +466,7 @@ export default function ApprovalsPage() {
               : approvedSheets.map(s => {
                 const [yr, mo] = s.month_year.split('-')
                 const ml = new Date(Number(yr), Number(mo) - 1, 1).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
-                const gross = ['basic_salary', 'attendance_allowance', 'performance_allowance', 'data_allowance', 'ot_payment', 'sales_commission', 'special_allowance_01', 'special_allowance_02'].reduce((a, k) => a + Number(s[k] || 0), 0)
+                const gross = ['basic_salary', 'attendance_allowance', 'performance_allowance', 'data_allowance', 'ot_payment', 'sales_commission', 'monthly_bonus', 'special_allowance_01', 'special_allowance_02'].reduce((a, k) => a + Number(s[k] || 0), 0)
                 const ded = ['epf_employee', 'no_pay_deduction', 'salary_advance', 'stamp_duty', 'meeting_absence', 'advance_deduction', 'late_deductions'].reduce((a, k) => a + Number(s[k] || 0), 0)
                 return (
                   <div key={s.id}>
@@ -556,7 +559,145 @@ export default function ApprovalsPage() {
 
         {/* ── Attendance ── */}
         {tab === 'attendance' && <AttendanceReview />}
+
+        {/* ── Bonuses ── */}
+        {tab === 'bonus' && <BonusReview />}
       </div>
+    </div>
+  )
+}
+
+// ── Monthly bonus calculator (see plan §5.3) ───────────────────────────────
+function BonusReview() {
+  const now = new Date()
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+
+  const [month, setMonth] = useState(currentMonth)
+  const [rows, setRows] = useState<any[]>([])
+  const [qualityOff, setQualityOff] = useState<Record<string, boolean>>({}) // user_id → had complaint/refund
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [savedMsg, setSavedMsg] = useState('')
+
+  const load = async (my: string) => {
+    setLoading(true); setSavedMsg('')
+    const res = await fetch(`/api/bonuses?month_year=${my}`).then(r => r.json())
+    setRows(res.rows || [])
+    setQualityOff({})
+    setLoading(false)
+  }
+  useEffect(() => { load(month) }, [month])
+
+  const shiftMonth = (delta: number) => {
+    const [y, m] = month.split('-').map(Number)
+    const d = new Date(y, m - 1 + delta, 1)
+    setMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+  }
+  const [y, m] = month.split('-').map(Number)
+  const monthLabel = new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+  const isCurrentMonth = month === currentMonth
+
+  const totalOf = (r: any) =>
+    r.volume_bonus + r.revenue_target_bonus + r.top_agent_bonus + r.platinum_bonus + (qualityOff[r.user_id] ? 0 : r.quality_bonus)
+
+  const grandTotal = rows.reduce((s, r) => s + totalOf(r), 0)
+  const eligibleCount = rows.filter(r => totalOf(r) > 0).length
+  const fmt = (n: number) => Number(n || 0).toLocaleString()
+
+  const apply = async () => {
+    setSaving(true); setSavedMsg('')
+    const payload = rows.map(r => ({ user_id: r.user_id, monthly_bonus: totalOf(r) }))
+    const res = await fetch('/api/bonuses', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ month_year: month, rows: payload }),
+    }).then(r => r.json())
+    setSaving(false)
+    setSavedMsg(res.ok ? `Saved to ${monthLabel} salary sheets ✓` : (res.error || 'Failed to save'))
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Controls */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-full px-1 py-1">
+          <button onClick={() => shiftMonth(-1)} className="w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-white transition"><ChevronLeft size={14} /></button>
+          <span className="text-xs font-bold text-gray-700 px-2 min-w-[110px] text-center">
+            {monthLabel}
+            {isCurrentMonth && <span className="ml-1.5 text-[8px] font-bold text-pink-500 bg-pink-50 px-1.5 py-0.5 rounded-full">LIVE</span>}
+          </span>
+          <button onClick={() => !isCurrentMonth && shiftMonth(1)} disabled={isCurrentMonth} className="w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-white disabled:opacity-30 transition"><ChevronRight size={14} /></button>
+        </div>
+        <div className="flex-1" />
+        {savedMsg && <span className="text-[11px] font-bold text-green-600">{savedMsg}</span>}
+        <button onClick={apply} disabled={saving || loading || rows.length === 0}
+          className="flex items-center gap-1.5 bg-amber-500 text-white rounded-xl px-4 py-2 text-xs font-bold shadow-sm hover:bg-amber-600 disabled:opacity-40">
+          {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+          Apply to salary sheets
+        </button>
+      </div>
+
+      {/* Totals banner */}
+      <div className="bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3 flex items-center justify-between">
+        <span className="text-xs font-bold text-amber-700">{eligibleCount} agent{eligibleCount === 1 ? '' : 's'} earning a bonus</span>
+        <span className="text-sm font-extrabold text-amber-700">Total payout: LKR {fmt(grandTotal)}</span>
+      </div>
+
+      {loading
+        ? <div className="p-10 text-center"><Loader2 size={20} className="animate-spin text-amber-500 mx-auto" /></div>
+        : rows.length === 0
+          ? <Empty text="No agents found for this month" />
+          : (
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 border-b border-gray-100">
+                  <tr>{['Agent', 'Sales', 'Revenue / Target', 'Plat.', 'Volume', 'Target', 'Top', 'Platinum', 'Quality', 'Total'].map(h =>
+                    <th key={h} className="px-3 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>)}</tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {rows.map(r => {
+                    const total = totalOf(r)
+                    const hitTarget = r.target != null && r.target > 0 && r.revenue >= r.target
+                    return (
+                      <tr key={r.user_id} className={total > 0 ? 'hover:bg-amber-50/20' : 'opacity-60 hover:bg-gray-50/40'}>
+                        <td className="px-3 py-2.5 font-bold text-gray-800 whitespace-nowrap">
+                          {r.full_name}
+                          {r.is_top_agent && <Trophy size={11} className="inline ml-1 text-amber-500" />}
+                        </td>
+                        <td className="px-3 py-2.5 text-gray-600 font-semibold">{r.sales}</td>
+                        <td className="px-3 py-2.5 whitespace-nowrap">
+                          <span className={hitTarget ? 'text-green-600 font-semibold' : 'text-gray-500'}>{fmt(r.revenue)}</span>
+                          <span className="text-gray-300"> / {r.target != null ? fmt(r.target) : '—'}</span>
+                        </td>
+                        <td className="px-3 py-2.5 text-gray-600 font-semibold">{r.platinum}</td>
+                        <td className="px-3 py-2.5">{r.volume_bonus ? <span className="text-gray-700 font-semibold">{fmt(r.volume_bonus)}</span> : <span className="text-gray-300">—</span>}</td>
+                        <td className="px-3 py-2.5">{r.revenue_target_bonus ? <span className="text-gray-700 font-semibold">{fmt(r.revenue_target_bonus)}</span> : <span className="text-gray-300">—</span>}</td>
+                        <td className="px-3 py-2.5">{r.top_agent_bonus ? <span className="text-gray-700 font-semibold">{fmt(r.top_agent_bonus)}</span> : <span className="text-gray-300">—</span>}</td>
+                        <td className="px-3 py-2.5">{r.platinum_bonus ? <span className="text-gray-700 font-semibold">{fmt(r.platinum_bonus)}</span> : <span className="text-gray-300">—</span>}</td>
+                        <td className="px-3 py-2.5">
+                          <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Untick if this agent had a complaint or refund">
+                            <input type="checkbox" checked={!qualityOff[r.user_id]}
+                              onChange={e => setQualityOff(p => ({ ...p, [r.user_id]: !e.target.checked }))}
+                              className="accent-amber-500" />
+                            <span className={qualityOff[r.user_id] ? 'text-gray-300' : 'text-gray-700 font-semibold'}>{fmt(r.quality_bonus)}</span>
+                          </label>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span className={`font-extrabold ${total > 0 ? 'text-amber-600' : 'text-gray-300'}`}>{total > 0 ? fmt(total) : '—'}</span>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+      <p className="text-[10px] text-gray-400 leading-relaxed px-1">
+        Volume tiers (20+/30+/40+ = 5k/12k/22k, highest only), revenue target (7.5k), top agent (5k, one winner),
+        5 Platinum incl. Princess Platinum (6.5k) are auto-calculated from invoiced non-fake orders (Free Posts excluded).
+        Quality bonus (3k) defaults on — untick agents who had a complaint or refund. <b>Apply</b> writes the total into each
+        agent&apos;s salary sheet for the month, where you approve it as usual.
+      </p>
     </div>
   )
 }

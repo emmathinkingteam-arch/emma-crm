@@ -19,6 +19,7 @@ import { findStatusColumn, writeLeadStatus } from '@/lib/google-sheets'
 import {
     META_STATUS_SHEET,
     META_STATUS_META,
+    FOLLOWUP_STATUSES,
     type MetaLeadStatus,
 } from '@/lib/meta-leads'
 import { type CrmTagKey } from '@/lib/crm-tags'
@@ -33,8 +34,11 @@ const META_TO_TAG: Partial<Record<MetaLeadStatus, CrmTagKey>> = {
     fake: 'fake',
 }
 
-// Statuses that also land in the admin's Rejected CRM queue.
-const NEGATIVE_META: MetaLeadStatus[] = ['no_answer', 'rejected', 'fake']
+// Terminal negatives — these file straight into the admin's Rejected CRM queue.
+// 'no_answer' is deliberately NOT here anymore: a no-answer stays with the agent
+// as a Tier Client (stage='followup') and only reaches admin if the 24h
+// escalation cron promotes it (see meta-leads-engine → processTierEscalations).
+const NEGATIVE_META: MetaLeadStatus[] = ['rejected', 'fake']
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -103,13 +107,20 @@ export async function POST(req: Request) {
         }
     }
 
-    // 2. Update the lead — status + stop the timer.
+    // 2. Update the lead — status + stop the 1h timer. Follow-up statuses keep
+    //    the lead with the agent as a Tier Client (stage='followup'); paid and
+    //    the terminal negatives close it out (stage='done'). responded_at is the
+    //    "latest update" that the 24h escalation clock reads from, and clearing
+    //    escalated_at re-arms a lead that was previously escalated but re-worked.
+    const nextStage = FOLLOWUP_STATUSES.includes(status) ? 'followup' : 'done'
     await sb
         .from('meta_leads')
         .update({
             status,
-            stage: 'done',
+            stage: nextStage,
             responded_at: new Date().toISOString(),
+            due_at: null,
+            escalated_at: null,
             customer_id: customerId,
         })
         .eq('id', leadId)

@@ -116,6 +116,7 @@ export default function MetaLeadPage() {
     const display = lead.phone_display || lead.phone || ''
     const cd = lead.stage === 'active' ? metaCountdown(lead.due_at) : null
     const done = lead.stage === 'done'
+    const followup = lead.stage === 'followup'
     const current = META_STATUS_META[lead.status]
 
     return (
@@ -157,6 +158,18 @@ export default function MetaLeadPage() {
                                 Current status: <span className={`px-2 py-0.5 rounded-full ${current.cls}`}>{current.label}</span>
                             </p>
                             <p className="text-[10px] text-gray-400 mt-1">You can still change it — it updates the sheet again.</p>
+                        </div>
+                    )}
+
+                    {followup && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-center mb-4">
+                            <p className="text-xs font-bold text-amber-700 flex items-center justify-center gap-1.5">
+                                <PhoneCall size={13} /> Not answered — call back
+                            </p>
+                            <p className="text-[10px] text-amber-600 mt-1">
+                                This is in your Tier Clients. Call and update the status.
+                                If it stays “No answer” for 24h it moves to admin.
+                            </p>
                         </div>
                     )}
 

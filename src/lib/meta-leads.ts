@@ -19,7 +19,11 @@ export function extractGid(input: string): number | null {
     return m ? Number(m[1]) : null
 }
 
-export type MetaLeadStage = 'new' | 'active' | 'done'
+// 'followup' = the agent has actioned it (no-answer/call-back/package/payment)
+// so it left the fresh pallet and now lives in their "Tier Clients" tab. It is
+// off the 1h penalty timer; a no-answer/call-back followup auto-escalates to
+// the admin queue after 24h with no newer update (see meta-leads-engine).
+export type MetaLeadStage = 'new' | 'active' | 'followup' | 'done'
 
 // Canonical status key → the EXACT string written into the sheet's lead_status.
 export type MetaLeadStatus =
@@ -58,6 +62,23 @@ export const META_STATUS_META: Record<
     rejected: { label: 'Rejected', cls: 'bg-red-50 text-red-600', btn: 'bg-red-50 text-red-700 border-red-200' },
 }
 
+// Statuses that keep a lead with its agent as a "Tier Client" (stage='followup')
+// instead of closing it out. Everything else (paid) or the terminal negatives
+// (rejected/fake) close the lead.
+export const FOLLOWUP_STATUSES: MetaLeadStatus[] = [
+    'no_answer',
+    'call_back',
+    'package_sent',
+    'payment_sent',
+]
+
+// Of the follow-ups, only these keep the 24h escalation clock running — if the
+// agent's latest update is still one of these after 24h, it goes to admin.
+export const ESCALATING_STATUSES: MetaLeadStatus[] = ['no_answer', 'call_back']
+
+// Hours a no-answer/call-back Tier Client waits before auto-escalating to admin.
+export const TIER_ESCALATE_HOURS = 24
+
 // The statuses an agent can pick (everything except the auto-initial "created").
 export const META_STATUS_BUTTONS: MetaLeadStatus[] = [
     'package_sent',
@@ -90,6 +111,7 @@ export interface MetaLead {
     responded_at: string | null
     last_penalty_at: string | null
     penalty_hours_deducted: number
+    escalated_at: string | null
     customer_id: string | null
     created_at: string
 }
@@ -173,4 +195,22 @@ export function metaCountdown(due_at: string | null): { overdue: boolean; label:
     const m = mins % 60
     const hm = h > 0 ? `${h}h ${m}m` : `${m}m`
     return { overdue, label: overdue ? `overdue ${hm}` : `due in ${hm}` }
+}
+
+// A Tier Client's countdown to auto-escalation. `responded_at` is the agent's
+// latest update; escalation fires TIER_ESCALATE_HOURS after it. Returns null
+// once the deadline has passed (the cron will move it to admin on its next run).
+export function tierEscalateCountdown(
+    responded_at: string | null
+): { due: boolean; label: string } {
+    if (!responded_at) return { due: false, label: '' }
+    const deadline =
+        new Date(responded_at).getTime() + TIER_ESCALATE_HOURS * 3_600_000
+    const diffMs = deadline - Date.now()
+    if (diffMs <= 0) return { due: true, label: 'moving to admin' }
+    const mins = Math.floor(diffMs / 60000)
+    const h = Math.floor(mins / 60)
+    const m = mins % 60
+    const hm = h > 0 ? `${h}h ${m}m` : `${m}m`
+    return { due: false, label: `admin in ${hm}` }
 }

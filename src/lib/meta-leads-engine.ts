@@ -33,6 +33,8 @@ import {
     parseDob,
     cleanSheetPhone,
     META_STATUS_SHEET,
+    ESCALATING_STATUSES,
+    TIER_ESCALATE_HOURS,
     type MetaLeadStatus,
     type RatioEntry,
 } from '@/lib/meta-leads'
@@ -429,6 +431,101 @@ export async function processMetaLeadPenalties(sb: SbLike): Promise<MetaPenaltyR
         })
         if (sms.ok) result.smsSent++
         else result.smsFailed++
+    }
+
+    return result
+}
+
+// ── Auto-escalate stale Tier Clients to the admin queue ─────────────────────
+// A no-answer / call-back lead sits with its agent as a Tier Client. If the
+// agent's latest update (responded_at) is still one of those after
+// TIER_ESCALATE_HOURS with nothing newer, it belongs to admin now: stamp
+// escalated_at, close the lead, and file it into the Rejected CRM queue exactly
+// like a manual negative. Any newer agent update flips the status/responded_at
+// out of this filter, so re-worked leads never escalate. Idempotent via the
+// escalated_at IS NULL guard on the claim.
+const META_TO_TAG_ENGINE: Partial<Record<MetaLeadStatus, string>> = {
+    no_answer: 'not_answer',
+    call_back: 'call_back',
+}
+
+export interface TierEscalationResult {
+    candidates: number
+    escalated: number
+}
+
+interface FollowupRow {
+    id: string
+    assigned_to: string | null
+    phone: string | null
+    full_name: string | null
+    status: MetaLeadStatus
+    customer_id: string | null
+}
+
+export async function processTierEscalations(
+    sb: SbLike
+): Promise<TierEscalationResult> {
+    const now = new Date()
+    const cutoff = new Date(
+        now.getTime() - TIER_ESCALATE_HOURS * 3_600_000
+    ).toISOString()
+    const result: TierEscalationResult = { candidates: 0, escalated: 0 }
+
+    const { data: rows } = await sb
+        .from('meta_leads')
+        .select('id, assigned_to, phone, full_name, status, customer_id')
+        .eq('stage', 'followup')
+        .is('escalated_at', null)
+        .in('status', ESCALATING_STATUSES)
+        .not('responded_at', 'is', null)
+        .lt('responded_at', cutoff)
+        .limit(MAX_PER_RUN)
+
+    const candidates = (rows as FollowupRow[]) || []
+    result.candidates = candidates.length
+
+    for (const lead of candidates) {
+        // Optimistic claim — must still be an un-escalated followup so two cron
+        // runs (or an agent update mid-run) can't double-file it.
+        const { data: claimed } = await sb
+            .from('meta_leads')
+            .update({ escalated_at: now.toISOString(), stage: 'done' })
+            .eq('id', lead.id)
+            .eq('stage', 'followup')
+            .is('escalated_at', null)
+            .select('id')
+        if (!claimed || claimed.length === 0) continue
+        result.escalated++
+
+        const tag = META_TO_TAG_ENGINE[lead.status]
+        try {
+            await sb.from('crm_rejections').insert({
+                customer_id: lead.customer_id,
+                phone: lead.phone || '',
+                customer_name: lead.full_name || null,
+                agent_id: lead.assigned_to,
+                tags: tag ? [tag] : [],
+                reason: `Auto-escalated: still no answer ${TIER_ESCALATE_HOURS}h after last update`,
+                note: null,
+            })
+        } catch {
+            // non-fatal — the lead is already marked escalated
+        }
+
+        if (lead.customer_id) {
+            try {
+                await sb.from('interactions').insert({
+                    customer_id: lead.customer_id,
+                    type: 'feedback',
+                    description: `Auto-escalated to admin — no answer for ${TIER_ESCALATE_HOURS}h after last update`,
+                    created_by: lead.assigned_to,
+                    tags: tag ? [tag] : [],
+                })
+            } catch {
+                // non-fatal
+            }
+        }
     }
 
     return result

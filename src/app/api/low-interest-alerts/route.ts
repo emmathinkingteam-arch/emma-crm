@@ -42,6 +42,7 @@ interface Item {
   postDate: string
   daysSince: number
   receivedTotal: number
+  repostedAt: string | null
 }
 
 export async function GET() {
@@ -59,7 +60,7 @@ export async function GET() {
   //    always empty — this is the fix.
   const { data: orders, error: ordErr } = await supabaseAdmin()
     .from('orders')
-    .select('id, customer_id, planned_post_date, customer:customers(id, name, phone)')
+    .select('id, customer_id, planned_post_date, customer:customers(id, name, phone, low_interest_reposted_at)')
     .not('planned_post_date', 'is', null)
     .lte('planned_post_date', cutoff)
     .eq('status', 'active')
@@ -70,13 +71,13 @@ export async function GET() {
   }
 
   // Dedup by customer, keeping the EARLIEST post date (most days-since).
-  const byCustomer = new Map<string, { id: string; name: string; phone: string; postDate: string }>()
+  const byCustomer = new Map<string, { id: string; name: string; phone: string; postDate: string; repostedAt: string | null }>()
   for (const o of orders as any[]) {
     const c = o.customer
     if (!c?.phone || !o.planned_post_date) continue
     const existing = byCustomer.get(c.id)
     if (!existing || o.planned_post_date < existing.postDate) {
-      byCustomer.set(c.id, { id: c.id, name: c.name || c.phone, phone: c.phone, postDate: o.planned_post_date })
+      byCustomer.set(c.id, { id: c.id, name: c.name || c.phone, phone: c.phone, postDate: o.planned_post_date, repostedAt: c.low_interest_reposted_at ?? null })
     }
   }
   const customers = Array.from(byCustomer.values())
@@ -127,7 +128,7 @@ export async function GET() {
     .map(w => {
       const receivedTotal = receivedByUser.get(w.userId) ?? 0
       const daysSince = Math.floor((Date.now() - new Date(w.postDate).getTime()) / 86400000)
-      return { customerId: w.id, name: w.name, phone: w.phone, postDate: w.postDate, daysSince, receivedTotal }
+      return { customerId: w.id, name: w.name, phone: w.phone, postDate: w.postDate, daysSince, receivedTotal, repostedAt: w.repostedAt }
     })
     .filter(it => it.receivedTotal < MIN_INTERESTS)
     .sort((a, b) => a.receivedTotal - b.receivedTotal || b.daysSince - a.daysSince)

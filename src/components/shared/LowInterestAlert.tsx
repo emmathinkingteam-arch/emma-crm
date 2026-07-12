@@ -15,7 +15,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { AlertCircle, Heart, Loader2 } from 'lucide-react'
+import { AlertCircle, Heart, Loader2, Repeat2, Check } from 'lucide-react'
 import { fmtDate } from '@/lib/utils'
 
 interface Item {
@@ -25,6 +25,7 @@ interface Item {
   postDate: string
   daysSince: number
   receivedTotal: number
+  repostedAt: string | null
 }
 
 interface Props {
@@ -35,6 +36,31 @@ interface Props {
 export default function LowInterestAlert({ limit = 5, viewAllHref = '/admin/alerts' }: Props) {
   const [items, setItems] = useState<Item[] | null>(null)
   const [thresholds, setThresholds] = useState({ days: 7, min: 3 })
+  // Rows we're mid-save on — disables the button so a double-tap can't race.
+  const [saving, setSaving] = useState<Record<string, boolean>>({})
+
+  // Toggle the "reposted" mark for one row. Optimistic: flip it locally right
+  // away, POST it, and roll back to the previous timestamp if the save fails.
+  async function toggleReposted(customerId: string, prevRepostedAt: string | null) {
+    if (saving[customerId]) return
+    const nextReposted = !prevRepostedAt
+    const stampedAt = nextReposted ? new Date().toISOString() : null
+    setSaving(s => ({ ...s, [customerId]: true }))
+    setItems(list => list?.map(it => it.customerId === customerId ? { ...it, repostedAt: stampedAt } : it) ?? list)
+    try {
+      const res = await fetch('/api/low-interest-alerts/repost', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customerId, reposted: nextReposted }),
+      })
+      if (!res.ok) throw new Error('save failed')
+    } catch {
+      // Roll back to the value we had before the optimistic flip.
+      setItems(list => list?.map(it => it.customerId === customerId ? { ...it, repostedAt: prevRepostedAt } : it) ?? list)
+    } finally {
+      setSaving(s => ({ ...s, [customerId]: false }))
+    }
+  }
 
   useEffect(() => {
     let alive = true
@@ -90,26 +116,52 @@ export default function LowInterestAlert({ limit = 5, viewAllHref = '/admin/aler
       </div>
 
       <div className="space-y-2">
-        {shown.map(item => (
-          <Link
-            key={item.customerId}
-            href={`/dashboard/customers/${item.customerId}`}
-            className="bg-white border border-red-100 rounded-xl px-4 py-2.5 flex items-center justify-between hover:border-red-300 transition-colors"
-          >
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-7 h-7 rounded-full bg-red-50 flex items-center justify-center flex-shrink-0">
-                <AlertCircle size={13} className="text-red-500" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-bold text-gray-800 truncate">{item.name}</p>
-                <p className="text-[11px] text-gray-400 font-medium mt-0.5">
-                  {item.receivedTotal} interest{item.receivedTotal !== 1 ? 's' : ''} · posted {item.daysSince}d ago · {fmtDate(item.postDate)}
-                </p>
-              </div>
+        {shown.map(item => {
+          const reposted = !!item.repostedAt
+          return (
+            <div
+              key={item.customerId}
+              className="bg-white border border-red-100 rounded-xl px-4 py-2.5 flex items-center justify-between gap-2"
+            >
+              <Link
+                href={`/dashboard/customers/${item.customerId}`}
+                className="flex items-center gap-3 min-w-0 flex-1 hover:opacity-80 transition-opacity"
+              >
+                <div className="w-7 h-7 rounded-full bg-red-50 flex items-center justify-center flex-shrink-0">
+                  <AlertCircle size={13} className="text-red-500" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-gray-800 truncate">{item.name}</p>
+                  <p className="text-[11px] text-gray-400 font-medium mt-0.5">
+                    {item.receivedTotal} interest{item.receivedTotal !== 1 ? 's' : ''} · posted {item.daysSince}d ago · {fmtDate(item.postDate)}
+                  </p>
+                </div>
+              </Link>
+
+              <button
+                type="button"
+                onClick={() => toggleReposted(item.customerId, item.repostedAt)}
+                disabled={saving[item.customerId]}
+                title={reposted ? `Reposted ${fmtDate(item.repostedAt!)} — click to un-mark` : 'Mark that you re-posted this profile'}
+                className={`flex items-center gap-1 flex-shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition-colors disabled:opacity-50 ${
+                  reposted
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+                    : 'bg-gray-50 text-gray-500 border border-gray-200 hover:bg-gray-100'
+                }`}
+              >
+                {reposted ? (
+                  <>
+                    <Check size={12} /> Reposted {fmtDate(item.repostedAt!)}
+                  </>
+                ) : (
+                  <>
+                    <Repeat2 size={12} /> Mark reposted
+                  </>
+                )}
+              </button>
             </div>
-            <span className="text-xs font-bold text-red-600 flex-shrink-0 ml-2">View →</span>
-          </Link>
-        ))}
+          )
+        })}
       </div>
 
       {extra > 0 && (

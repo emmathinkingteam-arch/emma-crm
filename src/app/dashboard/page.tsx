@@ -7,14 +7,14 @@ import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import { Order, OrderStep } from '@/types'
-import { Bell, ChevronRight, ChevronLeft, CheckCircle2, Sparkles, Clock, Phone, PhoneCall, TrendingUp, Users, UserPlus, Briefcase, ArrowLeftRight, Loader2, X } from 'lucide-react'
+import { Bell, ChevronRight, ChevronLeft, CheckCircle2, Sparkles, Clock, Phone, TrendingUp, Users, UserPlus, Briefcase, ArrowLeftRight, Loader2, X } from 'lucide-react'
 import CrmLeaderboard from '@/components/shared/CrmLeaderboard'
 import MissingSlipsCard from '@/components/shared/MissingSlipsCard'
 import LowInterestAlert from '@/components/shared/LowInterestAlert'
 import CountUp from '@/components/shared/CountUp'
 import Link from 'next/link'
 import { type Lead, leadCountdown, leadPenaltySoFar } from '@/lib/leads'
-import { type MetaLead, metaCountdown, tierEscalateCountdown, META_STATUS_META, ESCALATING_STATUSES } from '@/lib/meta-leads'
+import { type MetaLead, metaCountdown } from '@/lib/meta-leads'
 
 // A step joined with its order + customer + package (what fetchMyWork returns).
 type StepWithOrder = OrderStep & {
@@ -51,7 +51,6 @@ export default function DashboardPage() {
   const [secondPosts, setSecondPosts] = useState<any[]>([])
   const [leads, setLeads] = useState<Lead[]>([])
   const [metaLeads, setMetaLeads] = useState<MetaLead[]>([])
-  const [tierClients, setTierClients] = useState<MetaLead[]>([])
   // CRM agents shown as photo circles under the hero (me first, then the rest)
   const [team, setTeam] = useState<{ id: string; full_name: string; profile_photo_url?: string; is_supervisor?: boolean }[]>([])
   // ── Inspector: bulk-move "Leads to call" → another agent's CRM ──────────────
@@ -139,18 +138,6 @@ export default function DashboardPage() {
       .in('stage', ['new', 'active'])
       .order('due_at', { ascending: true, nullsFirst: false })
     setMetaLeads((meta as MetaLead[]) || [])
-
-    // Tier Clients — leads this agent already actioned (no-answer callbacks +
-    // in-progress clients) that stay with them until worked or auto-escalated.
-    // Oldest update first so the ones closest to the 24h admin cutoff surface.
-    const { data: tier } = await supabase
-      .from('meta_leads')
-      .select('*')
-      .eq('assigned_to', user.id)
-      .eq('stage', 'followup')
-      .is('escalated_at', null)
-      .order('responded_at', { ascending: true, nullsFirst: false })
-    setTierClients((tier as MetaLead[]) || [])
   }
 
   // CRM agent circles: logged-in user first, then teammates alphabetically.
@@ -585,54 +572,6 @@ export default function DashboardPage() {
                         </p>
                       </div>
                       <ChevronRight size={14} className="text-teal-300 flex-shrink-0 ml-2" />
-                    </div>
-                  </Link>
-                )
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Tier Clients — leads you already touched; call back & keep them moving.
-            No-answer / call-back rows auto-escalate to admin after 24h. */}
-        {tierClients.length > 0 && (
-          <div className="border-2 border-amber-200 rounded-2xl overflow-hidden">
-            <div className="px-4 py-2.5 bg-amber-500 flex items-center gap-2">
-              <PhoneCall size={14} className="text-white" />
-              <p className="text-xs font-bold text-white uppercase tracking-wide">Tier Clients — call back</p>
-              <span className="ml-auto text-[9px] font-bold bg-white/25 text-white px-2 py-0.5 rounded-full">{tierClients.length}</span>
-            </div>
-            <div className="p-2 space-y-2">
-              {tierClients.map((tc) => {
-                const sm = META_STATUS_META[tc.status]
-                const escalating = ESCALATING_STATUSES.includes(tc.status)
-                const esc = escalating ? tierEscalateCountdown(tc.responded_at) : null
-                return (
-                  <Link
-                    key={tc.id}
-                    href={`/dashboard/meta-leads/${tc.id}`}
-                    className={`block rounded-xl p-3 border active:scale-[0.98] transition-all ${escalating ? 'bg-amber-50 border-amber-100' : 'bg-white border-gray-100'}`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-gray-800 truncate">
-                          {tc.full_name || tc.phone_display || tc.phone}
-                          {tc.age != null && <span className="text-gray-400 font-semibold"> · {tc.age}</span>}
-                        </p>
-                        <p className="text-[10px] font-semibold text-gray-500 truncate flex items-center gap-1">
-                          <Briefcase size={9} /> {tc.job_title || '—'}
-                          <span className="font-mono text-gray-400">· {tc.phone_display || tc.phone}</span>
-                        </p>
-                        <div className="flex items-center gap-1.5 mt-1">
-                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${sm.cls}`}>{sm.label}</span>
-                          {escalating && (
-                            <span className={`text-[9px] font-bold ${esc?.due ? 'text-red-500' : 'text-amber-600'}`}>
-                              {esc?.due ? 'moving to admin' : `→ ${esc?.label}`}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <ChevronRight size={14} className="text-amber-300 flex-shrink-0 ml-2" />
                     </div>
                   </Link>
                 )

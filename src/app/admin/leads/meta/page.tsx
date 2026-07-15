@@ -12,7 +12,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import {
     extractSpreadsheetId,
+    ESCALATING_STATUSES,
     META_STATUS_META,
+    tierEscalateCountdown,
     type MetaLead,
     type MetaLeadSource,
     type MetaLeadStatus,
@@ -32,6 +34,7 @@ import {
     Pause,
     Table2,
     ArrowLeftRight,
+    PhoneCall,
     X,
 } from 'lucide-react'
 
@@ -49,6 +52,10 @@ export default function MetaAdsPage() {
     const [agents, setAgents] = useState<Agent[]>([])
     const [sources, setSources] = useState<MetaLeadSource[]>([])
     const [leads, setLeads] = useState<MetaLead[]>([])
+    // Tier Clients — leads an agent already actioned (no-answer / call-back /
+    // in-progress) that live with the agent until worked or auto-escalated.
+    // Surfaced here for admin oversight across every agent.
+    const [tierClients, setTierClients] = useState<MetaLead[]>([])
     const [loading, setLoading] = useState(true)
 
     // form
@@ -73,7 +80,7 @@ export default function MetaAdsPage() {
     const [reassignBusy, setReassignBusy] = useState<string | null>(null)
 
     const load = useCallback(async () => {
-        const [aRes, sRes, lRes] = await Promise.all([
+        const [aRes, sRes, lRes, tRes] = await Promise.all([
             supabase
                 .from('users')
                 .select('id, full_name')
@@ -84,10 +91,20 @@ export default function MetaAdsPage() {
                 .order('full_name'),
             supabase.from('meta_lead_sources').select('*').order('created_at', { ascending: false }),
             supabase.from('meta_leads').select('*').order('created_at', { ascending: false }).limit(150),
+            // Tier Clients: still with their agent (stage='followup') and not yet
+            // auto-escalated. Oldest update first so the ones nearest the 24h
+            // admin cutoff surface at the top.
+            supabase
+                .from('meta_leads')
+                .select('*')
+                .eq('stage', 'followup')
+                .is('escalated_at', null)
+                .order('responded_at', { ascending: true, nullsFirst: false }),
         ])
         setAgents((aRes.data as Agent[]) || [])
         setSources((sRes.data as MetaLeadSource[]) || [])
         setLeads((lRes.data as MetaLead[]) || [])
+        setTierClients((tRes.data as MetaLead[]) || [])
         setLoading(false)
     }, [])
 
@@ -472,6 +489,46 @@ export default function MetaAdsPage() {
                     </div>
                 )}
             </div>
+
+            {/* ── Tier Clients — call back ───────────────────────────────── */}
+            {/* Every agent's actioned-but-open lead, in one place for admin. */}
+            {tierClients.length > 0 && (
+                <div>
+                    <div className="flex items-center gap-2 mb-3">
+                        <PhoneCall size={14} className="text-amber-500" />
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Tier Clients — call back</p>
+                        <span className="text-[9px] font-bold bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full">{tierClients.length}</span>
+                    </div>
+                    <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden divide-y divide-gray-50">
+                        {tierClients.slice(0, 100).map((tc) => {
+                            const sm = META_STATUS_META[tc.status]
+                            const escalating = ESCALATING_STATUSES.includes(tc.status)
+                            const esc = escalating ? tierEscalateCountdown(tc.responded_at) : null
+                            return (
+                                <div key={tc.id} className="px-4 py-2.5 flex items-center gap-3">
+                                    <div className="min-w-0 flex-1">
+                                        <p className="text-xs font-bold text-gray-800 truncate">
+                                            {tc.full_name || tc.phone_display || tc.phone}
+                                            {tc.age != null && <span className="text-gray-400 font-semibold"> · {tc.age}</span>}
+                                        </p>
+                                        <p className="text-[10px] text-gray-400 font-medium truncate">
+                                            {tc.job_title || '—'} · {tc.phone_display || tc.phone} · {agentName(tc.assigned_to)}
+                                        </p>
+                                    </div>
+                                    <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                                        <span className={`text-[8px] font-bold px-2 py-1 rounded-full ${sm.cls}`}>{sm.label}</span>
+                                        {escalating && (
+                                            <span className={`text-[9px] font-bold ${esc?.due ? 'text-red-500' : 'text-amber-600'}`}>
+                                                {esc?.due ? 'moving to admin' : `→ ${esc?.label}`}
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                            )
+                        })}
+                    </div>
+                </div>
+            )}
 
             {/* ── Recent leads ───────────────────────────────────────────── */}
             {leads.length > 0 && (

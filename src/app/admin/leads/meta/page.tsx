@@ -33,6 +33,7 @@ import {
     Table2,
     ArrowLeftRight,
     X,
+    Columns3,
 } from 'lucide-react'
 
 interface Agent {
@@ -44,6 +45,23 @@ interface Tab {
     gid: number
     index: number
 }
+interface HeaderCell {
+    index: number
+    letter: string
+    name: string
+}
+
+// The fields the importer reads, with the labels the admin sees in the picker.
+// `phone` is the only one truly required to import a lead.
+const MAP_FIELDS: { key: string; label: string; hint?: string }[] = [
+    { key: 'phone', label: 'Phone / WhatsApp', hint: 'required' },
+    { key: 'full_name', label: 'Name' },
+    { key: 'date_of_birth', label: 'Birthday' },
+    { key: 'job_title', label: 'Job title' },
+    { key: 'lead_status', label: 'Lead status', hint: 'for write-back' },
+    { key: 'id', label: 'Lead ID' },
+    { key: 'inbox_url', label: 'Inbox URL' },
+]
 
 export default function MetaAdsPage() {
     const [agents, setAgents] = useState<Agent[]>([])
@@ -61,6 +79,11 @@ export default function MetaAdsPage() {
     const [penalty, setPenalty] = useState(30)
     const [ratio, setRatio] = useState<Record<string, number>>({})
     const [isActive, setIsActive] = useState(true)
+
+    // Column mapping (for FB forms whose headers change)
+    const [headerCells, setHeaderCells] = useState<HeaderCell[]>([])
+    const [colMap, setColMap] = useState<Record<string, number | ''>>({})
+    const [loadingHeaders, setLoadingHeaders] = useState(false)
 
     const [loadingTabs, setLoadingTabs] = useState(false)
     const [saving, setSaving] = useState(false)
@@ -116,6 +139,8 @@ export default function MetaAdsPage() {
         setPenalty(30)
         setRatio({})
         setIsActive(true)
+        setHeaderCells([])
+        setColMap({})
     }
 
     function startEdit(s: MetaLeadSource) {
@@ -130,8 +155,41 @@ export default function MetaAdsPage() {
         for (const e of s.ratio || []) r[e.user_id] = e.weight
         setRatio(r)
         setIsActive(s.is_active)
+        setHeaderCells([])
+        const cm: Record<string, number | ''> = {}
+        for (const f of MAP_FIELDS) {
+            const v = s.column_map?.[f.key]
+            cm[f.key] = typeof v === 'number' ? v : ''
+        }
+        setColMap(cm)
         setMsg(null)
         window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+
+    async function loadHeaders() {
+        if (!extractSpreadsheetId(spreadsheet) || !sheetTitle) {
+            setMsg({ kind: 'err', text: 'Pick the sheet link and tab first.' })
+            return
+        }
+        setLoadingHeaders(true)
+        setMsg(null)
+        try {
+            const res = await fetch('/api/meta-leads/headers', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ spreadsheet, sheetTitle }),
+            })
+            const j = await res.json()
+            if (!j.ok) {
+                setMsg({ kind: 'err', text: j.error || 'Could not read the columns.' })
+            } else {
+                setHeaderCells(j.cells)
+                setMsg({ kind: 'ok', text: `Read ${j.cells.length} columns — point each field at the right one.` })
+            }
+        } catch {
+            setMsg({ kind: 'err', text: 'Network error reading columns.' })
+        }
+        setLoadingHeaders(false)
     }
 
     async function loadTabs() {
@@ -184,6 +242,10 @@ export default function MetaAdsPage() {
         const ratioArr = agents
             .filter((a) => (ratio[a.id] || 0) > 0)
             .map((a) => ({ user_id: a.id, weight: ratio[a.id] }))
+        const columnMap: Record<string, number> = {}
+        for (const [k, v] of Object.entries(colMap)) {
+            if (typeof v === 'number' && v >= 0) columnMap[k] = v
+        }
         try {
             const res = await fetch('/api/meta-leads/source', {
                 method: 'POST',
@@ -198,6 +260,7 @@ export default function MetaAdsPage() {
                     penaltyLkr: penalty,
                     ratio: ratioArr,
                     isActive,
+                    columnMap,
                 }),
             })
             const j = await res.json()
@@ -246,6 +309,7 @@ export default function MetaAdsPage() {
                 penaltyLkr: s.penalty_lkr,
                 ratio: s.ratio,
                 isActive: !s.is_active,
+                columnMap: s.column_map || undefined,
             }),
         })
         load()
@@ -356,8 +420,64 @@ export default function MetaAdsPage() {
                             ))}
                         </select>
                         <p className="text-[10px] text-gray-400 mt-1.5">
-                            Reads only: full_name · date_of_birth · phone · job_title · lead_status
+                            By default it auto-detects columns by header name. If Facebook changed the headers, set the mapping below.
                         </p>
+                    </div>
+                )}
+
+                {/* Column mapping — for forms whose headers changed */}
+                {sheetTitle && (
+                    <div className="mb-4 pt-4 border-t border-gray-50">
+                        <div className="flex items-center gap-2 mb-2">
+                            <label className="flex items-center gap-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                                <Columns3 size={12} /> Column mapping
+                            </label>
+                            <button
+                                onClick={loadHeaders}
+                                disabled={loadingHeaders}
+                                className="ml-auto flex items-center gap-1.5 bg-gray-800 text-white px-3 py-1.5 rounded-full text-[11px] font-bold disabled:opacity-50 active:scale-95"
+                            >
+                                {loadingHeaders ? <Loader2 size={12} className="animate-spin" /> : <Columns3 size={12} />}
+                                {headerCells.length ? 'Reload columns' : 'Load columns'}
+                            </button>
+                        </div>
+
+                        {headerCells.length === 0 ? (
+                            <p className="text-[10px] text-gray-400">
+                                Optional. Leave unset to auto-detect by header name. Click <b>Load columns</b> to pick each field manually (needed when the form&apos;s headers change, e.g. <code className="text-gray-500">phone</code> → <code className="text-gray-500">whatsapp_number</code>).
+                            </p>
+                        ) : (
+                            <div className="space-y-2">
+                                {MAP_FIELDS.map((f) => (
+                                    <div key={f.key} className="flex items-center gap-3">
+                                        <span className="text-xs font-semibold text-gray-700 w-28 flex-shrink-0">
+                                            {f.label}
+                                            {f.hint && <span className="text-[9px] font-bold text-gray-300 ml-1">{f.hint}</span>}
+                                        </span>
+                                        <select
+                                            value={colMap[f.key] === '' || colMap[f.key] === undefined ? '' : String(colMap[f.key])}
+                                            onChange={(e) =>
+                                                setColMap((p) => ({
+                                                    ...p,
+                                                    [f.key]: e.target.value === '' ? '' : Number(e.target.value),
+                                                }))
+                                            }
+                                            className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1.5 text-xs font-semibold outline-none focus:border-pink-300"
+                                        >
+                                            <option value="">— not in this form —</option>
+                                            {headerCells.map((c) => (
+                                                <option key={c.index} value={c.index}>
+                                                    {c.letter} · {c.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                ))}
+                                <p className="text-[10px] text-gray-400 mt-1.5">
+                                    Saved with the source. Overrides auto-detect. Re-open and reload after any future header change.
+                                </p>
+                            </div>
+                        )}
                     </div>
                 )}
 
@@ -429,7 +549,12 @@ export default function MetaAdsPage() {
                                                 <Facebook size={13} className="text-pink-500 flex-shrink-0" /> {s.name}
                                             </p>
                                             <p className="text-[10px] text-gray-400 font-semibold truncate">
-                                                {s.sheet_title} · {(s.ratio || []).map((r) => agentName(r.user_id) + ' ' + r.weight).join(' : ') || 'no ratio'}
+                                                {s.sheet_title}
+                                                {s.column_map && Object.keys(s.column_map).length > 0 && (
+                                                    <span className="ml-1 text-pink-500">· mapped</span>
+                                                )}
+                                                {' · '}
+                                                {(s.ratio || []).map((r) => agentName(r.user_id) + ' ' + r.weight).join(' : ') || 'no ratio'}
                                             </p>
                                             <p className="text-[10px] text-gray-400 font-semibold">
                                                 {s.ttl_minutes}min timer · LKR {s.penalty_lkr}/hr

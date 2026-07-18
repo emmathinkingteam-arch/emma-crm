@@ -15,7 +15,7 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { currentProfile, isAdminRole } from '@/lib/api-auth'
-import { findStatusColumn, writeLeadStatus } from '@/lib/google-sheets'
+import { findStatusColumn, writeLeadStatus, type ColumnMap } from '@/lib/google-sheets'
 import {
     META_STATUS_SHEET,
     META_STATUS_META,
@@ -164,11 +164,17 @@ export async function POST(req: Request) {
     try {
         const { data: source } = await sb
             .from('meta_lead_sources')
-            .select('spreadsheet_id, sheet_title')
+            .select('spreadsheet_id, sheet_title, column_map')
             .eq('id', lead.source_id)
             .single()
         if (source) {
-            const col = await findStatusColumn(source.spreadsheet_id, source.sheet_title)
+            // Prefer the source's manually-mapped lead_status column; only
+            // auto-detect by header name when no map is set.
+            const mapped = (source.column_map as ColumnMap | null)?.lead_status
+            const col =
+                typeof mapped === 'number' && mapped >= 0
+                    ? mapped
+                    : await findStatusColumn(source.spreadsheet_id, source.sheet_title)
             if (col === null) {
                 sheetError = 'no_lead_status_column'
             } else {

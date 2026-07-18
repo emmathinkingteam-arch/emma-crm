@@ -134,6 +134,10 @@ export interface MetaLeadSource {
     is_active: boolean
     last_synced_at: string | null
     last_sync_note: string | null
+    // Optional manual header→column-index map. Keys are the fields we read
+    // (full_name, phone, date_of_birth, job_title, lead_status, id, inbox_url),
+    // values are 0-based sheet column indexes. null = auto-detect by header name.
+    column_map: Record<string, number> | null
     created_at: string
 }
 

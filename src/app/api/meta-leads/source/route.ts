@@ -10,8 +10,30 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { currentProfile, isAdminRole } from '@/lib/api-auth'
-import { extractSpreadsheetId } from '@/lib/google-sheets'
+import { extractSpreadsheetId, columnMapHasAny, type ColumnMap, type LeadField } from '@/lib/google-sheets'
 import type { RatioEntry } from '@/lib/meta-leads'
+
+const LEAD_FIELDS: LeadField[] = [
+    'full_name',
+    'date_of_birth',
+    'phone',
+    'job_title',
+    'lead_status',
+    'id',
+    'inbox_url',
+]
+
+// Keep only known fields with a valid 0-based index; drop everything else.
+// Returns null when nothing is pinned, so the source falls back to auto-detect.
+function cleanColumnMap(raw: unknown): ColumnMap | null {
+    if (!raw || typeof raw !== 'object') return null
+    const out: ColumnMap = {}
+    for (const f of LEAD_FIELDS) {
+        const v = (raw as Record<string, unknown>)[f]
+        if (typeof v === 'number' && Number.isInteger(v) && v >= 0) out[f] = v
+    }
+    return columnMapHasAny(out) ? out : null
+}
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -31,6 +53,7 @@ export async function POST(req: Request) {
         penaltyLkr: number
         ratio: RatioEntry[]
         isActive: boolean
+        columnMap?: unknown
     }
     try {
         body = await req.json()
@@ -54,6 +77,7 @@ export async function POST(req: Request) {
         penalty_lkr: Math.max(0, Math.floor(body.penaltyLkr ?? 30)),
         ratio,
         is_active: body.isActive !== false,
+        column_map: cleanColumnMap(body.columnMap),
     }
 
     const sb = supabaseAdmin()

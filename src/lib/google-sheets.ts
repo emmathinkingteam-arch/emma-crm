@@ -111,9 +111,44 @@ export function colLetter(index: number): string {
 
 const WANT = ['full_name', 'date_of_birth', 'phone', 'job_title', 'lead_status', 'id', 'inbox_url']
 
+// The fields the importer actually reads. A manual column map assigns each one
+// a 0-based sheet column index (or null/absent = not present in this form).
+export type LeadField =
+    | 'full_name'
+    | 'date_of_birth'
+    | 'phone'
+    | 'job_title'
+    | 'lead_status'
+    | 'id'
+    | 'inbox_url'
+
+export type ColumnMap = Partial<Record<LeadField, number | null>>
+
+// Does a stored map actually pin any column? (An all-null/empty map is treated
+// as "no map" so the source falls back to auto-detect.)
+export function columnMapHasAny(map: ColumnMap | null | undefined): boolean {
+    if (!map) return false
+    return Object.values(map).some((v) => typeof v === 'number' && v >= 0)
+}
+
+export interface HeaderCell {
+    index: number // 0-based column index
+    letter: string // A1 letter (A, B, … AA)
+    name: string // the header text as written in the sheet
+}
+
 export interface SheetHeaderMap {
     headerRow: number // 1-based row number of the header
     cols: Record<string, number> // header name → 0-based column index
+}
+
+// First row that has any non-empty cell — the header row for a manual map
+// (tolerates leading blank rows). Returns -1 if the grid is entirely blank.
+function firstNonEmptyRow(grid: string[][]): number {
+    for (let r = 0; r < grid.length; r++) {
+        if ((grid[r] || []).some((c) => c && c.trim() !== '')) return r
+    }
+    return -1
 }
 
 export interface SheetLeadRow {
@@ -149,10 +184,34 @@ export interface ReadLeadsResult {
     leads: SheetLeadRow[]
 }
 
-// Read every data row below the header into clean lead objects.
-export async function readLeadRows(
+// Read the header row's cells (for the admin column-mapping picker). Returns
+// each non-empty header with its 0-based index and A1 letter.
+export async function readHeaderCells(
     spreadsheetId: string,
     sheetTitle: string
+): Promise<HeaderCell[]> {
+    const sheets = sheetsClient()
+    const res = await sheets.spreadsheets.values.get({
+        spreadsheetId,
+        range: `'${sheetTitle.replace(/'/g, "''")}'!1:15`,
+    })
+    const grid = ((res.data.values || []) as unknown[][]).map((row) =>
+        row.map((c) => (c === undefined || c === null ? '' : String(c).trim()))
+    )
+    const hr = firstNonEmptyRow(grid)
+    if (hr < 0) return []
+    return (grid[hr] || [])
+        .map((name, index) => ({ index, letter: colLetter(index), name }))
+        .filter((c) => c.name !== '')
+}
+
+// Read every data row below the header into clean lead objects.
+// If `columnMap` pins any column, that map is used verbatim (header = first
+// non-empty row, data below it). Otherwise headers are auto-detected by name.
+export async function readLeadRows(
+    spreadsheetId: string,
+    sheetTitle: string,
+    columnMap?: ColumnMap | null
 ): Promise<ReadLeadsResult> {
     const sheets = sheetsClient()
     const res = await sheets.spreadsheets.values.get({
@@ -165,11 +224,25 @@ export async function readLeadRows(
     const str = (v: unknown) => (v === undefined || v === null ? '' : String(v).trim())
     const grid = values.map((row) => row.map(str))
 
-    const header = findHeader(grid)
-    if (!header) {
-        throw new Error(
-            'Could not find a header row with "full_name" and "phone" in this tab.'
-        )
+    let header: SheetHeaderMap | null
+    if (columnMapHasAny(columnMap)) {
+        // Manual map: header is the first non-empty row, columns come straight
+        // from the admin's picks — no name matching, so renamed/reordered
+        // headers and extra question columns don't matter.
+        const hr = firstNonEmptyRow(grid)
+        if (hr < 0) throw new Error('The tab is empty.')
+        const cols: Record<string, number> = {}
+        for (const [k, v] of Object.entries(columnMap!)) {
+            if (typeof v === 'number' && v >= 0) cols[k] = v
+        }
+        header = { headerRow: hr + 1, cols }
+    } else {
+        header = findHeader(grid)
+        if (!header) {
+            throw new Error(
+                'Could not find a header row with "full_name" and "phone" in this tab. Open the source and set the column mapping.'
+            )
+        }
     }
     const { cols, headerRow } = header
     const get = (row: string[], key: string) =>

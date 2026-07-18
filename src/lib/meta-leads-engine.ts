@@ -28,7 +28,7 @@ import { sendSmsToUser } from '@/lib/sms'
 import { isPunchedInNow } from '@/lib/leads-engine'
 import { normaliseLeadToken } from '@/lib/leads'
 import { formatPhoneDisplay } from '@/lib/country-codes'
-import { readLeadRows } from '@/lib/google-sheets'
+import { readLeadRows, type ColumnMap } from '@/lib/google-sheets'
 import {
     parseDob,
     cleanSheetPhone,
@@ -78,13 +78,14 @@ interface SourceRow {
     ratio: RatioEntry[]
     rr_cursor: number
     is_active: boolean
+    column_map: ColumnMap | null
 }
 
 // ── Import + distribute new rows for ONE source ─────────────────────────────
 export async function syncSource(sb: SbLike, sourceId: string): Promise<SyncResult> {
     const { data: source } = await sb
         .from('meta_lead_sources')
-        .select('id, spreadsheet_id, sheet_title, ttl_minutes, penalty_lkr, ratio, rr_cursor, is_active')
+        .select('id, spreadsheet_id, sheet_title, ttl_minutes, penalty_lkr, ratio, rr_cursor, is_active, column_map')
         .eq('id', sourceId)
         .single()
 
@@ -99,7 +100,7 @@ export async function syncSource(sb: SbLike, sourceId: string): Promise<SyncResu
 
     let read
     try {
-        read = await readLeadRows(s.spreadsheet_id, s.sheet_title)
+        read = await readLeadRows(s.spreadsheet_id, s.sheet_title, s.column_map)
     } catch (err) {
         const note = err instanceof Error ? err.message : 'sheet_read_failed'
         await stampSync(sb, s.id, s.rr_cursor, note)

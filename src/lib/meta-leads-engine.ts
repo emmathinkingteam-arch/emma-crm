@@ -437,13 +437,14 @@ export async function processMetaLeadPenalties(sb: SbLike): Promise<MetaPenaltyR
     return result
 }
 
-// ── Auto-escalate stale Tier Clients to the admin queue ─────────────────────
+// ── Auto-escalate stale Tier Clients to the admin call-list ─────────────────
 // A no-answer / call-back lead sits with its agent as a Tier Client. If the
 // agent's latest update (responded_at) is still one of those after
 // TIER_ESCALATE_HOURS with nothing newer, it belongs to admin now: stamp
-// escalated_at, close the lead, and file it into the Rejected CRM queue exactly
-// like a manual negative. Any newer agent update flips the status/responded_at
-// out of this filter, so re-worked leads never escalate. Idempotent via the
+// escalated_at + close the lead. It then surfaces in the admin Meta Ads page's
+// "Escalated to admin" card, where admin can try calling and delete it if it
+// goes nowhere. Any newer agent update flips the status/responded_at out of
+// this filter, so re-worked leads never escalate. Idempotent via the
 // escalated_at IS NULL guard on the claim.
 const META_TO_TAG_ENGINE: Partial<Record<MetaLeadStatus, string>> = {
     no_answer: 'not_answer',
@@ -500,20 +501,6 @@ export async function processTierEscalations(
         result.escalated++
 
         const tag = META_TO_TAG_ENGINE[lead.status]
-        try {
-            await sb.from('crm_rejections').insert({
-                customer_id: lead.customer_id,
-                phone: lead.phone || '',
-                customer_name: lead.full_name || null,
-                agent_id: lead.assigned_to,
-                tags: tag ? [tag] : [],
-                reason: `Auto-escalated: still no answer ${TIER_ESCALATE_HOURS}h after last update`,
-                note: null,
-            })
-        } catch {
-            // non-fatal — the lead is already marked escalated
-        }
-
         if (lead.customer_id) {
             try {
                 await sb.from('interactions').insert({

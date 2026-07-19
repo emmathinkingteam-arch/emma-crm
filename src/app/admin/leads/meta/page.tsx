@@ -17,6 +17,7 @@ import {
     type MetaLeadSource,
     type MetaLeadStatus,
 } from '@/lib/meta-leads'
+import { formatPhoneDisplay } from '@/lib/country-codes'
 import {
     Loader2,
     Link2,
@@ -34,6 +35,8 @@ import {
     ArrowLeftRight,
     X,
     Columns3,
+    PhoneCall,
+    Phone,
 } from 'lucide-react'
 
 interface Agent {
@@ -67,6 +70,9 @@ export default function MetaAdsPage() {
     const [agents, setAgents] = useState<Agent[]>([])
     const [sources, setSources] = useState<MetaLeadSource[]>([])
     const [leads, setLeads] = useState<MetaLead[]>([])
+    // No-answer/call-back Tier Clients auto-escalated to admin after 24h.
+    const [escalated, setEscalated] = useState<MetaLead[]>([])
+    const [deletingId, setDeletingId] = useState<string | null>(null)
     const [loading, setLoading] = useState(true)
 
     // form
@@ -96,7 +102,7 @@ export default function MetaAdsPage() {
     const [reassignBusy, setReassignBusy] = useState<string | null>(null)
 
     const load = useCallback(async () => {
-        const [aRes, sRes, lRes] = await Promise.all([
+        const [aRes, sRes, lRes, eRes] = await Promise.all([
             supabase
                 .from('users')
                 .select('id, full_name')
@@ -107,10 +113,17 @@ export default function MetaAdsPage() {
                 .order('full_name'),
             supabase.from('meta_lead_sources').select('*').order('created_at', { ascending: false }),
             supabase.from('meta_leads').select('*').order('created_at', { ascending: false }).limit(150),
+            supabase
+                .from('meta_leads')
+                .select('*')
+                .not('escalated_at', 'is', null)
+                .order('escalated_at', { ascending: false })
+                .limit(150),
         ])
         setAgents((aRes.data as Agent[]) || [])
         setSources((sRes.data as MetaLeadSource[]) || [])
         setLeads((lRes.data as MetaLead[]) || [])
+        setEscalated((eRes.data as MetaLead[]) || [])
         setLoading(false)
     }, [])
 
@@ -358,6 +371,30 @@ export default function MetaAdsPage() {
         setReassignBusy(null)
     }
 
+    async function deleteEscalated(leadId: string) {
+        if (!confirm('Delete this escalated lead from the system? (The Google Sheet is not touched.)')) return
+        setDeletingId(leadId)
+        setMsg(null)
+        // Optimistic remove so the list clears immediately.
+        setEscalated((prev) => prev.filter((l) => l.id !== leadId))
+        try {
+            const res = await fetch('/api/meta-leads/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ leadId }),
+            })
+            const j = await res.json()
+            if (!j.ok) {
+                setMsg({ kind: 'err', text: j.error || 'Delete failed.' })
+                load() // put it back if the server rejected it
+            }
+        } catch {
+            setMsg({ kind: 'err', text: 'Network error deleting.' })
+            load()
+        }
+        setDeletingId(null)
+    }
+
     const agentName = (id: string | null) => agents.find((a) => a.id === id)?.full_name || '—'
 
     const createdLeads = useMemo(() => leads.filter((l) => l.status === 'created'), [leads])
@@ -597,6 +634,67 @@ export default function MetaAdsPage() {
                     </div>
                 )}
             </div>
+
+            {/* ── Escalated to admin — call back ─────────────────────────── */}
+            {escalated.length > 0 && (
+                <div>
+                    <div className="flex items-center gap-2 mb-2">
+                        <PhoneCall size={13} className="text-amber-500" />
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                            Escalated to admin — call back
+                        </p>
+                        <span className="text-[9px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
+                            {escalated.length}
+                        </span>
+                    </div>
+                    <p className="text-[10px] text-gray-400 font-medium mb-2">
+                        No answer for {`>`}24h after the agent&apos;s last try — try calling, then delete if it goes nowhere.
+                    </p>
+                    <div className="bg-white border border-amber-100 rounded-2xl shadow-sm overflow-hidden divide-y divide-gray-50">
+                        {escalated.map((l) => {
+                            const st = META_STATUS_META[(l.status as MetaLeadStatus) || 'no_answer']
+                            const phone = l.phone_display || formatPhoneDisplay(l.phone || '')
+                            return (
+                                <div key={l.id} className="px-4 py-3">
+                                    <div className="flex items-center gap-3">
+                                        <div className="min-w-0 flex-1">
+                                            <p className="text-xs font-bold text-gray-800 truncate">
+                                                {l.full_name || phone}
+                                                {l.age != null && <span className="text-gray-400 font-semibold"> · {l.age}</span>}
+                                            </p>
+                                            <p className="text-[10px] text-gray-400 font-medium truncate">
+                                                <span className="font-mono text-gray-500">{phone}</span>
+                                                {' · '}{l.job_title || '—'}
+                                                {' · was '}{agentName(l.assigned_to)}
+                                            </p>
+                                            {l.escalated_at && (
+                                                <p className="text-[9px] text-amber-600 font-semibold mt-0.5">
+                                                    Moved to admin {new Date(l.escalated_at).toLocaleString()}
+                                                </p>
+                                            )}
+                                        </div>
+                                        <span className={`text-[8px] font-bold px-2 py-1 rounded-full flex-shrink-0 ${st.cls}`}>{st.label}</span>
+                                        <a
+                                            href={l.phone ? `tel:${l.phone}` : undefined}
+                                            className={`flex items-center gap-1 text-[10px] font-bold px-3 py-1.5 rounded-full flex-shrink-0 active:scale-95 ${l.phone ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-300 pointer-events-none'}`}
+                                        >
+                                            <Phone size={11} /> Call
+                                        </a>
+                                        <button
+                                            onClick={() => deleteEscalated(l.id)}
+                                            disabled={deletingId === l.id}
+                                            className="text-gray-300 hover:text-red-500 p-1.5 flex-shrink-0 disabled:opacity-50"
+                                            aria-label="Delete lead"
+                                        >
+                                            {deletingId === l.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                                        </button>
+                                    </div>
+                                </div>
+                            )
+                        })}
+                    </div>
+                </div>
+            )}
 
             {/* ── Recent leads ───────────────────────────────────────────── */}
             {leads.length > 0 && (

@@ -19,10 +19,11 @@ export function extractGid(input: string): number | null {
     return m ? Number(m[1]) : null
 }
 
-// 'followup' = the agent has actioned it (no-answer/call-back/package/payment)
-// so it left the fresh pallet and now lives in their "Tier Clients" tab. It is
-// off the 1h penalty timer; a no-answer/call-back followup auto-escalates to
-// the admin queue after 24h with no newer update (see meta-leads-engine).
+// 'followup' = the agent got a no-answer / call-back on it, so it left the fresh
+// pallet and now lives in their "Tier Clients — call back" tab. It is off the 1h
+// penalty timer and auto-escalates to the admin queue after 24h with no newer
+// update (see meta-leads-engine). A normal update (package/payment sent) does
+// NOT go here — it closes the lead ('done') and lives on as a regular CRM client.
 export type MetaLeadStage = 'new' | 'active' | 'followup' | 'done'
 
 // Canonical status key → the EXACT string written into the sheet's lead_status.
@@ -62,18 +63,17 @@ export const META_STATUS_META: Record<
     rejected: { label: 'Rejected', cls: 'bg-red-50 text-red-600', btn: 'bg-red-50 text-red-700 border-red-200' },
 }
 
-// Statuses that keep a lead with its agent as a "Tier Client" (stage='followup')
-// instead of closing it out. Everything else (paid) or the terminal negatives
-// (rejected/fake) close the lead.
-export const FOLLOWUP_STATUSES: MetaLeadStatus[] = [
-    'no_answer',
-    'call_back',
-    'package_sent',
-    'payment_sent',
-]
+// Statuses that keep a lead with its agent as a "Tier Client — call back"
+// (stage='followup') instead of closing it out. ONLY the no-answer / call-back
+// outcomes belong here: they're the ones that need chasing and auto-escalate to
+// admin after 24h. A normal update (package/payment details sent) is a real
+// client — it closes out (stage='done') and just lives in the CRM like every
+// other number. Paid and the terminal negatives (rejected/fake) also close.
+export const FOLLOWUP_STATUSES: MetaLeadStatus[] = ['no_answer', 'call_back']
 
-// Of the follow-ups, only these keep the 24h escalation clock running — if the
+// Of the follow-ups, these keep the 24h escalation clock running — if the
 // agent's latest update is still one of these after 24h, it goes to admin.
+// (Same set as FOLLOWUP_STATUSES now: every Tier Client is an escalating one.)
 export const ESCALATING_STATUSES: MetaLeadStatus[] = ['no_answer', 'call_back']
 
 // Hours a no-answer/call-back Tier Client waits before auto-escalating to admin.

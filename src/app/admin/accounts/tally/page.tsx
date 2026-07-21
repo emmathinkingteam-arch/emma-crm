@@ -90,10 +90,12 @@ interface TallyRow {
     amount: number
     dir: 'in' | 'out'
     sourceSlip: string | null // slip that came from the source table
+    homeBank: BankKey // the bank this row naturally belongs to (from its source)
     // overlay state (acc_tally_marks)
     checked: boolean
     slipOverride: string | null
     sortIndex: number | null // null = order by date
+    bankOverride: BankKey | null // set = moved onto the other bank's tab
 }
 
 const KIND_META: Record<RowKind, { label: string; cls: string; Icon: typeof Package }> = {
@@ -160,8 +162,18 @@ export default function BankTallyPage() {
         if (ledgerId.boc) idToBank[ledgerId.boc] = 'boc'
 
         const out: Record<BankKey, TallyRow[]> = { commercial: [], boc: [] }
-        const push = (bank: BankKey, r: Omit<TallyRow, 'checked' | 'slipOverride' | 'sortIndex'>) =>
-            out[bank].push({ ...r, checked: false, slipOverride: null, sortIndex: null })
+        const push = (
+            bank: BankKey,
+            r: Omit<TallyRow, 'homeBank' | 'checked' | 'slipOverride' | 'sortIndex' | 'bankOverride'>
+        ) =>
+            out[bank].push({
+                ...r,
+                homeBank: bank,
+                checked: false,
+                slipOverride: null,
+                sortIndex: null,
+                bankOverride: null,
+            })
 
         // ── A) Imported Commercial Bank statement ─────────────────────────────
         const { data: stmt } = await supabase
@@ -312,14 +324,17 @@ export default function BankTallyPage() {
             })
         }
 
-        // ── Overlay: reconciled tick, manual order, uploaded slip ─────────────
+        // ── Overlay: reconciled tick, manual order, uploaded slip, bank move ──
         const { data: marks } = await supabase
             .from('acc_tally_marks')
-            .select('row_key, checked, sort_index, slip_url')
+            .select('row_key, checked, sort_index, slip_url, bank_override')
             .limit(20000)
         const markBy: Record<string, any> = {}
         for (const m of (marks || []) as any[]) markBy[m.row_key] = m
 
+        // Apply overlay, then bucket each row onto its effective bank (an override
+        // relocates a mis-filed row to the other tab).
+        const final: Record<BankKey, TallyRow[]> = { commercial: [], boc: [] }
         for (const k of ['commercial', 'boc'] as BankKey[]) {
             for (const r of out[k]) {
                 const m = markBy[r.key]
@@ -327,12 +342,15 @@ export default function BankTallyPage() {
                     r.checked = !!m.checked
                     r.sortIndex = m.sort_index == null ? null : Number(m.sort_index)
                     r.slipOverride = m.slip_url ?? null
+                    r.bankOverride = (m.bank_override as BankKey) ?? null
                 }
+                final[r.bankOverride ?? r.homeBank].push(r)
             }
-            out[k].sort(cmpRows)
         }
+        final.commercial.sort(cmpRows)
+        final.boc.sort(cmpRows)
 
-        setRowsByBank(out)
+        setRowsByBank(final)
         setLoading(false)
     }, [])
 
@@ -395,10 +413,25 @@ export default function BankTallyPage() {
                 checked_by: merged.checked ? user?.id ?? null : null,
                 sort_index: merged.sortIndex,
                 slip_url: merged.slipOverride,
+                bank_override: merged.bankOverride,
                 updated_at: now,
             },
             { onConflict: 'row_key' }
         )
+    }
+
+    // Reassign a mis-filed row to the other bank. If it lands back on its natural
+    // bank the override is cleared, so we never keep a redundant override.
+    async function moveBank(r: TallyRow) {
+        const target: BankKey = bank === 'commercial' ? 'boc' : 'commercial'
+        const nextOverride: BankKey | null = target === r.homeBank ? null : target
+        const moved: TallyRow = { ...r, bankOverride: nextOverride }
+        setRowsByBank((prev) => ({
+            ...prev,
+            [bank]: prev[bank].filter((x) => x.key !== r.key),
+            [target]: [...prev[target], moved].sort(cmpRows),
+        }))
+        await saveMark(r, { bankOverride: nextOverride })
     }
 
     async function toggleCheck(r: TallyRow) {
@@ -460,6 +493,7 @@ export default function BankTallyPage() {
     }
 
     const colSpan = 3 + (canEdit ? 1 : 0)
+    const otherBankLabel = bank === 'commercial' ? BANKS.boc.label : BANKS.commercial.label
 
     return (
         <div className="space-y-4">
@@ -558,7 +592,7 @@ export default function BankTallyPage() {
                                     <th className="px-3 py-2.5 text-right text-[10px] font-bold text-gray-400 uppercase">In</th>
                                     <th className="px-3 py-2.5 text-right text-[10px] font-bold text-gray-400 uppercase">Out</th>
                                     <th className="px-3 py-2.5 text-center text-[10px] font-bold text-gray-400 uppercase">Slip</th>
-                                    {canEdit && <th className="px-2 py-2.5 w-12 text-center text-[10px] font-bold text-gray-400 uppercase">Order</th>}
+                                    {canEdit && <th className="px-2 py-2.5 w-20 text-center text-[10px] font-bold text-gray-400 uppercase">Actions</th>}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-50">
@@ -607,6 +641,14 @@ export default function BankTallyPage() {
                                                             {src.label}
                                                         </span>
                                                     )}
+                                                    {r.bankOverride && (
+                                                        <span
+                                                            title={`Moved here from ${r.homeBank === 'commercial' ? BANKS.commercial.label : BANKS.boc.label}`}
+                                                            className="inline-flex items-center gap-0.5 px-1.5 py-1 rounded-lg text-[9px] font-bold bg-indigo-100 text-indigo-700"
+                                                        >
+                                                            <ArrowLeftRight size={9} /> moved
+                                                        </span>
+                                                    )}
                                                 </div>
                                             </td>
                                             <td className="px-3 py-2.5 text-right font-bold text-emerald-600 tabular-nums whitespace-nowrap">
@@ -652,6 +694,13 @@ export default function BankTallyPage() {
                                                         >
                                                             <ChevronDown size={14} />
                                                         </button>
+                                                        <button
+                                                            onClick={() => moveBank(r)}
+                                                            title={`Wrong bank? Move to ${otherBankLabel}`}
+                                                            className="text-gray-300 hover:text-indigo-600 ml-0.5"
+                                                        >
+                                                            <ArrowLeftRight size={14} />
+                                                        </button>
                                                     </div>
                                                 </td>
                                             )}
@@ -690,7 +739,8 @@ export default function BankTallyPage() {
                         imported income. Legacy transfer/cash income didn&apos;t record which bank, so it&apos;s
                         attributed to BOC as a best guess. There is no imported historical BOC expense data.</>
                 )}{' '}
-                Tick the circle to mark a line reconciled, upload a slip, or use the arrows to reorder. Net = {lkr(totals.net)}.
+                Tick the circle to mark a line reconciled, upload a slip, use the arrows to reorder, or the
+                ⇄ button to move a mis-filed line to the other bank. Net = {lkr(totals.net)}.
             </p>
         </div>
     )

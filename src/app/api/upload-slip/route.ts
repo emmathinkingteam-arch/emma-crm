@@ -1,12 +1,30 @@
 // src/app/api/upload-slip/route.ts
-import { NextResponse } from 'next/server'
-import { v2 as cloudinary } from 'cloudinary'
+// ============================================================================
+// Expense / income slip upload. Stores to the PRIVATE Backblaze B2 bucket and
+// returns an /api/media path (served to logged-in staff only). Previously this
+// uploaded to Cloudinary, but Cloudinary blocks PDF delivery by default (401),
+// so slips are now kept alongside every other file in B2.
+//
+// Response shape is unchanged for existing callers (income / add-expense):
+//   { ok, driveUrl, fileId, fileName }
+// ============================================================================
 
-cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET,
-})
+import { NextResponse } from 'next/server'
+import { uploadFile } from '@/lib/backblaze'
+
+export const runtime = 'nodejs'
+
+// Pick a file extension from the upload's name, falling back to its MIME type.
+function extFor(file: File): string {
+    const fromName = file.name?.split('?')[0].match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase()
+    if (fromName) return fromName
+    const t = (file.type || '').toLowerCase()
+    if (t.includes('pdf')) return 'pdf'
+    if (t.includes('png')) return 'png'
+    if (t.includes('jpeg') || t.includes('jpg')) return 'jpg'
+    if (t.includes('webp')) return 'webp'
+    return 'bin'
+}
 
 export async function POST(req: Request) {
     try {
@@ -18,19 +36,13 @@ export async function POST(req: Request) {
         if (!code) return NextResponse.json({ error: 'No code provided' }, { status: 400 })
 
         const buffer = Buffer.from(await file.arrayBuffer())
-        const base64 = `data:${file.type};base64,${buffer.toString('base64')}`
-
-        const result = await cloudinary.uploader.upload(base64, {
-            folder: 'expense-slips',
-            public_id: code,
-            overwrite: true,
-            resource_type: 'auto',
-        })
+        const key = `expense-slips/${code}.${extFor(file)}`
+        const { url } = await uploadFile(key, buffer, file.type || 'application/octet-stream')
 
         return NextResponse.json({
             ok: true,
-            driveUrl: result.secure_url,
-            fileId: result.public_id,
+            driveUrl: url, // /api/media/expense-slips/<code>.<ext>
+            fileId: key,
             fileName: code,
         })
     } catch (err: any) {

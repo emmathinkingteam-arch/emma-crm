@@ -50,6 +50,8 @@ import {
     Circle,
     ChevronUp,
     ChevronDown,
+    Trash2,
+    RotateCcw,
 } from 'lucide-react'
 
 type BankKey = 'commercial' | 'boc'
@@ -96,6 +98,7 @@ interface TallyRow {
     slipOverride: string | null
     sortIndex: number | null // null = order by date
     bankOverride: BankKey | null // set = moved onto the other bank's tab
+    hidden: boolean // removed from the tally (reversible)
 }
 
 const KIND_META: Record<RowKind, { label: string; cls: string; Icon: typeof Package }> = {
@@ -144,6 +147,7 @@ export default function BankTallyPage() {
     })
     const [month, setMonth] = useState('')
     const [q, setQ] = useState('')
+    const [showRemoved, setShowRemoved] = useState(false)
     const [busyKey, setBusyKey] = useState<string | null>(null)
 
     const uploadFor = useRef<TallyRow | null>(null)
@@ -164,7 +168,10 @@ export default function BankTallyPage() {
         const out: Record<BankKey, TallyRow[]> = { commercial: [], boc: [] }
         const push = (
             bank: BankKey,
-            r: Omit<TallyRow, 'homeBank' | 'checked' | 'slipOverride' | 'sortIndex' | 'bankOverride'>
+            r: Omit<
+                TallyRow,
+                'homeBank' | 'checked' | 'slipOverride' | 'sortIndex' | 'bankOverride' | 'hidden'
+            >
         ) =>
             out[bank].push({
                 ...r,
@@ -173,6 +180,7 @@ export default function BankTallyPage() {
                 slipOverride: null,
                 sortIndex: null,
                 bankOverride: null,
+                hidden: false,
             })
 
         // ── A) Imported Commercial Bank statement ─────────────────────────────
@@ -327,7 +335,7 @@ export default function BankTallyPage() {
         // ── Overlay: reconciled tick, manual order, uploaded slip, bank move ──
         const { data: marks } = await supabase
             .from('acc_tally_marks')
-            .select('row_key, checked, sort_index, slip_url, bank_override')
+            .select('row_key, checked, sort_index, slip_url, bank_override, hidden')
             .limit(20000)
         const markBy: Record<string, any> = {}
         for (const m of (marks || []) as any[]) markBy[m.row_key] = m
@@ -343,6 +351,7 @@ export default function BankTallyPage() {
                     r.sortIndex = m.sort_index == null ? null : Number(m.sort_index)
                     r.slipOverride = m.slip_url ?? null
                     r.bankOverride = (m.bank_override as BankKey) ?? null
+                    r.hidden = !!m.hidden
                 }
                 final[r.bankOverride ?? r.homeBank].push(r)
             }
@@ -366,6 +375,7 @@ export default function BankTallyPage() {
         return Array.from(set).sort().reverse()
     }, [rows])
 
+    // Rows passing the month/search filter (still includes removed ones).
     const filtered = useMemo(() => {
         let r = rows
         if (month) r = r.filter((x) => x.date.slice(0, 7) === month)
@@ -378,9 +388,19 @@ export default function BankTallyPage() {
         return r
     }, [rows, month, q])
 
+    const hiddenCount = useMemo(() => filtered.filter((r) => r.hidden).length, [filtered])
+    // What the table renders: removed rows only appear when "Show removed" is on.
+    const shown = useMemo(
+        () => (showRemoved ? filtered : filtered.filter((r) => !r.hidden)),
+        [filtered, showRemoved]
+    )
+
+    // Totals never count removed rows.
     const totals = useMemo(() => {
-        let inn = 0, out = 0, checkedIn = 0, checkedOut = 0, checked = 0
+        let inn = 0, out = 0, checkedIn = 0, checkedOut = 0, checked = 0, count = 0
         for (const r of filtered) {
+            if (r.hidden) continue
+            count++
             if (r.dir === 'in') inn += r.amount
             else out += r.amount
             if (r.checked) {
@@ -389,7 +409,7 @@ export default function BankTallyPage() {
                 else checkedOut += r.amount
             }
         }
-        return { inn, out, net: inn - out, count: filtered.length, checked, checkedIn, checkedOut }
+        return { inn, out, net: inn - out, count, checked, checkedIn, checkedOut }
     }, [filtered])
 
     // ── overlay mutations ────────────────────────────────────────────────────
@@ -414,10 +434,16 @@ export default function BankTallyPage() {
                 sort_index: merged.sortIndex,
                 slip_url: merged.slipOverride,
                 bank_override: merged.bankOverride,
+                hidden: merged.hidden,
                 updated_at: now,
             },
             { onConflict: 'row_key' }
         )
+    }
+
+    async function setHidden(r: TallyRow, hidden: boolean) {
+        patch(r.key, { hidden })
+        await saveMark(r, { hidden })
     }
 
     // Reassign a mis-filed row to the other bank. If it lands back on its natural
@@ -441,7 +467,7 @@ export default function BankTallyPage() {
     }
 
     async function move(r: TallyRow, dir: 'up' | 'down') {
-        const list = filtered
+        const list = shown
         const i = list.findIndex((x) => x.key === r.key)
         const j = dir === 'up' ? i - 1 : i + 1
         if (i < 0 || j < 0 || j >= list.length) return
@@ -568,6 +594,17 @@ export default function BankTallyPage() {
                 <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-600">
                     <Archive size={11} /> legacy import
                 </span>
+                {canEdit && hiddenCount > 0 && (
+                    <button
+                        onClick={() => setShowRemoved((v) => !v)}
+                        className={`px-3 py-2 rounded-xl text-xs font-bold border transition ${showRemoved
+                            ? 'bg-rose-50 border-rose-200 text-rose-600'
+                            : 'bg-gray-50 border-gray-200 text-gray-400 hover:text-gray-600'
+                            }`}
+                    >
+                        {showRemoved ? 'Hide removed' : `Show removed (${hiddenCount})`}
+                    </button>
+                )}
             </div>
 
             {/* Register */}
@@ -576,7 +613,7 @@ export default function BankTallyPage() {
                     <div className="py-20 flex items-center justify-center">
                         <Loader2 className="animate-spin text-pink-600" size={22} />
                     </div>
-                ) : filtered.length === 0 ? (
+                ) : shown.length === 0 ? (
                     <div className="py-16 text-center text-xs text-gray-400">
                         No transactions on {BANKS[bank].label} for this filter.
                     </div>
@@ -596,16 +633,18 @@ export default function BankTallyPage() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-50">
-                                {filtered.map((r, idx) => {
+                                {shown.map((r, idx) => {
                                     const meta = KIND_META[r.kind]
                                     const src = SOURCE_META[r.source]
                                     const slip = r.slipOverride ?? r.sourceSlip
                                     const busy = busyKey === r.key
+                                    const rowCls = r.hidden
+                                        ? 'bg-rose-50/40 hover:bg-rose-50/70 opacity-60'
+                                        : r.checked
+                                            ? 'bg-emerald-50/50 hover:bg-emerald-50'
+                                            : 'hover:bg-pink-50/20'
                                     return (
-                                        <tr
-                                            key={r.key}
-                                            className={r.checked ? 'bg-emerald-50/50 hover:bg-emerald-50' : 'hover:bg-pink-50/20'}
-                                        >
+                                        <tr key={r.key} className={rowCls}>
                                             {canEdit && (
                                                 <td className="px-2 py-2.5 text-center">
                                                     <button
@@ -649,6 +688,11 @@ export default function BankTallyPage() {
                                                             <ArrowLeftRight size={9} /> moved
                                                         </span>
                                                     )}
+                                                    {r.hidden && (
+                                                        <span className="inline-flex items-center gap-0.5 px-1.5 py-1 rounded-lg text-[9px] font-bold bg-rose-100 text-rose-600">
+                                                            <Trash2 size={9} /> removed
+                                                        </span>
+                                                    )}
                                                 </div>
                                             </td>
                                             <td className="px-3 py-2.5 text-right font-bold text-emerald-600 tabular-nums whitespace-nowrap">
@@ -677,31 +721,50 @@ export default function BankTallyPage() {
                                             </td>
                                             {canEdit && (
                                                 <td className="px-2 py-2.5">
-                                                    <div className="flex items-center justify-center gap-0.5">
-                                                        <button
-                                                            onClick={() => move(r, 'up')}
-                                                            disabled={idx === 0}
-                                                            title="Move up"
-                                                            className="text-gray-300 hover:text-pink-600 disabled:opacity-30 disabled:hover:text-gray-300"
-                                                        >
-                                                            <ChevronUp size={14} />
-                                                        </button>
-                                                        <button
-                                                            onClick={() => move(r, 'down')}
-                                                            disabled={idx === filtered.length - 1}
-                                                            title="Move down"
-                                                            className="text-gray-300 hover:text-pink-600 disabled:opacity-30 disabled:hover:text-gray-300"
-                                                        >
-                                                            <ChevronDown size={14} />
-                                                        </button>
-                                                        <button
-                                                            onClick={() => moveBank(r)}
-                                                            title={`Wrong bank? Move to ${otherBankLabel}`}
-                                                            className="text-gray-300 hover:text-indigo-600 ml-0.5"
-                                                        >
-                                                            <ArrowLeftRight size={14} />
-                                                        </button>
-                                                    </div>
+                                                    {r.hidden ? (
+                                                        <div className="flex items-center justify-center">
+                                                            <button
+                                                                onClick={() => setHidden(r, false)}
+                                                                title="Restore to the tally"
+                                                                className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600 hover:text-emerald-700"
+                                                            >
+                                                                <RotateCcw size={13} /> Restore
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="flex items-center justify-center gap-0.5">
+                                                            <button
+                                                                onClick={() => move(r, 'up')}
+                                                                disabled={idx === 0}
+                                                                title="Move up"
+                                                                className="text-gray-300 hover:text-pink-600 disabled:opacity-30 disabled:hover:text-gray-300"
+                                                            >
+                                                                <ChevronUp size={14} />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => move(r, 'down')}
+                                                                disabled={idx === shown.length - 1}
+                                                                title="Move down"
+                                                                className="text-gray-300 hover:text-pink-600 disabled:opacity-30 disabled:hover:text-gray-300"
+                                                            >
+                                                                <ChevronDown size={14} />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => moveBank(r)}
+                                                                title={`Wrong bank? Move to ${otherBankLabel}`}
+                                                                className="text-gray-300 hover:text-indigo-600"
+                                                            >
+                                                                <ArrowLeftRight size={14} />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => setHidden(r, true)}
+                                                                title="Remove from tally"
+                                                                className="text-gray-300 hover:text-rose-600"
+                                                            >
+                                                                <Trash2 size={14} />
+                                                            </button>
+                                                        </div>
+                                                    )}
                                                 </td>
                                             )}
                                         </tr>
@@ -711,9 +774,12 @@ export default function BankTallyPage() {
                             <tfoot>
                                 <tr className="bg-gray-50 border-t-2 border-gray-100">
                                     <td colSpan={colSpan} className="px-3 py-2.5 text-xs font-bold text-gray-600">
-                                        Total — {filtered.length} transactions
+                                        Total — {totals.count} transactions
                                         {totals.checked > 0 && (
                                             <span className="ml-2 text-emerald-600">· {totals.checked} checked</span>
+                                        )}
+                                        {hiddenCount > 0 && (
+                                            <span className="ml-2 text-rose-500">· {hiddenCount} removed</span>
                                         )}
                                     </td>
                                     <td className="px-3 py-2.5 text-right font-extrabold text-emerald-700 tabular-nums whitespace-nowrap">
@@ -739,8 +805,10 @@ export default function BankTallyPage() {
                         imported income. Legacy transfer/cash income didn&apos;t record which bank, so it&apos;s
                         attributed to BOC as a best guess. There is no imported historical BOC expense data.</>
                 )}{' '}
-                Tick the circle to mark a line reconciled, upload a slip, use the arrows to reorder, or the
-                ⇄ button to move a mis-filed line to the other bank. Net = {lkr(totals.net)}.
+                Tick the circle to mark a line reconciled, upload a slip, use the arrows to reorder, the
+                ⇄ button to move a mis-filed line to the other bank, or the trash to remove a line (it drops
+                out of the totals; &ldquo;Show removed&rdquo; brings it back — the source record is never
+                deleted). Net = {lkr(totals.net)}.
             </p>
         </div>
     )

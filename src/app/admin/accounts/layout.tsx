@@ -15,6 +15,7 @@ import {
     Users as UsersIcon,
     Receipt,
     Sparkles,
+    Scale,
 } from 'lucide-react'
 
 const SUB_TABS = [
@@ -23,6 +24,7 @@ const SUB_TABS = [
     { href: '/admin/accounts/add-expense-auto', icon: Sparkles, label: 'Add Auto' },
     { href: '/admin/accounts/income', icon: ArrowDownToLine, label: 'Income' },
     { href: '/admin/accounts/transactions', icon: ListOrdered, label: 'Transactions' },
+    { href: '/admin/accounts/tally', icon: Scale, label: 'Bank Tally' },
     { href: '/admin/accounts/commercial', icon: Building2, label: 'Commercial Bank' },
     { href: '/admin/accounts/banks', icon: Landmark, label: 'Bank & Cash' },
     { href: '/admin/accounts/wallets', icon: Wallet, label: 'Wallets' },

@@ -260,7 +260,7 @@ export default function BankTallyPage() {
         const { data: orders } = await supabase
             .from('orders')
             .select(
-                'id, amount_paid, installment_2_amount, installment_2_paid_at, payment_type, payment_bank, created_at, customer:customers(name, phone), package:packages(name)'
+                'id, amount_paid, installment_2_amount, installment_2_paid_at, payment_type, payment_bank, payment_slip_url, installment_2_slip_url, created_at, customer:customers(name, phone), package:packages(name)'
             )
             .order('created_at', { ascending: true })
             .limit(5000)
@@ -287,7 +287,7 @@ export default function BankTallyPage() {
                     source: 'order',
                     amount: first,
                     dir: 'in',
-                    sourceSlip: null,
+                    sourceSlip: o.payment_slip_url ?? null,
                 })
             }
             const inst2 = Number(o.installment_2_amount || 0)
@@ -302,7 +302,7 @@ export default function BankTallyPage() {
                     source: 'order',
                     amount: inst2,
                     dir: 'in',
-                    sourceSlip: null,
+                    sourceSlip: o.installment_2_slip_url ?? null,
                 })
             }
         }

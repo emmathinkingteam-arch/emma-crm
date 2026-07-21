@@ -14,11 +14,13 @@ import {
     Building2,
     Users as UsersIcon,
     Receipt,
+    Sparkles,
 } from 'lucide-react'
 
 const SUB_TABS = [
     { href: '/admin/accounts', icon: LayoutDashboard, label: 'Overview', exact: true },
     { href: '/admin/accounts/add-expense', icon: PlusCircle, label: 'Add Expense' },
+    { href: '/admin/accounts/add-expense-auto', icon: Sparkles, label: 'Add Auto' },
     { href: '/admin/accounts/income', icon: ArrowDownToLine, label: 'Income' },
     { href: '/admin/accounts/transactions', icon: ListOrdered, label: 'Transactions' },
     { href: '/admin/accounts/commercial', icon: Building2, label: 'Commercial Bank' },

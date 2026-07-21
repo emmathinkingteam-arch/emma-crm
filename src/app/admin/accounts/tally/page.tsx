@@ -52,6 +52,9 @@ import {
     ChevronDown,
     Trash2,
     RotateCcw,
+    Pencil,
+    Check,
+    X,
 } from 'lucide-react'
 
 type BankKey = 'commercial' | 'boc'
@@ -93,13 +96,22 @@ interface TallyRow {
     dir: 'in' | 'out'
     sourceSlip: string | null // slip that came from the source table
     homeBank: BankKey // the bank this row naturally belongs to (from its source)
+    baseOrder: number // unique default rank (chronological) for stable reordering
     // overlay state (acc_tally_marks)
     checked: boolean
     slipOverride: string | null
-    sortIndex: number | null // null = order by date
+    sortIndex: number | null // null = order by baseOrder
     bankOverride: BankKey | null // set = moved onto the other bank's tab
     hidden: boolean // removed from the tally (reversible)
+    dateOverride: string | null // corrected date (yyyy-mm-dd)
+    amountOverride: number | null // corrected amount
+    descOverride: string | null // corrected description
 }
+
+// Effective display values — an override wins over the source value.
+const rowDate = (r: TallyRow) => r.dateOverride ?? r.date
+const rowAmount = (r: TallyRow) => (r.amountOverride != null ? r.amountOverride : r.amount)
+const rowDesc = (r: TallyRow) => r.descOverride ?? r.desc
 
 const KIND_META: Record<RowKind, { label: string; cls: string; Icon: typeof Package }> = {
     package: { label: 'Package income', cls: 'bg-emerald-50 text-emerald-700', Icon: Package },
@@ -123,13 +135,15 @@ function slipHref(url: string) {
     return url.includes('/upload/') ? url.replace('/upload/', '/upload/fl_attachment/') : url
 }
 
-// Order key: manual sort_index if set, else the date as day-number so the default
-// order is chronological. Day units leave lots of float headroom for midpoints.
-function dateSeed(date: string) {
-    return Math.floor(new Date(date + 'T00:00:00Z').getTime() / 86_400_000)
+// Default chronological order, used once at load to hand out unique baseOrders.
+function dateKeyCmp(a: TallyRow, b: TallyRow) {
+    return rowDate(a).localeCompare(rowDate(b)) || a.key.localeCompare(b.key)
 }
+// Order key: manual sort_index if set, else the row's unique baseOrder. Because
+// every baseOrder is distinct, a move only ever swaps two adjacent values — so a
+// nudge moves exactly one position (no leapfrogging same-date rows).
 function effective(r: TallyRow) {
-    return r.sortIndex != null ? r.sortIndex : dateSeed(r.date)
+    return r.sortIndex != null ? r.sortIndex : r.baseOrder
 }
 function cmpRows(a: TallyRow, b: TallyRow) {
     return effective(a) - effective(b) || a.key.localeCompare(b.key)
@@ -149,6 +163,12 @@ export default function BankTallyPage() {
     const [q, setQ] = useState('')
     const [showRemoved, setShowRemoved] = useState(false)
     const [busyKey, setBusyKey] = useState<string | null>(null)
+
+    // inline edit (date / amount / description)
+    const [editingKey, setEditingKey] = useState<string | null>(null)
+    const [editDate, setEditDate] = useState('')
+    const [editAmount, setEditAmount] = useState('')
+    const [editDesc, setEditDesc] = useState('')
 
     const uploadFor = useRef<TallyRow | null>(null)
     const fileRef = useRef<HTMLInputElement | null>(null)
@@ -170,17 +190,22 @@ export default function BankTallyPage() {
             bank: BankKey,
             r: Omit<
                 TallyRow,
-                'homeBank' | 'checked' | 'slipOverride' | 'sortIndex' | 'bankOverride' | 'hidden'
+                | 'homeBank' | 'baseOrder' | 'checked' | 'slipOverride' | 'sortIndex'
+                | 'bankOverride' | 'hidden' | 'dateOverride' | 'amountOverride' | 'descOverride'
             >
         ) =>
             out[bank].push({
                 ...r,
                 homeBank: bank,
+                baseOrder: 0,
                 checked: false,
                 slipOverride: null,
                 sortIndex: null,
                 bankOverride: null,
                 hidden: false,
+                dateOverride: null,
+                amountOverride: null,
+                descOverride: null,
             })
 
         // ── A) Imported Commercial Bank statement ─────────────────────────────
@@ -335,7 +360,7 @@ export default function BankTallyPage() {
         // ── Overlay: reconciled tick, manual order, uploaded slip, bank move ──
         const { data: marks } = await supabase
             .from('acc_tally_marks')
-            .select('row_key, checked, sort_index, slip_url, bank_override, hidden')
+            .select('row_key, checked, sort_index, slip_url, bank_override, hidden, date_override, amount_override, desc_override')
             .limit(20000)
         const markBy: Record<string, any> = {}
         for (const m of (marks || []) as any[]) markBy[m.row_key] = m
@@ -352,12 +377,20 @@ export default function BankTallyPage() {
                     r.slipOverride = m.slip_url ?? null
                     r.bankOverride = (m.bank_override as BankKey) ?? null
                     r.hidden = !!m.hidden
+                    r.dateOverride = m.date_override ? String(m.date_override).slice(0, 10) : null
+                    r.amountOverride = m.amount_override == null ? null : Number(m.amount_override)
+                    r.descOverride = m.desc_override ?? null
                 }
                 final[r.bankOverride ?? r.homeBank].push(r)
             }
         }
-        final.commercial.sort(cmpRows)
-        final.boc.sort(cmpRows)
+        // Hand out a unique baseOrder per bank in chronological order, then apply
+        // any saved manual order on top.
+        for (const k of ['commercial', 'boc'] as BankKey[]) {
+            final[k].sort(dateKeyCmp)
+            final[k].forEach((r, i) => { r.baseOrder = i })
+            final[k].sort(cmpRows)
+        }
 
         setRowsByBank(final)
         setLoading(false)
@@ -371,18 +404,18 @@ export default function BankTallyPage() {
 
     const months = useMemo(() => {
         const set = new Set<string>()
-        rows.forEach((r) => set.add(r.date.slice(0, 7)))
+        rows.forEach((r) => set.add(rowDate(r).slice(0, 7)))
         return Array.from(set).sort().reverse()
     }, [rows])
 
     // Rows passing the month/search filter (still includes removed ones).
     const filtered = useMemo(() => {
         let r = rows
-        if (month) r = r.filter((x) => x.date.slice(0, 7) === month)
+        if (month) r = r.filter((x) => rowDate(x).slice(0, 7) === month)
         if (q.trim()) {
             const s = q.toLowerCase()
             r = r.filter(
-                (x) => x.desc.toLowerCase().includes(s) || (x.sub || '').toLowerCase().includes(s)
+                (x) => rowDesc(x).toLowerCase().includes(s) || (x.sub || '').toLowerCase().includes(s)
             )
         }
         return r
@@ -401,12 +434,13 @@ export default function BankTallyPage() {
         for (const r of filtered) {
             if (r.hidden) continue
             count++
-            if (r.dir === 'in') inn += r.amount
-            else out += r.amount
+            const amt = rowAmount(r)
+            if (r.dir === 'in') inn += amt
+            else out += amt
             if (r.checked) {
                 checked++
-                if (r.dir === 'in') checkedIn += r.amount
-                else checkedOut += r.amount
+                if (r.dir === 'in') checkedIn += amt
+                else checkedOut += amt
             }
         }
         return { inn, out, net: inn - out, count, checked, checkedIn, checkedOut }
@@ -435,10 +469,25 @@ export default function BankTallyPage() {
                 slip_url: merged.slipOverride,
                 bank_override: merged.bankOverride,
                 hidden: merged.hidden,
+                date_override: merged.dateOverride,
+                amount_override: merged.amountOverride,
+                desc_override: merged.descOverride,
                 updated_at: now,
             },
             { onConflict: 'row_key' }
         )
+    }
+
+    // Save an inline edit of a row's date / amount / description (blank = clear
+    // the override and fall back to the source value).
+    async function saveEdit(r: TallyRow, next: { date: string; amount: string; desc: string }) {
+        const dateOverride = next.date && next.date !== r.date ? next.date : null
+        const amt = Number(next.amount)
+        const amountOverride = next.amount !== '' && Number.isFinite(amt) && amt !== r.amount ? amt : null
+        const trimmed = next.desc.trim()
+        const descOverride = trimmed && trimmed !== r.desc ? trimmed : null
+        patch(r.key, { dateOverride, amountOverride, descOverride }, true)
+        await saveMark(r, { dateOverride, amountOverride, descOverride })
     }
 
     async function setHidden(r: TallyRow, hidden: boolean) {
@@ -466,6 +515,9 @@ export default function BankTallyPage() {
         await saveMark(r, { checked: next })
     }
 
+    // Move exactly one position: swap this row's order value with its neighbour's.
+    // Because every effective value is unique, this is a clean adjacent swap — it
+    // can never leapfrog other rows.
     async function move(r: TallyRow, dir: 'up' | 'down') {
         const list = shown
         const i = list.findIndex((x) => x.key === r.key)
@@ -473,17 +525,8 @@ export default function BankTallyPage() {
         if (i < 0 || j < 0 || j >= list.length) return
         const a = list[i]
         const b = list[j]
-        const ea = effective(a)
-        const eb = effective(b)
-        // a moves next to b: give a b's slot, b takes a's. Break ties with a nudge.
-        let na: number, nb: number
-        if (ea === eb) {
-            na = dir === 'up' ? eb - 0.5 : eb + 0.5
-            nb = eb
-        } else {
-            na = eb
-            nb = ea
-        }
+        const na = effective(b) // a takes b's slot
+        const nb = effective(a) // b takes a's slot
         setRowsByBank((prev) => {
             const arr = prev[bank]
                 .map((x) => (x.key === a.key ? { ...x, sortIndex: na } : x.key === b.key ? { ...x, sortIndex: nb } : x))
@@ -491,6 +534,17 @@ export default function BankTallyPage() {
             return { ...prev, [bank]: arr }
         })
         await Promise.all([saveMark(a, { sortIndex: na }), saveMark(b, { sortIndex: nb })])
+    }
+
+    function startEdit(r: TallyRow) {
+        setEditingKey(r.key)
+        setEditDate(rowDate(r))
+        setEditAmount(String(rowAmount(r)))
+        setEditDesc(rowDesc(r))
+    }
+    async function commitEdit(r: TallyRow) {
+        await saveEdit(r, { date: editDate, amount: editAmount, desc: editDesc })
+        setEditingKey(null)
     }
 
     function pickSlip(r: TallyRow) {
@@ -629,7 +683,7 @@ export default function BankTallyPage() {
                                     <th className="px-3 py-2.5 text-right text-[10px] font-bold text-gray-400 uppercase">In</th>
                                     <th className="px-3 py-2.5 text-right text-[10px] font-bold text-gray-400 uppercase">Out</th>
                                     <th className="px-3 py-2.5 text-center text-[10px] font-bold text-gray-400 uppercase">Slip</th>
-                                    {canEdit && <th className="px-2 py-2.5 w-20 text-center text-[10px] font-bold text-gray-400 uppercase">Actions</th>}
+                                    {canEdit && <th className="px-2 py-2.5 w-28 text-center text-[10px] font-bold text-gray-400 uppercase">Actions</th>}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-50">
@@ -638,6 +692,8 @@ export default function BankTallyPage() {
                                     const src = SOURCE_META[r.source]
                                     const slip = r.slipOverride ?? r.sourceSlip
                                     const busy = busyKey === r.key
+                                    const editing = editingKey === r.key
+                                    const edited = r.dateOverride != null || r.amountOverride != null || r.descOverride != null
                                     const rowCls = r.hidden
                                         ? 'bg-rose-50/40 hover:bg-rose-50/70 opacity-60'
                                         : r.checked
@@ -657,16 +713,36 @@ export default function BankTallyPage() {
                                                 </td>
                                             )}
                                             <td className="px-3 py-2.5 whitespace-nowrap font-medium text-gray-500">
-                                                {new Date(r.date).toLocaleDateString('en-GB', {
-                                                    day: '2-digit',
-                                                    month: 'short',
-                                                    year: '2-digit',
-                                                })}
+                                                {editing ? (
+                                                    <input
+                                                        type="date"
+                                                        value={editDate}
+                                                        onChange={(e) => setEditDate(e.target.value)}
+                                                        className="bg-white border border-pink-300 rounded-lg px-2 py-1 text-xs outline-none"
+                                                    />
+                                                ) : (
+                                                    new Date(rowDate(r)).toLocaleDateString('en-GB', {
+                                                        day: '2-digit',
+                                                        month: 'short',
+                                                        year: '2-digit',
+                                                    })
+                                                )}
                                             </td>
                                             <td className={`px-3 py-2.5 font-semibold max-w-[280px] ${r.checked ? 'text-gray-400' : 'text-gray-800'}`}>
-                                                <span className="line-clamp-1">{r.desc}</span>
-                                                {r.sub && (
-                                                    <span className="block text-[10px] font-medium text-gray-400">{r.sub}</span>
+                                                {editing ? (
+                                                    <input
+                                                        type="text"
+                                                        value={editDesc}
+                                                        onChange={(e) => setEditDesc(e.target.value)}
+                                                        className="w-full bg-white border border-pink-300 rounded-lg px-2 py-1 text-xs outline-none"
+                                                    />
+                                                ) : (
+                                                    <>
+                                                        <span className="line-clamp-1">{rowDesc(r)}</span>
+                                                        {r.sub && (
+                                                            <span className="block text-[10px] font-medium text-gray-400">{r.sub}</span>
+                                                        )}
+                                                    </>
                                                 )}
                                             </td>
                                             <td className="px-3 py-2.5 hidden md:table-cell">
@@ -693,14 +769,32 @@ export default function BankTallyPage() {
                                                             <Trash2 size={9} /> removed
                                                         </span>
                                                     )}
+                                                    {edited && !r.hidden && (
+                                                        <span title="Edited in the tally" className="inline-flex items-center gap-0.5 px-1.5 py-1 rounded-lg text-[9px] font-bold bg-amber-100 text-amber-700">
+                                                            <Pencil size={9} /> edited
+                                                        </span>
+                                                    )}
                                                 </div>
                                             </td>
-                                            <td className="px-3 py-2.5 text-right font-bold text-emerald-600 tabular-nums whitespace-nowrap">
-                                                {r.dir === 'in' ? lkr0(r.amount) : ''}
-                                            </td>
-                                            <td className="px-3 py-2.5 text-right font-bold text-rose-500 tabular-nums whitespace-nowrap">
-                                                {r.dir === 'out' ? lkr0(r.amount) : ''}
-                                            </td>
+                                            {editing ? (
+                                                <td colSpan={2} className="px-3 py-2.5 text-right">
+                                                    <input
+                                                        type="number"
+                                                        value={editAmount}
+                                                        onChange={(e) => setEditAmount(e.target.value)}
+                                                        className="w-28 text-right bg-white border border-pink-300 rounded-lg px-2 py-1 text-xs font-bold outline-none"
+                                                    />
+                                                </td>
+                                            ) : (
+                                                <>
+                                                    <td className="px-3 py-2.5 text-right font-bold text-emerald-600 tabular-nums whitespace-nowrap">
+                                                        {r.dir === 'in' ? lkr0(rowAmount(r)) : ''}
+                                                    </td>
+                                                    <td className="px-3 py-2.5 text-right font-bold text-rose-500 tabular-nums whitespace-nowrap">
+                                                        {r.dir === 'out' ? lkr0(rowAmount(r)) : ''}
+                                                    </td>
+                                                </>
+                                            )}
                                             <td className="px-3 py-2.5 text-center">
                                                 {slip ? (
                                                     <a href={slipHref(slip)} target="_blank" rel="noreferrer" className="inline-flex text-pink-600 hover:text-pink-700" title="View slip">
@@ -721,7 +815,16 @@ export default function BankTallyPage() {
                                             </td>
                                             {canEdit && (
                                                 <td className="px-2 py-2.5">
-                                                    {r.hidden ? (
+                                                    {editing ? (
+                                                        <div className="flex items-center justify-center gap-1.5">
+                                                            <button onClick={() => commitEdit(r)} title="Save" className="text-emerald-600 hover:text-emerald-700">
+                                                                <Check size={15} />
+                                                            </button>
+                                                            <button onClick={() => setEditingKey(null)} title="Cancel" className="text-gray-400 hover:text-gray-600">
+                                                                <X size={15} />
+                                                            </button>
+                                                        </div>
+                                                    ) : r.hidden ? (
                                                         <div className="flex items-center justify-center">
                                                             <button
                                                                 onClick={() => setHidden(r, false)}
@@ -748,6 +851,13 @@ export default function BankTallyPage() {
                                                                 className="text-gray-300 hover:text-pink-600 disabled:opacity-30 disabled:hover:text-gray-300"
                                                             >
                                                                 <ChevronDown size={14} />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => startEdit(r)}
+                                                                title="Edit date / amount / description"
+                                                                className="text-gray-300 hover:text-amber-600"
+                                                            >
+                                                                <Pencil size={13} />
                                                             </button>
                                                             <button
                                                                 onClick={() => moveBank(r)}
@@ -805,10 +915,10 @@ export default function BankTallyPage() {
                         imported income. Legacy transfer/cash income didn&apos;t record which bank, so it&apos;s
                         attributed to BOC as a best guess. There is no imported historical BOC expense data.</>
                 )}{' '}
-                Tick the circle to mark a line reconciled, upload a slip, use the arrows to reorder, the
-                ⇄ button to move a mis-filed line to the other bank, or the trash to remove a line (it drops
-                out of the totals; &ldquo;Show removed&rdquo; brings it back — the source record is never
-                deleted). Net = {lkr(totals.net)}.
+                Tick the circle to mark a line reconciled, upload a slip, use the arrows to reorder one step,
+                the pencil to edit its date / amount / description, the ⇄ button to move a mis-filed line to the
+                other bank, or the trash to remove a line. Edits and removals only affect the tally — the source
+                record is never changed, and everything is reversible. Net = {lkr(totals.net)}.
             </p>
         </div>
     )

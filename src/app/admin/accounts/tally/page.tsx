@@ -48,8 +48,6 @@ import {
     Archive,
     CheckCircle2,
     Circle,
-    ChevronUp,
-    ChevronDown,
     Trash2,
     RotateCcw,
     Pencil,
@@ -139,11 +137,12 @@ function slipHref(url: string) {
 function dateKeyCmp(a: TallyRow, b: TallyRow) {
     return rowDate(a).localeCompare(rowDate(b)) || a.key.localeCompare(b.key)
 }
-// Order key: manual sort_index if set, else the row's unique baseOrder. Because
-// every baseOrder is distinct, a move only ever swaps two adjacent values — so a
-// nudge moves exactly one position (no leapfrogging same-date rows).
+// Rows the user has given an order number (sort_index) come first, in that
+// numeric order; everything else stays in date order below them. DATE_BASE keeps
+// un-numbered rows (baseOrder 0..N) sorted after any realistic typed number.
+const DATE_BASE = 1e12
 function effective(r: TallyRow) {
-    return r.sortIndex != null ? r.sortIndex : r.baseOrder
+    return r.sortIndex != null ? r.sortIndex : DATE_BASE + r.baseOrder
 }
 function cmpRows(a: TallyRow, b: TallyRow) {
     return effective(a) - effective(b) || a.key.localeCompare(b.key)
@@ -515,27 +514,6 @@ export default function BankTallyPage() {
         await saveMark(r, { checked: next })
     }
 
-    // Move exactly one position: swap this row's order value with its neighbour's.
-    // Because every effective value is unique, this is a clean adjacent swap — it
-    // can never leapfrog other rows.
-    async function move(r: TallyRow, dir: 'up' | 'down') {
-        const list = shown
-        const i = list.findIndex((x) => x.key === r.key)
-        const j = dir === 'up' ? i - 1 : i + 1
-        if (i < 0 || j < 0 || j >= list.length) return
-        const a = list[i]
-        const b = list[j]
-        const na = effective(b) // a takes b's slot
-        const nb = effective(a) // b takes a's slot
-        setRowsByBank((prev) => {
-            const arr = prev[bank]
-                .map((x) => (x.key === a.key ? { ...x, sortIndex: na } : x.key === b.key ? { ...x, sortIndex: nb } : x))
-                .sort(cmpRows)
-            return { ...prev, [bank]: arr }
-        })
-        await Promise.all([saveMark(a, { sortIndex: na }), saveMark(b, { sortIndex: nb })])
-    }
-
     function startEdit(r: TallyRow) {
         setEditingKey(r.key)
         setEditDate(rowDate(r))
@@ -545,6 +523,16 @@ export default function BankTallyPage() {
     async function commitEdit(r: TallyRow) {
         await saveEdit(r, { date: editDate, amount: editAmount, desc: editDesc })
         setEditingKey(null)
+    }
+
+    // Set a row's manual order number (blank clears it → back to date order).
+    async function setOrder(r: TallyRow, raw: string) {
+        const v = raw.trim()
+        const n = v === '' ? null : Number(v)
+        if (v !== '' && !Number.isFinite(n)) return
+        if (n === r.sortIndex) return
+        patch(r.key, { sortIndex: n }, true)
+        await saveMark(r, { sortIndex: n })
     }
 
     function pickSlip(r: TallyRow) {
@@ -572,7 +560,9 @@ export default function BankTallyPage() {
         setBusyKey(null)
     }
 
-    const colSpan = 3 + (canEdit ? 1 : 0)
+    // Footer "Total" cell spans everything left of the In column:
+    //   Date+Description+Type (3) plus, when editable, the check + # columns (2).
+    const colSpan = 3 + (canEdit ? 2 : 0)
     const otherBankLabel = bank === 'commercial' ? BANKS.boc.label : BANKS.commercial.label
 
     return (
@@ -677,6 +667,7 @@ export default function BankTallyPage() {
                             <thead className="bg-gray-50 border-b border-gray-100">
                                 <tr>
                                     {canEdit && <th className="px-2 py-2.5 w-9" />}
+                                    {canEdit && <th className="px-2 py-2.5 w-12 text-center text-[10px] font-bold text-gray-400 uppercase">#</th>}
                                     <th className="px-3 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase">Date</th>
                                     <th className="px-3 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase">Description</th>
                                     <th className="px-3 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase hidden md:table-cell">Type</th>
@@ -710,6 +701,20 @@ export default function BankTallyPage() {
                                                     >
                                                         {r.checked ? <CheckCircle2 size={16} /> : <Circle size={16} />}
                                                     </button>
+                                                </td>
+                                            )}
+                                            {canEdit && (
+                                                <td className="px-2 py-2.5 text-center">
+                                                    <input
+                                                        key={r.key + '-ord-' + (r.sortIndex ?? 'n')}
+                                                        type="number"
+                                                        defaultValue={r.sortIndex ?? ''}
+                                                        placeholder={String(idx + 1)}
+                                                        title="Type a number to arrange the order (blank = by date)"
+                                                        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                                                        onBlur={(e) => setOrder(r, e.target.value)}
+                                                        className={`w-11 text-center rounded-lg px-1 py-1 text-xs font-bold outline-none border ${r.sortIndex != null ? 'border-pink-300 text-pink-600 bg-pink-50/40' : 'border-gray-200 text-gray-400 bg-white'}`}
+                                                    />
                                                 </td>
                                             )}
                                             <td className="px-3 py-2.5 whitespace-nowrap font-medium text-gray-500">
@@ -835,23 +840,7 @@ export default function BankTallyPage() {
                                                             </button>
                                                         </div>
                                                     ) : (
-                                                        <div className="flex items-center justify-center gap-0.5">
-                                                            <button
-                                                                onClick={() => move(r, 'up')}
-                                                                disabled={idx === 0}
-                                                                title="Move up"
-                                                                className="text-gray-300 hover:text-pink-600 disabled:opacity-30 disabled:hover:text-gray-300"
-                                                            >
-                                                                <ChevronUp size={14} />
-                                                            </button>
-                                                            <button
-                                                                onClick={() => move(r, 'down')}
-                                                                disabled={idx === shown.length - 1}
-                                                                title="Move down"
-                                                                className="text-gray-300 hover:text-pink-600 disabled:opacity-30 disabled:hover:text-gray-300"
-                                                            >
-                                                                <ChevronDown size={14} />
-                                                            </button>
+                                                        <div className="flex items-center justify-center gap-1">
                                                             <button
                                                                 onClick={() => startEdit(r)}
                                                                 title="Edit date / amount / description"
@@ -915,10 +904,12 @@ export default function BankTallyPage() {
                         imported income. Legacy transfer/cash income didn&apos;t record which bank, so it&apos;s
                         attributed to BOC as a best guess. There is no imported historical BOC expense data.</>
                 )}{' '}
-                Tick the circle to mark a line reconciled, upload a slip, use the arrows to reorder one step,
-                the pencil to edit its date / amount / description, the ⇄ button to move a mis-filed line to the
-                other bank, or the trash to remove a line. Edits and removals only affect the tally — the source
-                record is never changed, and everything is reversible. Net = {lkr(totals.net)}.
+                Rows are in date order by default. Type a number in the <b>#</b> box to arrange them — numbered
+                rows sort to the top in that order (1, 2, 3…), the rest stay by date; clear the box to send a row
+                back to date order. You can also tick a line reconciled, upload a slip, edit its date / amount /
+                description with the pencil, move a mis-filed line to the other bank with ⇄, or remove it with the
+                trash. Edits and removals only affect the tally — the source record is never changed, and
+                everything is reversible. Net = {lkr(totals.net)}.
             </p>
         </div>
     )

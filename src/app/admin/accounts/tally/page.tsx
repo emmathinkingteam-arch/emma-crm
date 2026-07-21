@@ -1,29 +1,37 @@
 'use client'
 
 // ============================================================================
-// /admin/accounts/tally — Bank Tally (Commercial + BOC)
+// /admin/accounts/tally — Bank Tally (Commercial + BOC), all-time
 // ============================================================================
 // One page, two tabs (Commercial Bank / BOC). Each tab lists EVERY transaction
-// that touched that bank — in the order it happened — so a real bank statement
-// can be laid next to it and ticked off line by line.
+// that touched that bank — oldest→newest — so a real bank statement can be laid
+// next to it and ticked off line by line.
 //
-// Three sources are merged into a single dated register per bank:
-//   • PACKAGE INCOME  — customer payments from `orders` whose payment bank is
-//                       this bank (first payment on created_at, plus the 2nd
-//                       installment on the day it was paid). Money IN.
-//   • OTHER INCOME    — other_income / owner_capital entries that landed in this
-//                       bank ledger (debit side). Money IN.
-//   • EXPENSES / OUT  — expenses, salaries and outgoing transfers posted against
-//                       this bank ledger (credit side). Money OUT. Incoming
-//                       transfers (debit side) show as money IN.
+// The data lives in four places, stitched here so nothing double-counts:
 //
-// Read-only: this is a reconciliation worksheet, not an editor. Edit amounts on
-// the Transactions / Income pages. Sorted oldest→newest to match a statement.
+//   COMMERCIAL BANK
+//     • STATEMENT  — the imported Commercial Bank statement (`commercial_statement`,
+//                    Dec 2025 → May 2026). This is the bank's own truth for its
+//                    period: money in = income, money out = expenses.
+//     • SYSTEM/ORDER — orders + ledger entries dated AFTER the statement ends,
+//                    so the live CRM data continues where the statement stops.
+//
+//   BOC (no statement was ever imported)
+//     • LEGACY     — historical income from `legacy_invoices` whose payment
+//                    method is a bank transfer / online / cash / cheque. Those
+//                    didn't record WHICH bank, so they're attributed to BOC (the
+//                    primary account) as a best guess. Card income is left out
+//                    here because Commercial's card income is already in its
+//                    statement; KOKO/Genie are skipped (they don't appear as
+//                    individual bank-statement lines).
+//     • SYSTEM/ORDER — all orders + ledger entries booked against BOC.
+//
+// Read-only reconciliation worksheet. Edit amounts on Transactions / Income.
 // ============================================================================
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { lkr, lkr0, monthYear, loadLedgers } from '@/lib/accounting'
+import { lkr, lkr0, loadLedgers } from '@/lib/accounting'
 import {
     Loader2,
     Search,
@@ -37,6 +45,8 @@ import {
     ArrowLeftRight,
     Wallet,
     PiggyBank,
+    FileText,
+    Archive,
 } from 'lucide-react'
 
 type BankKey = 'commercial' | 'boc'
@@ -54,7 +64,23 @@ const BANKS: Record<BankKey, { code: string; label: string; match: (via: string)
     },
 }
 
-// What kind of row it is — drives the little badge + icon.
+// Historical income (legacy_invoices) never recorded the bank — only the method.
+// Best-guess routing: bank-ish methods → BOC (primary account, no statement of
+// its own). Card is Commercial's and already lives in the Commercial statement,
+// so it's excluded. KOKO/Genie settle in batches and never show as single bank
+// lines, so they're excluded too. Returns null = don't place on any bank tab.
+function legacyBank(method: string | null): BankKey | null {
+    const m = (method || '').toLowerCase()
+    if (m.includes('koko') || m.includes('genie')) return null
+    if (m.includes('card')) return null
+    if (m.includes('transfer') || m.includes('online') || m.includes('cash') || m.includes('cheque'))
+        return 'boc'
+    return null
+}
+
+// Where a row came from — drives a small provenance badge.
+type Source = 'order' | 'system' | 'legacy' | 'statement'
+// What kind of movement it is — drives the type badge + icon.
 type RowKind = 'package' | 'other_income' | 'owner_capital' | 'expense' | 'salary' | 'transfer'
 
 interface TallyRow {
@@ -63,6 +89,7 @@ interface TallyRow {
     desc: string
     sub: string | null // customer / package / category under the description
     kind: RowKind
+    source: Source
     amount: number
     dir: 'in' | 'out'
     slipUrl: string | null
@@ -77,6 +104,13 @@ const KIND_META: Record<RowKind, { label: string; cls: string; Icon: typeof Pack
     transfer: { label: 'Transfer', cls: 'bg-sky-50 text-sky-700', Icon: ArrowLeftRight },
 }
 
+const SOURCE_META: Record<Source, { label: string; cls: string }> = {
+    order: { label: 'CRM', cls: 'bg-gray-100 text-gray-500' },
+    system: { label: 'System', cls: 'bg-gray-100 text-gray-500' },
+    legacy: { label: 'Legacy', cls: 'bg-amber-100 text-amber-700' },
+    statement: { label: 'Statement', cls: 'bg-indigo-100 text-indigo-700' },
+}
+
 function slipHref(url: string) {
     return url.includes('/upload/') ? url.replace('/upload/', '/upload/fl_attachment/') : url
 }
@@ -84,7 +118,6 @@ function slipHref(url: string) {
 export default function BankTallyPage() {
     const [bank, setBank] = useState<BankKey>('commercial')
     const [loading, setLoading] = useState(true)
-    // rows are keyed per bank so switching tabs is instant after the first load
     const [rowsByBank, setRowsByBank] = useState<Record<BankKey, TallyRow[]>>({
         commercial: [],
         boc: [],
@@ -105,10 +138,35 @@ export default function BankTallyPage() {
         if (ledgerId.commercial) idToBank[ledgerId.commercial] = 'commercial'
         if (ledgerId.boc) idToBank[ledgerId.boc] = 'boc'
 
-        const acc: Record<BankKey, TallyRow[]> = { commercial: [], boc: [] }
-        const pkg: Record<BankKey, TallyRow[]> = { commercial: [], boc: [] }
+        const out: Record<BankKey, TallyRow[]> = { commercial: [], boc: [] }
 
-        // ── 1) Ledger movements on either bank (expenses, salary, transfers,
+        // ── A) Imported Commercial Bank statement (the truth for its period) ──
+        //     Fetched first so we know the cut-over date for live Commercial data.
+        const { data: stmt } = await supabase
+            .from('commercial_statement')
+            .select('id, txn_date, description, amount, direction, category, slip_url')
+            .order('txn_date', { ascending: true })
+            .limit(3000)
+
+        let stmtMaxDate = '' // last day the statement covers; live data starts after
+        for (const s of (stmt || []) as any[]) {
+            const date = String(s.txn_date).slice(0, 10)
+            if (date > stmtMaxDate) stmtMaxDate = date
+            const inn = s.direction === 'in'
+            out.commercial.push({
+                key: 's_' + s.id,
+                date,
+                desc: s.description || '—',
+                sub: s.category || null,
+                kind: inn ? 'other_income' : 'expense',
+                source: 'statement',
+                amount: Number(s.amount || 0),
+                dir: inn ? 'in' : 'out',
+                slipUrl: s.slip_url ?? null,
+            })
+        }
+
+        // ── B) Ledger movements on either bank (expenses, salary, transfers,
         //       other income, owner capital) ──────────────────────────────────
         const bankIds = [ledgerId.commercial, ledgerId.boc].filter(Boolean) as string[]
         if (bankIds.length) {
@@ -125,6 +183,10 @@ export default function BankTallyPage() {
                 if (!e || e.status !== 'posted') continue
                 const which = idToBank[l.ledger_id]
                 if (!which) continue
+                const date = String(e.entry_date).slice(0, 10)
+                // Commercial's statement is authoritative through stmtMaxDate — only
+                // take live ledger rows AFTER it so the two don't double-count.
+                if (which === 'commercial' && stmtMaxDate && date <= stmtMaxDate) continue
                 const debit = Number(l.debit || 0)
                 const credit = Number(l.credit || 0)
                 const amount = debit > 0 ? debit : credit
@@ -141,12 +203,13 @@ export default function BankTallyPage() {
                                 : t === 'other_income'
                                     ? 'other_income'
                                     : 'expense'
-                acc[which].push({
+                out[which].push({
                     key: 'a_' + l.id,
-                    date: e.entry_date,
+                    date,
                     desc: e.description || '—',
                     sub: e.category?.name || null,
                     kind,
+                    source: 'system',
                     amount,
                     dir,
                     slipUrl: e.attachments?.[0]?.drive_url ?? null,
@@ -154,7 +217,7 @@ export default function BankTallyPage() {
             }
         }
 
-        // ── 2) Package income from orders (customer payments) ─────────────────
+        // ── C) Package income from live orders (customer payments) ────────────
         const { data: orders } = await supabase
             .from('orders')
             .select(
@@ -173,26 +236,32 @@ export default function BankTallyPage() {
             const who = o.customer?.name || o.customer?.phone || 'Customer'
             const pk = o.package?.name || null
             const first = Number(o.amount_paid || 0)
-            if (first > 0) {
-                pkg[which].push({
+            const firstDate = String(o.created_at).slice(0, 10)
+            // Skip Commercial orders inside the statement's period (already there).
+            const covered = (d: string) => which === 'commercial' && stmtMaxDate && d <= stmtMaxDate
+            if (first > 0 && !covered(firstDate)) {
+                out[which].push({
                     key: 'o_' + o.id,
-                    date: String(o.created_at).slice(0, 10),
+                    date: firstDate,
                     desc: who,
                     sub: pk,
                     kind: 'package',
+                    source: 'order',
                     amount: first,
                     dir: 'in',
                     slipUrl: null,
                 })
             }
             const inst2 = Number(o.installment_2_amount || 0)
-            if (o.installment_2_paid_at && inst2 > 0) {
-                pkg[which].push({
+            const inst2Date = o.installment_2_paid_at ? String(o.installment_2_paid_at).slice(0, 10) : ''
+            if (inst2Date && inst2 > 0 && !covered(inst2Date)) {
+                out[which].push({
                     key: 'o2_' + o.id,
-                    date: String(o.installment_2_paid_at).slice(0, 10),
+                    date: inst2Date,
                     desc: who + ' — 2nd installment',
                     sub: pk,
                     kind: 'package',
+                    source: 'order',
                     amount: inst2,
                     dir: 'in',
                     slipUrl: null,
@@ -200,11 +269,36 @@ export default function BankTallyPage() {
             }
         }
 
-        // ── Merge + sort oldest→newest (statement order) ──────────────────────
-        const merge = (k: BankKey) =>
-            [...acc[k], ...pkg[k]].sort((a, b) => a.date.localeCompare(b.date) || a.key.localeCompare(b.key))
+        // ── D) Legacy imported income (Excel), best-guessed to a bank ─────────
+        const { data: legacy } = await supabase
+            .from('legacy_invoices')
+            .select('id, customer_name, phone_number, invoice_date, package_name, description, total_amount, payment_method, payment_slip_link')
+            .order('invoice_date', { ascending: true })
+            .limit(5000)
 
-        setRowsByBank({ commercial: merge('commercial'), boc: merge('boc') })
+        for (const inv of (legacy || []) as any[]) {
+            const which = legacyBank(inv.payment_method)
+            if (!which) continue
+            const amt = Number(inv.total_amount || 0)
+            if (!(amt > 0)) continue
+            out[which].push({
+                key: 'l_' + inv.id,
+                date: String(inv.invoice_date).slice(0, 10),
+                desc: inv.customer_name || inv.phone_number || 'Customer',
+                sub: [inv.package_name, inv.payment_method].filter(Boolean).join(' · ') || null,
+                kind: 'package',
+                source: 'legacy',
+                amount: amt,
+                dir: 'in',
+                slipUrl: inv.payment_slip_link ?? null,
+            })
+        }
+
+        // ── Sort each bank oldest→newest (statement order) ────────────────────
+        const sortByDate = (rows: TallyRow[]) =>
+            rows.sort((a, b) => a.date.localeCompare(b.date) || a.key.localeCompare(b.key))
+
+        setRowsByBank({ commercial: sortByDate(out.commercial), boc: sortByDate(out.boc) })
         setLoading(false)
     }, [])
 
@@ -268,9 +362,9 @@ export default function BankTallyPage() {
             {/* Summary */}
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
                 <p className="text-[10px] text-gray-400 mb-3">
-                    Every package income, other income and expense recorded against{' '}
-                    <span className="font-bold text-gray-600">{BANKS[bank].label}</span>, in the order it
-                    happened — tick each line off against the real statement.
+                    All-time package income, other income and expenses recorded against{' '}
+                    <span className="font-bold text-gray-600">{BANKS[bank].label}</span>, oldest first — tick
+                    each line off against the real statement.
                 </p>
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
                     <Stat label="Money in" value={lkr0(totals.inn)} tone="in" />
@@ -280,7 +374,7 @@ export default function BankTallyPage() {
                 </div>
             </div>
 
-            {/* Filters */}
+            {/* Filters + legend */}
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-wrap items-center gap-2">
                 <select
                     value={month}
@@ -303,6 +397,12 @@ export default function BankTallyPage() {
                         className="flex-1 bg-transparent text-xs outline-none"
                     />
                 </div>
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-600">
+                    <FileText size={11} /> from statement
+                </span>
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-600">
+                    <Archive size={11} /> legacy import
+                </span>
             </div>
 
             {/* Register */}
@@ -343,6 +443,7 @@ export default function BankTallyPage() {
                             <tbody className="divide-y divide-gray-50">
                                 {filtered.map((r) => {
                                     const meta = KIND_META[r.kind]
+                                    const src = SOURCE_META[r.source]
                                     return (
                                         <tr key={r.key} className="hover:bg-pink-50/20">
                                             <td className="px-3 py-2.5 whitespace-nowrap font-medium text-gray-500">
@@ -361,12 +462,21 @@ export default function BankTallyPage() {
                                                 )}
                                             </td>
                                             <td className="px-3 py-2.5 hidden md:table-cell">
-                                                <span
-                                                    className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold ${meta.cls}`}
-                                                >
-                                                    <meta.Icon size={10} />
-                                                    {meta.label}
-                                                </span>
+                                                <div className="flex items-center gap-1">
+                                                    <span
+                                                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold ${meta.cls}`}
+                                                    >
+                                                        <meta.Icon size={10} />
+                                                        {meta.label}
+                                                    </span>
+                                                    {(r.source === 'legacy' || r.source === 'statement') && (
+                                                        <span
+                                                            className={`inline-flex items-center px-1.5 py-1 rounded-lg text-[9px] font-bold ${src.cls}`}
+                                                        >
+                                                            {src.label}
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </td>
                                             <td className="px-3 py-2.5 text-right font-bold text-emerald-600 tabular-nums whitespace-nowrap">
                                                 {r.dir === 'in' ? lkr0(r.amount) : ''}
@@ -411,11 +521,21 @@ export default function BankTallyPage() {
                 )}
             </div>
 
-            <p className="text-[10px] text-gray-400">
-                Package income comes from customer orders paid via this bank (including 2nd installments on the
-                day they were paid). Other income and expenses come from the accounting ledger. Payments marked
-                only as a generic method (e.g. &ldquo;bank transfer&rdquo;, KOKO) aren&apos;t shown here because
-                they don&apos;t name a bank. Net = {lkr(totals.net)}.
+            <p className="text-[10px] text-gray-400 leading-relaxed">
+                {bank === 'commercial' ? (
+                    <>
+                        Commercial history (income + expenses) comes from the imported bank statement; live CRM
+                        orders and ledger entries continue after the statement ends, so nothing is double-counted.
+                    </>
+                ) : (
+                    <>
+                        BOC has no imported bank statement, so its history is built from live CRM data plus legacy
+                        imported income. Legacy transfer/cash income didn&apos;t record which bank, so it&apos;s
+                        attributed to BOC as a best guess — some of it may actually have hit Commercial. There is no
+                        imported historical BOC expense data.
+                    </>
+                )}{' '}
+                Net = {lkr(totals.net)}.
             </p>
         </div>
     )

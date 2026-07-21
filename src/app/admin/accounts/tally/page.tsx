@@ -48,6 +48,8 @@ import {
     Archive,
     CheckCircle2,
     Circle,
+    ChevronUp,
+    ChevronDown,
     Trash2,
     RotateCcw,
     Pencil,
@@ -426,6 +428,12 @@ export default function BankTallyPage() {
         () => (showRemoved ? filtered : filtered.filter((r) => !r.hidden)),
         [filtered, showRemoved]
     )
+    // 1-based position of each (non-removed) row across the whole bank — the # value.
+    const posByKey = useMemo(() => {
+        const m: Record<string, number> = {}
+        rows.filter((r) => !r.hidden).forEach((r, i) => { m[r.key] = i + 1 })
+        return m
+    }, [rows])
 
     // Totals never count removed rows.
     const totals = useMemo(() => {
@@ -454,27 +462,38 @@ export default function BankTallyPage() {
         })
     }
 
+    // Build the full overlay row for a tally row (used by single + batch saves).
+    function markPayload(r: TallyRow, now: string) {
+        return {
+            row_key: r.key,
+            bank,
+            checked: r.checked,
+            checked_at: r.checked ? now : null,
+            checked_by: r.checked ? user?.id ?? null : null,
+            sort_index: r.sortIndex,
+            slip_url: r.slipOverride,
+            bank_override: r.bankOverride,
+            hidden: r.hidden,
+            date_override: r.dateOverride,
+            amount_override: r.amountOverride,
+            desc_override: r.descOverride,
+            updated_at: now,
+        }
+    }
+
     async function saveMark(r: TallyRow, over: Partial<TallyRow>) {
-        const merged = { ...r, ...over }
         const now = new Date().toISOString()
-        await supabase.from('acc_tally_marks').upsert(
-            {
-                row_key: r.key,
-                bank,
-                checked: merged.checked,
-                checked_at: merged.checked ? now : null,
-                checked_by: merged.checked ? user?.id ?? null : null,
-                sort_index: merged.sortIndex,
-                slip_url: merged.slipOverride,
-                bank_override: merged.bankOverride,
-                hidden: merged.hidden,
-                date_override: merged.dateOverride,
-                amount_override: merged.amountOverride,
-                desc_override: merged.descOverride,
-                updated_at: now,
-            },
-            { onConflict: 'row_key' }
-        )
+        await supabase
+            .from('acc_tally_marks')
+            .upsert(markPayload({ ...r, ...over }, now), { onConflict: 'row_key' })
+    }
+
+    async function saveMany(rows: TallyRow[]) {
+        if (!rows.length) return
+        const now = new Date().toISOString()
+        await supabase
+            .from('acc_tally_marks')
+            .upsert(rows.map((r) => markPayload(r, now)), { onConflict: 'row_key' })
     }
 
     // Save an inline edit of a row's date / amount / description (blank = clear
@@ -525,14 +544,44 @@ export default function BankTallyPage() {
         setEditingKey(null)
     }
 
-    // Set a row's manual order number (blank clears it → back to date order).
-    async function setOrder(r: TallyRow, raw: string) {
-        const v = raw.trim()
-        const n = v === '' ? null : Number(v)
-        if (v !== '' && !Number.isFinite(n)) return
-        if (n === r.sortIndex) return
-        patch(r.key, { sortIndex: n }, true)
-        await saveMark(r, { sortIndex: n })
+    // Move a row to a 1-based position in the (visible) list and renumber the
+    // whole sequence so the # column stays contiguous 1..N. Persists only rows
+    // whose number actually changed.
+    async function reorderTo(r: TallyRow, targetPos: number) {
+        const visible = rowsByBank[bank].filter((x) => !x.hidden).sort(cmpRows)
+        const from = visible.findIndex((x) => x.key === r.key)
+        if (from < 0) return
+        const to = Math.max(0, Math.min(visible.length - 1, Math.round(targetPos) - 1))
+        if (to === from) return
+
+        const reordered = [...visible]
+        const [moved] = reordered.splice(from, 1)
+        reordered.splice(to, 0, moved)
+
+        // Assign contiguous positions; note which rows changed.
+        const nextByKey: Record<string, number> = {}
+        const changed: TallyRow[] = []
+        reordered.forEach((x, i) => {
+            const pos = i + 1
+            if (x.sortIndex !== pos) {
+                nextByKey[x.key] = pos
+                changed.push({ ...x, sortIndex: pos })
+            }
+        })
+        if (!changed.length) return
+
+        setRowsByBank((prev) => ({
+            ...prev,
+            [bank]: prev[bank]
+                .map((x) => (x.key in nextByKey ? { ...x, sortIndex: nextByKey[x.key] } : x))
+                .sort(cmpRows),
+        }))
+        await saveMany(changed)
+    }
+
+    // Up/down: move exactly one position (numbers reflow automatically).
+    async function move(r: TallyRow, dir: 'up' | 'down', pos: number) {
+        await reorderTo(r, dir === 'up' ? pos - 1 : pos + 1)
     }
 
     function pickSlip(r: TallyRow) {
@@ -564,6 +613,7 @@ export default function BankTallyPage() {
     //   Date+Description+Type (3) plus, when editable, the check + # columns (2).
     const colSpan = 3 + (canEdit ? 2 : 0)
     const otherBankLabel = bank === 'commercial' ? BANKS.boc.label : BANKS.commercial.label
+    const visibleCount = Object.keys(posByKey).length
 
     return (
         <div className="space-y-4">
@@ -685,6 +735,7 @@ export default function BankTallyPage() {
                                     const busy = busyKey === r.key
                                     const editing = editingKey === r.key
                                     const edited = r.dateOverride != null || r.amountOverride != null || r.descOverride != null
+                                    const pos = posByKey[r.key] ?? idx + 1
                                     const rowCls = r.hidden
                                         ? 'bg-rose-50/40 hover:bg-rose-50/70 opacity-60'
                                         : r.checked
@@ -706,14 +757,17 @@ export default function BankTallyPage() {
                                             {canEdit && (
                                                 <td className="px-2 py-2.5 text-center">
                                                     <input
-                                                        key={r.key + '-ord-' + (r.sortIndex ?? 'n')}
+                                                        key={r.key + '-pos-' + pos}
                                                         type="number"
-                                                        defaultValue={r.sortIndex ?? ''}
-                                                        placeholder={String(idx + 1)}
-                                                        title="Type a number to arrange the order (blank = by date)"
+                                                        defaultValue={pos}
+                                                        title="Type a position number to move this row there — the rest renumber automatically"
                                                         onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                                                        onBlur={(e) => setOrder(r, e.target.value)}
-                                                        className={`w-11 text-center rounded-lg px-1 py-1 text-xs font-bold outline-none border ${r.sortIndex != null ? 'border-pink-300 text-pink-600 bg-pink-50/40' : 'border-gray-200 text-gray-400 bg-white'}`}
+                                                        onBlur={(e) => {
+                                                            const v = e.target.value.trim()
+                                                            if (v === '' || Number(v) === pos) return
+                                                            reorderTo(r, Number(v))
+                                                        }}
+                                                        className="w-11 text-center rounded-lg px-1 py-1 text-xs font-bold outline-none border border-gray-200 text-gray-600 bg-white focus:border-pink-300"
                                                     />
                                                 </td>
                                             )}
@@ -840,7 +894,23 @@ export default function BankTallyPage() {
                                                             </button>
                                                         </div>
                                                     ) : (
-                                                        <div className="flex items-center justify-center gap-1">
+                                                        <div className="flex items-center justify-center gap-0.5">
+                                                            <button
+                                                                onClick={() => move(r, 'up', pos)}
+                                                                disabled={pos <= 1}
+                                                                title="Move up"
+                                                                className="text-gray-300 hover:text-pink-600 disabled:opacity-30 disabled:hover:text-gray-300"
+                                                            >
+                                                                <ChevronUp size={14} />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => move(r, 'down', pos)}
+                                                                disabled={pos >= visibleCount}
+                                                                title="Move down"
+                                                                className="text-gray-300 hover:text-pink-600 disabled:opacity-30 disabled:hover:text-gray-300"
+                                                            >
+                                                                <ChevronDown size={14} />
+                                                            </button>
                                                             <button
                                                                 onClick={() => startEdit(r)}
                                                                 title="Edit date / amount / description"
@@ -904,12 +974,12 @@ export default function BankTallyPage() {
                         imported income. Legacy transfer/cash income didn&apos;t record which bank, so it&apos;s
                         attributed to BOC as a best guess. There is no imported historical BOC expense data.</>
                 )}{' '}
-                Rows are in date order by default. Type a number in the <b>#</b> box to arrange them — numbered
-                rows sort to the top in that order (1, 2, 3…), the rest stay by date; clear the box to send a row
-                back to date order. You can also tick a line reconciled, upload a slip, edit its date / amount /
-                description with the pencil, move a mis-filed line to the other bank with ⇄, or remove it with the
-                trash. Edits and removals only affect the tally — the source record is never changed, and
-                everything is reversible. Net = {lkr(totals.net)}.
+                Rows are numbered in date order by default. Change the order two ways: use the up/down arrows to
+                nudge a row one place, or type a new number in the <b>#</b> box to send it to that position — either
+                way every other row renumbers to stay in sequence. You can also tick a line reconciled, upload a
+                slip, edit its date / amount / description with the pencil, move a mis-filed line to the other bank
+                with ⇄, or remove it with the trash. Edits and removals only affect the tally — the source record
+                is never changed, and everything is reversible. Net = {lkr(totals.net)}.
             </p>
         </div>
     )

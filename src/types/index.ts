@@ -20,7 +20,7 @@ export type PaymentType = 'cash' | 'bank_transfer' | 'card' | 'koko' | 'other'
 export type LeaveType = 'annual' | 'casual' | 'sick' | 'other'
 export type RequestStatus = 'pending' | 'approved' | 'rejected'
 export type MilestoneType = 'wallet_balance' | 'order_count' | 'package_specific' | 'daily_entry' | 'custom'
-export type TimeSlot = 'W' | 'X' | 'Y' | 'Z' // four daily sittings; clock time varies by weekday/weekend — see getSlotLabel
+export type TimeSlot = 'W' | 'X' | 'Y' | 'Z' | 'WX' | 'YZ' // four daily sittings; clock time varies by weekday/weekend — see getSlotLabel. WX (10am) and YZ (5pm) are two extra fixed-time slots.
 export type FlowVariant = 'standard' | 'silver_bronze' | 'free'
 
 // ── Database row types ───────────────────────────────────────
@@ -302,10 +302,11 @@ export const MONTH_CODES: Record<number, string> = {
 //   Mon–Fri : 8:30am · 11:30am · 1:30pm · 7:00pm
 //   Saturday: 9:00am · 12:00pm · 2:00pm · 8:00pm
 //   Sunday  : 10:00am · 1:00pm · 3:00pm · 7:00pm
-const SLOT_ORDER: TimeSlot[] = ['W', 'X', 'Y', 'Z']
-const WEEKDAY_SLOT_TIMES = ['8:30am', '11:30am', '1:30pm', '7:00pm']
-const SATURDAY_SLOT_TIMES = ['9:00am', '12:00pm', '2:00pm', '8:00pm']
-const SUNDAY_SLOT_TIMES = ['10:00am', '1:00pm', '3:00pm', '7:00pm']
+// WX (10am) and YZ (5pm) are two extra slots with a fixed clock time every day.
+const SLOT_ORDER: TimeSlot[] = ['W', 'X', 'Y', 'Z', 'WX', 'YZ']
+const WEEKDAY_SLOT_TIMES = ['8:30am', '11:30am', '1:30pm', '7:00pm', '10:00am', '5:00pm']
+const SATURDAY_SLOT_TIMES = ['9:00am', '12:00pm', '2:00pm', '8:00pm', '10:00am', '5:00pm']
+const SUNDAY_SLOT_TIMES = ['10:00am', '1:00pm', '3:00pm', '7:00pm', '10:00am', '5:00pm']
 
 // Day of week (0=Sun..6=Sat) for a 'YYYY-MM-DD' string, parsed in LOCAL time so
 // it never drifts a day versus a UTC interpretation.
@@ -329,7 +330,8 @@ export function getSlotLabel(slot: TimeSlot | string, date?: string | Date | nul
 
 // Kept for backwards-compatible imports; defaults to the weekday schedule.
 export const TIME_SLOT_LABELS: Record<TimeSlot, string> = {
-  W: WEEKDAY_SLOT_TIMES[0], X: WEEKDAY_SLOT_TIMES[1], Y: WEEKDAY_SLOT_TIMES[2], Z: WEEKDAY_SLOT_TIMES[3]
+  W: WEEKDAY_SLOT_TIMES[0], X: WEEKDAY_SLOT_TIMES[1], Y: WEEKDAY_SLOT_TIMES[2], Z: WEEKDAY_SLOT_TIMES[3],
+  WX: WEEKDAY_SLOT_TIMES[4], YZ: WEEKDAY_SLOT_TIMES[5]
 }
 
 // Absolute instant (ISO string) for a slot on a given 'YYYY-MM-DD' date, using

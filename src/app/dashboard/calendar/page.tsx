@@ -11,7 +11,7 @@ import { generatePostId } from '@/lib/utils'
 import { ChevronLeft, ChevronRight, Search, Loader2, Sparkles, Package as PackageIcon } from 'lucide-react'
 import { PACKAGE_TONE, packageTone } from '@/lib/package-colors'
 
-const SLOTS: TimeSlot[] = ['W', 'X', 'Y', 'Z']
+const SLOTS: TimeSlot[] = ['W', 'X', 'Y', 'Z', 'WX', 'YZ']
 
 // One repost candidate — an existing order (old or new) found by the search.
 type RepostResult = {

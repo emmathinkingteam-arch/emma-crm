@@ -5,7 +5,8 @@ import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Users, CalendarRange,
   PlusCircle, Wallet, Award, ClipboardList, Search, MessageCircle,
-  ArrowDownToLine, ListOrdered, Landmark, Receipt, DollarSign, ShieldCheck
+  ArrowDownToLine, ListOrdered, Landmark, Receipt, DollarSign, ShieldCheck,
+  HeartHandshake
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 
@@ -32,7 +33,7 @@ const NAV_CONFIG = {
   ],
   back_office: [
     { href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
-    { href: '/dashboard/customers', icon: Users, label: 'Clients' },
+    { href: '/dashboard/follow-up', icon: HeartHandshake, label: 'Follow Up' },
     { href: '/admin/orders', icon: ListOrdered, label: 'Orders' },
     { href: '/dashboard/legacy-history', icon: Search, label: 'Search' },
     { href: '/dashboard/calendar', icon: CalendarRange, label: 'Plan' },

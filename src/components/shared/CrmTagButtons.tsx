@@ -4,9 +4,9 @@
 // CrmTagButtons — the quick-status button grid used on every entry screen.
 // ============================================================================
 // Multi-select: the agent can tap several ("Package details sent" + "Call back
-// later"). Selecting any negative tag (Not answer / Not interest / Reject /
-// Fake) reveals an OPTIONAL reason box — if filled, it goes to the admin's
-// Rejected CRM tab. Agents can skip it.
+// later"). Selecting any delete tag (Not interest / Reject / Fake) reveals an
+// OPTIONAL reason box — the number is purged on save, so the reason is just a
+// note for the moment. Agents can skip it.
 // ============================================================================
 
 import { CRM_TAGS, negativeOf, type CrmTagKey } from '@/lib/crm-tags'

@@ -14,7 +14,7 @@ import LowInterestAlert from '@/components/shared/LowInterestAlert'
 import CountUp from '@/components/shared/CountUp'
 import Link from 'next/link'
 import { type Lead, leadCountdown, leadPenaltySoFar } from '@/lib/leads'
-import { type MetaLead, metaCountdown, tierEscalateCountdown, META_STATUS_META, ESCALATING_STATUSES } from '@/lib/meta-leads'
+import { type MetaLead, metaCountdown, META_STATUS_META } from '@/lib/meta-leads'
 
 // A step joined with its order + customer + package (what fetchMyWork returns).
 type StepWithOrder = OrderStep & {
@@ -30,6 +30,15 @@ type WorkTab = 'new' | 'in_progress' | 'completed'
 function isCurrentMonth(d: Date) {
   const now = new Date()
   return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
+}
+
+// Start of today in the viewer's local timezone (Sri Lanka), as an ISO string.
+// A "bounced" lead (no answer / call back) re-surfaces only once its last touch
+// (responded_at) is before this — i.e. it was worked on an earlier day.
+function startOfTodayISO(): string {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  return d.toISOString()
 }
 
 export default function DashboardPage() {
@@ -50,6 +59,9 @@ export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<WorkTab>('new')
   const [secondPosts, setSecondPosts] = useState<any[]>([])
   const [leads, setLeads] = useState<Lead[]>([])
+  // Phone leads the agent marked call-back / no-answer on an earlier day —
+  // they bounce back onto the dashboard to be chased again (no penalty).
+  const [callBacks, setCallBacks] = useState<Lead[]>([])
   const [metaLeads, setMetaLeads] = useState<MetaLead[]>([])
   const [tierClients, setTierClients] = useState<MetaLead[]>([])
   // CRM agents shown as photo circles under the hero (me first, then the rest)
@@ -119,6 +131,19 @@ export default function DashboardPage() {
       .order('due_at', { ascending: true })
     setLeads((data as Lead[]) || [])
 
+    // Bounced phone leads — call-back / no-answer worked on an earlier day.
+    // They stay with this agent (status='followup') and re-surface here every
+    // day until closed with a different status. No timer, no penalty.
+    const todayStart = startOfTodayISO()
+    const { data: cbacks } = await supabase
+      .from('leads')
+      .select('*')
+      .eq('assigned_to', user.id)
+      .eq('status', 'followup')
+      .lt('responded_at', todayStart)
+      .order('responded_at', { ascending: true })
+    setCallBacks((cbacks as Lead[]) || [])
+
     // Pull any brand-new Facebook leads from the sheet (throttled server-side so
     // many agents polling = one cheap import), then start this agent's 1h timers
     // (punch-gated), then read what's still open for them.
@@ -140,15 +165,15 @@ export default function DashboardPage() {
       .order('due_at', { ascending: true, nullsFirst: false })
     setMetaLeads((meta as MetaLead[]) || [])
 
-    // Tier Clients — leads this agent already actioned (no-answer callbacks +
-    // in-progress clients) that stay with them until worked or auto-escalated.
-    // Oldest update first so the ones closest to the 24h admin cutoff surface.
+    // Tier Clients — Meta leads this agent marked no-answer / call-back on an
+    // earlier day. They stay with this agent (stage='followup') and re-surface
+    // here every day until closed with a different status. Never go to admin.
     const { data: tier } = await supabase
       .from('meta_leads')
       .select('*')
       .eq('assigned_to', user.id)
       .eq('stage', 'followup')
-      .is('escalated_at', null)
+      .lt('responded_at', todayStart)
       .order('responded_at', { ascending: true, nullsFirst: false })
     setTierClients((tier as MetaLead[]) || [])
   }
@@ -553,6 +578,46 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {/* Call backs — phone leads marked call-back / no-answer on an earlier
+            day. They bounce back here to be chased again — no timer, no penalty. */}
+        {callBacks.length > 0 && (
+          <div className="border-2 border-purple-200 rounded-2xl overflow-hidden">
+            <div className="px-4 py-2.5 bg-purple-600 flex items-center gap-2">
+              <PhoneCall size={14} className="text-white" />
+              <p className="text-xs font-bold text-white uppercase tracking-wide">Call backs</p>
+              <span className="ml-auto text-[9px] font-bold bg-white/25 text-white px-2 py-0.5 rounded-full">{callBacks.length}</span>
+            </div>
+            <div className="p-2 space-y-2">
+              {callBacks.map((lead) => (
+                <Link
+                  key={lead.id}
+                  href={`/dashboard/leads/${lead.id}`}
+                  className="block rounded-xl p-3 border border-purple-100 bg-purple-50 active:scale-[0.98] transition-all"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-gray-800 truncate font-mono">
+                        {lead.phone_display || lead.phone}
+                      </p>
+                      <p className="text-[10px] font-semibold text-gray-500 truncate">
+                        Call back — {lead.responded_at
+                          ? `last tried ${new Date(lead.responded_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`
+                          : 'call again'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
+                      <span className="text-[8px] font-bold px-2 py-1 rounded-full flex items-center gap-1 bg-purple-100 text-purple-600">
+                        <PhoneCall size={8} /> call again
+                      </span>
+                      <ChevronRight size={14} className="text-purple-300" />
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* New customers — Meta-ad leads. Pallet: Job · Age · Name · Number */}
         {metaLeads.length > 0 && (
           <div className="border-2 border-teal-200 rounded-2xl overflow-hidden">
@@ -593,8 +658,8 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* Tier Clients — leads you already touched; call back & keep them moving.
-            No-answer / call-back rows auto-escalate to admin after 24h. */}
+        {/* Tier Clients — Meta leads you marked no-answer / call-back on an
+            earlier day. They stay with you and bounce back here to chase again. */}
         {tierClients.length > 0 && (
           <div className="border-2 border-amber-200 rounded-2xl overflow-hidden">
             <div className="px-4 py-2.5 bg-amber-500 flex items-center gap-2">
@@ -605,13 +670,11 @@ export default function DashboardPage() {
             <div className="p-2 space-y-2">
               {tierClients.map((tc) => {
                 const sm = META_STATUS_META[tc.status]
-                const escalating = ESCALATING_STATUSES.includes(tc.status)
-                const esc = escalating ? tierEscalateCountdown(tc.responded_at) : null
                 return (
                   <Link
                     key={tc.id}
                     href={`/dashboard/meta-leads/${tc.id}`}
-                    className={`block rounded-xl p-3 border active:scale-[0.98] transition-all ${escalating ? 'bg-amber-50 border-amber-100' : 'bg-white border-gray-100'}`}
+                    className="block rounded-xl p-3 border bg-amber-50 border-amber-100 active:scale-[0.98] transition-all"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex-1 min-w-0">
@@ -625,11 +688,6 @@ export default function DashboardPage() {
                         </p>
                         <div className="flex items-center gap-1.5 mt-1">
                           <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${sm.cls}`}>{sm.label}</span>
-                          {escalating && (
-                            <span className={`text-[9px] font-bold ${esc?.due ? 'text-red-500' : 'text-amber-600'}`}>
-                              {esc?.due ? 'moving to admin' : `→ ${esc?.label}`}
-                            </span>
-                          )}
                         </div>
                       </div>
                       <ChevronRight size={14} className="text-amber-300 flex-shrink-0 ml-2" />

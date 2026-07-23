@@ -20,7 +20,6 @@ import {
     syncAllActiveSources,
     releaseAllMetaLeads,
     processMetaLeadPenalties,
-    processTierEscalations,
 } from '@/lib/meta-leads-engine'
 
 export const dynamic = 'force-dynamic'
@@ -49,14 +48,12 @@ async function handle(req: Request) {
     let sync = { imported: 0, smsSent: 0 }
     let started = 0
     let penalties = null
-    let escalations = null
     let error: string | null = null
 
     try {
         sync = await syncAllActiveSources(sb)
         started = await releaseAllMetaLeads(sb)
         penalties = await processMetaLeadPenalties(sb)
-        escalations = await processTierEscalations(sb)
     } catch (err) {
         error = err instanceof Error ? err.message : 'unknown_error'
     }
@@ -68,7 +65,6 @@ async function handle(req: Request) {
         sync,
         started,
         penalties,
-        escalations,
         error,
     })
 }

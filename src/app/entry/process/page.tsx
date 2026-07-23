@@ -8,7 +8,7 @@ import { Loader2, ArrowLeft, CalendarClock, Flame } from 'lucide-react'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import CrmTagButtons from '@/components/shared/CrmTagButtons'
-import { buildEntryDescription, negativeOf, type CrmTagKey } from '@/lib/crm-tags'
+import { buildEntryDescription, categoryOf, type CrmTagKey } from '@/lib/crm-tags'
 import { recordPing } from '@/lib/location'
 
 function ProcessContent() {
@@ -64,7 +64,8 @@ function ProcessContent() {
   const handleSave = async () => {
     if (!user) { alert('Your session expired. Please log in again.'); return }
     if (loading) return
-    const negatives = negativeOf(tags)
+    const category = categoryOf(tags)
+    if (category === 'delete' && !confirm('This will permanently delete this number from the system (unless it has an order). Continue?')) return
     setLoading(true)
 
     try {
@@ -96,6 +97,26 @@ function ProcessContent() {
       // GPS ping for entry history (already swallows its own errors).
       await recordPing(user.id, 'new_entry', customerId).catch(() => {})
 
+      // Delete outcome (Not interested / Reject / Fake) → purge the number from
+      // the system entirely (guarded: kept if it has an order). Done via the
+      // service-role route so it can hard-delete across tables.
+      if (category === 'delete') {
+        try {
+          const res = await fetch('/api/leads/purge', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ customerId }),
+          })
+          const j = await res.json()
+          if (j.ok && j.deleted > 0) {
+            router.push('/dashboard')
+            return
+          }
+        } catch {
+          // fall through — keep the customer if the purge call failed
+        }
+      }
+
       // Log the note as an interaction. If this hiccups, we still navigate —
       // the customer is saved, which is what matters.
       if (notes.trim() || tags.length > 0) {
@@ -107,20 +128,6 @@ function ProcessContent() {
           tags,
         })
         if (noteError) console.error('Failed to log interaction note:', noteError)
-      }
-
-      // Negative outcome → file it into the admin's Rejected CRM queue.
-      if (negatives.length > 0) {
-        const { error: rejError } = await supabase.from('crm_rejections').insert({
-          customer_id: customerId,
-          phone,
-          customer_name: customerName || null,
-          agent_id: user.id,
-          tags: negatives,
-          reason: reason.trim() || null,
-          note: notes.trim() || null,
-        })
-        if (rejError) console.error('Failed to file rejection:', rejError)
       }
 
       router.push(`/dashboard/customers/${customerId}`)

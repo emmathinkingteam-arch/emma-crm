@@ -20,6 +20,7 @@ import {
     META_STATUS_SHEET,
     META_STATUS_META,
     FOLLOWUP_STATUSES,
+    DELETE_STATUSES,
     type MetaLeadStatus,
 } from '@/lib/meta-leads'
 import { type CrmTagKey } from '@/lib/crm-tags'
@@ -34,12 +35,6 @@ const META_TO_TAG: Partial<Record<MetaLeadStatus, CrmTagKey>> = {
     rejected: 'rejected',
     fake: 'fake',
 }
-
-// Terminal negatives — these file straight into the admin's Rejected CRM queue.
-// 'no_answer' is deliberately NOT here anymore: a no-answer stays with the agent
-// as a Tier Client (stage='followup') and only reaches admin if the 24h
-// escalation cron promotes it (see meta-leads-engine → processTierEscalations).
-const NEGATIVE_META: MetaLeadStatus[] = ['rejected', 'fake']
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -108,11 +103,11 @@ export async function POST(req: Request) {
         }
     }
 
-    // 2. Update the lead — status + stop the 1h timer. Follow-up statuses keep
-    //    the lead with the agent as a Tier Client (stage='followup'); paid and
-    //    the terminal negatives close it out (stage='done'). responded_at is the
-    //    "latest update" that the 24h escalation clock reads from, and clearing
-    //    escalated_at re-arms a lead that was previously escalated but re-worked.
+    // 2. Update the lead — status + stop the 1h timer. Bounce statuses (no
+    //    answer / call back) keep the lead with the agent as a Tier Client
+    //    (stage='followup') so it re-surfaces on their dashboard the next day;
+    //    everything else closes it out (stage='done'). responded_at is the
+    //    "last touched" time the dashboard bounce filter reads from.
     const nextStage = FOLLOWUP_STATUSES.includes(status) ? 'followup' : 'done'
     await sb
         .from('meta_leads')
@@ -128,12 +123,13 @@ export async function POST(req: Request) {
 
     const tag = META_TO_TAG[status]
 
-    // 2b. Reject → purge the number from the system entirely (guarded). If the
-    //     customer has real history (orders / accounting / complaints) the
-    //     purge is refused and we fall through to the normal reject flow. The
-    //     Google-sheet write-back (step 4) still runs so the source reflects it.
+    // 2b. Delete outcome (reject / fake) → purge the number from the system
+    //     entirely (guarded). If the customer has real history (orders /
+    //     accounting / complaints) the purge is refused and we keep it as a
+    //     normal client (stage='done', already set above). The Google-sheet
+    //     write-back (step 4) still runs so the source reflects the status.
     let purged = false
-    if (status === 'rejected') {
+    if (DELETE_STATUSES.includes(status)) {
         const res = await purgeRejectedCustomer(sb, { customerId, metaLeadId: lead.id })
         purged = res.purged
     }
@@ -148,24 +144,6 @@ export async function POST(req: Request) {
                 description: `Lead status → ${META_STATUS_META[status].label}${reason ? `\nReason: ${reason}` : ''}${note ? `\n${note}` : ''}`,
                 created_by: userId,
                 tags: tag ? [tag] : [],
-            })
-        } catch {
-            // non-fatal
-        }
-    }
-
-    // 3b. Negative outcome → file it into the admin's Rejected CRM queue (unless
-    //     a reject was purged outright).
-    if (NEGATIVE_META.includes(status) && !purged) {
-        try {
-            await sb.from('crm_rejections').insert({
-                customer_id: customerId,
-                phone: lead.phone || '',
-                customer_name: lead.full_name || null,
-                agent_id: userId,
-                tags: tag ? [tag] : [],
-                reason: reason || null,
-                note: note || null,
             })
         } catch {
             // non-fatal

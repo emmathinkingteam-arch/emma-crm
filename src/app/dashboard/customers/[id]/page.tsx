@@ -19,7 +19,7 @@ import InterestStatsCard from '@/components/shared/InterestStatsCard'
 import WhatsappBoostPanel from '@/components/shared/WhatsappBoostPanel'
 import { packageTone, PACKAGE_TONE } from '@/lib/package-colors'
 import CrmTagButtons from '@/components/shared/CrmTagButtons'
-import { buildEntryDescription, negativeOf, effectiveTags, CRM_TAG_MAP, type CrmTagKey } from '@/lib/crm-tags'
+import { buildEntryDescription, categoryOf, effectiveTags, CRM_TAG_MAP, type CrmTagKey } from '@/lib/crm-tags'
 
 // Slot occupancy info for the planner grid — package tier + expiry so each
 // taken cell can be coloured the same way as the FR PLAN calendar.
@@ -2681,7 +2681,7 @@ export default function CustomerDetailPage() {
             </div>
 
             {isCrmWorker && (
-              <LogInteractionForm customerId={id} userId={user!.id} onSaved={fetchAll} phone={customer?.phone || ''} customerName={customer?.name || null} />
+              <LogInteractionForm customerId={id} userId={user!.id} onSaved={fetchAll} />
             )}
 
             {/* ── POSTS · BUILD WITH AI (no post yet) ───────── */}
@@ -3052,7 +3052,8 @@ function DesignerBriefPanel({ description, postCode }: { description: string; po
   )
 }
 
-function LogInteractionForm({ customerId, userId, onSaved, phone, customerName }: { customerId: string; userId: string; onSaved: () => void; phone: string; customerName: string | null }) {
+function LogInteractionForm({ customerId, userId, onSaved }: { customerId: string; userId: string; onSaved: () => void }) {
+  const router = useRouter()
   const [type, setType] = useState<'message' | 'call' | 'feedback'>('message')
   const [notes, setNotes] = useState('')
   const [tags, setTags] = useState<CrmTagKey[]>([])
@@ -3073,7 +3074,29 @@ function LogInteractionForm({ customerId, userId, onSaved, phone, customerName }
 
   const save = async () => {
     if (!notes.trim() && tags.length === 0) return
-    const negatives = negativeOf(tags)
+    const category = categoryOf(tags)
+
+    // Delete outcome (Not interested / Reject / Fake) → purge the number from
+    // the system entirely (guarded: kept as a client if it has an order).
+    if (category === 'delete') {
+      if (!confirm('This will permanently delete this number from the system (unless it has an order). Continue?')) return
+      setSaving(true)
+      try {
+        const res = await fetch('/api/leads/purge', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ customerId }),
+        })
+        const j = await res.json()
+        if (j.ok && j.deleted > 0) {
+          router.push('/dashboard')
+          return
+        }
+      } catch {
+        // fall through — keep the customer + log the note if the purge failed
+      }
+    }
+
     setSaving(true)
     await supabase.from('interactions').insert({
       customer_id: customerId,
@@ -3082,18 +3105,6 @@ function LogInteractionForm({ customerId, userId, onSaved, phone, customerName }
       created_by: userId,
       tags,
     })
-    if (negatives.length > 0) {
-      const { error: rejError } = await supabase.from('crm_rejections').insert({
-        customer_id: customerId,
-        phone,
-        customer_name: customerName,
-        agent_id: userId,
-        tags: negatives,
-        reason: reason.trim() || null,
-        note: notes.trim() || null,
-      })
-      if (rejError) console.error('Failed to file rejection:', rejError)
-    }
     setNotes(''); setTags([]); setReason(''); setSaving(false); onSaved()
   }
 

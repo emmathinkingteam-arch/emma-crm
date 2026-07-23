@@ -63,21 +63,21 @@ export const META_STATUS_META: Record<
     rejected: { label: 'Rejected', cls: 'bg-red-50 text-red-600', btn: 'bg-red-50 text-red-700 border-red-200' },
 }
 
+// What a status DOES to the lead (mirror of crm-tags CrmTagCategory):
+//   bounce   → no-answer / call-back. Stays with the SAME agent (stage=
+//              'followup') and re-surfaces on their dashboard the next day,
+//              every day, until they close it with a different status. It never
+//              goes to admin (the old 24h escalation is gone).
+//   delete   → reject / fake. The number is PURGED from the system entirely,
+//              unless it carries an order (then kept as a normal client).
+//   progress → package/payment sent, paid. Closes out (stage='done') as a real
+//              client and lives in the CRM like every other number.
+export const BOUNCE_STATUSES: MetaLeadStatus[] = ['no_answer', 'call_back']
+export const DELETE_STATUSES: MetaLeadStatus[] = ['rejected', 'fake']
+
 // Statuses that keep a lead with its agent as a "Tier Client — call back"
-// (stage='followup') instead of closing it out. ONLY the no-answer / call-back
-// outcomes belong here: they're the ones that need chasing and auto-escalate to
-// admin after 24h. A normal update (package/payment details sent) is a real
-// client — it closes out (stage='done') and just lives in the CRM like every
-// other number. Paid and the terminal negatives (rejected/fake) also close.
-export const FOLLOWUP_STATUSES: MetaLeadStatus[] = ['no_answer', 'call_back']
-
-// Of the follow-ups, these keep the 24h escalation clock running — if the
-// agent's latest update is still one of these after 24h, it goes to admin.
-// (Same set as FOLLOWUP_STATUSES now: every Tier Client is an escalating one.)
-export const ESCALATING_STATUSES: MetaLeadStatus[] = ['no_answer', 'call_back']
-
-// Hours a no-answer/call-back Tier Client waits before auto-escalating to admin.
-export const TIER_ESCALATE_HOURS = 24
+// (stage='followup') instead of closing it out — the bounce outcomes.
+export const FOLLOWUP_STATUSES: MetaLeadStatus[] = BOUNCE_STATUSES
 
 // The statuses an agent can pick (everything except the auto-initial "created").
 export const META_STATUS_BUTTONS: MetaLeadStatus[] = [
@@ -201,20 +201,3 @@ export function metaCountdown(due_at: string | null): { overdue: boolean; label:
     return { overdue, label: overdue ? `overdue ${hm}` : `due in ${hm}` }
 }
 
-// A Tier Client's countdown to auto-escalation. `responded_at` is the agent's
-// latest update; escalation fires TIER_ESCALATE_HOURS after it. Returns null
-// once the deadline has passed (the cron will move it to admin on its next run).
-export function tierEscalateCountdown(
-    responded_at: string | null
-): { due: boolean; label: string } {
-    if (!responded_at) return { due: false, label: '' }
-    const deadline =
-        new Date(responded_at).getTime() + TIER_ESCALATE_HOURS * 3_600_000
-    const diffMs = deadline - Date.now()
-    if (diffMs <= 0) return { due: true, label: 'moving to admin' }
-    const mins = Math.floor(diffMs / 60000)
-    const h = Math.floor(mins / 60)
-    const m = mins % 60
-    const hm = h > 0 ? `${h}h ${m}m` : `${m}m`
-    return { due: false, label: `admin in ${hm}` }
-}

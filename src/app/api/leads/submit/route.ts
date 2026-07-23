@@ -22,7 +22,7 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { currentProfile } from '@/lib/api-auth'
-import { buildEntryDescription, isCrmTagKey, negativeOf } from '@/lib/crm-tags'
+import { buildEntryDescription, isCrmTagKey, categoryOf } from '@/lib/crm-tags'
 import { purgeRejectedCustomer } from '@/lib/purge-rejected'
 
 export const dynamic = 'force-dynamic'
@@ -126,13 +126,14 @@ export async function POST(req: Request) {
         await sb.from('customers').update({ name: customerName }).eq('id', customerId)
     }
 
-    const negatives = negativeOf(tags)
+    const category = categoryOf(tags)
 
-    // 2b. Reject → purge the number from the system entirely (guarded). Done
-    //     before logging so we don't write an interaction only to delete it.
-    //     If the customer has real history (orders / accounting / complaints)
-    //     the purge is refused and we fall through to the normal reject flow.
-    if (tags.includes('rejected')) {
+    // 2b. Delete outcome (not interested / reject / fake) → purge the number
+    //     from the system entirely (guarded). Done before logging so we don't
+    //     write an interaction only to delete it. If the customer carries real
+    //     history (orders / accounting / complaints) the purge is refused and
+    //     we keep it as a normal client instead (fall through, status=responded).
+    if (category === 'delete') {
         const res = await purgeRejectedCustomer(sb, { customerId, leadId })
         if (res.purged) {
             return NextResponse.json({ ok: true, customerId: null, purged: true })
@@ -150,24 +151,17 @@ export async function POST(req: Request) {
         })
     }
 
-    // 3b. Negative outcome → file it into the admin's Rejected CRM queue.
-    if (negatives.length > 0) {
-        await sb.from('crm_rejections').insert({
-            customer_id: customerId,
-            phone: lead.phone,
-            customer_name: customerName || null,
-            agent_id: userId,
-            tags: negatives,
-            reason: reason || null,
-            note: notes.trim() || null,
-        })
-    }
-
-    // 4. Mark lead as responded.
+    // 4. Advance the lead by category:
+    //    bounce → 'followup': stays with THIS agent and re-surfaces on their
+    //             dashboard the next day (the dashboard filters followup leads by
+    //             responded_at < start-of-today). No admin, no penalty timer.
+    //    everything else (progress / delete-kept / plain note) → 'responded':
+    //             closed out as a normal client, no longer chased.
+    const nextStatus = category === 'bounce' ? 'followup' : 'responded'
     await sb
         .from('leads')
         .update({
-            status: 'responded',
+            status: nextStatus,
             responded_at: new Date().toISOString(),
             response_type: iType,
             customer_id: customerId,

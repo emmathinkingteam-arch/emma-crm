@@ -16,7 +16,7 @@ import { formatPhoneDisplay } from '@/lib/country-codes'
 import { CRM_TAG_MAP, effectiveTags, isCrmTagKey } from '@/lib/crm-tags'
 import {
     Loader2, Ban, ChevronDown, ChevronUp, Send, CheckCircle2,
-    History as HistoryIcon, Phone, Search,
+    History as HistoryIcon, Phone, Search, Trash2, AlertTriangle,
 } from 'lucide-react'
 
 interface RejectionRow {
@@ -64,6 +64,10 @@ export default function RejectedCrmPage() {
     const [moveTarget, setMoveTarget] = useState<Record<string, string>>({})
     const [movingId, setMovingId] = useState<string | null>(null)
     const [doneMsg, setDoneMsg] = useState<string | null>(null)
+
+    // permanent-delete state
+    const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+    const [deletingId, setDeletingId] = useState<string | null>(null)
 
     const load = useCallback(async () => {
         setLoading(true)
@@ -132,6 +136,34 @@ export default function RejectedCrmPage() {
             load()
         } finally {
             setMovingId(null)
+        }
+    }
+
+    const handleDelete = async (r: RejectionRow) => {
+        if (deletingId) return
+        setDeletingId(r.id)
+        try {
+            const res = await fetch('/api/leads/purge', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rejectionId: r.id }),
+            })
+            const j = await res.json()
+            if (!j.ok) {
+                if (j.error === 'has_history') {
+                    alert('Cannot delete: this number belongs to a paying client with order / accounting history. Deleting it would corrupt your records.')
+                } else {
+                    alert('Could not delete: ' + (j.error || 'unknown'))
+                }
+                return
+            }
+            setDoneMsg(`+${r.phone} permanently deleted from the database.`)
+            setTimeout(() => setDoneMsg(null), 6000)
+            setConfirmDeleteId(null)
+            // Drop it locally so the row disappears without a full refetch.
+            setRows(prev => prev.filter(x => x.id !== r.id))
+        } finally {
+            setDeletingId(null)
         }
     }
 
@@ -238,7 +270,7 @@ export default function RejectedCrmPage() {
                                             )}
                                         </div>
 
-                                        <div className="flex items-center gap-2 flex-shrink-0">
+                                        <div className="flex items-center gap-3 flex-shrink-0">
                                             <button
                                                 onClick={() => toggleHistory(r)}
                                                 className="flex items-center gap-1 text-[10px] font-bold text-gray-400 hover:text-pink-600 transition-colors"
@@ -246,8 +278,41 @@ export default function RejectedCrmPage() {
                                                 <HistoryIcon size={12} /> History
                                                 {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                                             </button>
+                                            <button
+                                                onClick={() => setConfirmDeleteId(confirmDeleteId === r.id ? null : r.id)}
+                                                className="flex items-center gap-1 text-[10px] font-bold text-gray-400 hover:text-red-600 transition-colors"
+                                            >
+                                                <Trash2 size={12} /> Delete
+                                            </button>
                                         </div>
                                     </div>
+
+                                    {/* Permanent-delete confirm — irreversible */}
+                                    {confirmDeleteId === r.id && (
+                                        <div className="mt-3 pt-3 border-t border-red-100 flex items-center gap-2 flex-wrap bg-red-50/50 -mx-4 px-4 pb-3">
+                                            <AlertTriangle size={14} className="text-red-500 flex-shrink-0" />
+                                            <span className="text-[11px] font-bold text-red-700">
+                                                Permanently delete this number and all its history from the database? This cannot be undone.
+                                            </span>
+                                            <div className="flex items-center gap-2 ml-auto">
+                                                <button
+                                                    onClick={() => setConfirmDeleteId(null)}
+                                                    disabled={deletingId === r.id}
+                                                    className="px-3 py-1.5 rounded-full text-[11px] font-bold text-gray-500 bg-white border border-gray-200 hover:bg-gray-50"
+                                                >
+                                                    Cancel
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDelete(r)}
+                                                    disabled={deletingId === r.id}
+                                                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[11px] font-bold text-white bg-red-600 hover:bg-red-700 active:scale-95 transition-all disabled:opacity-60"
+                                                >
+                                                    {deletingId === r.id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                                                    Delete permanently
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
 
                                     {/* Move to another agent (open only) */}
                                     {r.status === 'open' && (

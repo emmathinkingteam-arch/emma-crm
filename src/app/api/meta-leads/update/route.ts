@@ -23,6 +23,7 @@ import {
     type MetaLeadStatus,
 } from '@/lib/meta-leads'
 import { type CrmTagKey } from '@/lib/crm-tags'
+import { purgeRejectedCustomer } from '@/lib/purge-rejected'
 
 // Map meta-lead statuses onto the shared CRM tag keys (structured filtering).
 const META_TO_TAG: Partial<Record<MetaLeadStatus, CrmTagKey>> = {
@@ -125,9 +126,21 @@ export async function POST(req: Request) {
         })
         .eq('id', leadId)
 
-    // 3. Log the status change as an interaction (best-effort).
     const tag = META_TO_TAG[status]
-    if (customerId) {
+
+    // 2b. Reject → purge the number from the system entirely (guarded). If the
+    //     customer has real history (orders / accounting / complaints) the
+    //     purge is refused and we fall through to the normal reject flow. The
+    //     Google-sheet write-back (step 4) still runs so the source reflects it.
+    let purged = false
+    if (status === 'rejected') {
+        const res = await purgeRejectedCustomer(sb, { customerId, metaLeadId: lead.id })
+        purged = res.purged
+    }
+
+    // 3. Log the status change as an interaction (best-effort). Skipped when the
+    //    customer was just purged — the row would only be deleted again.
+    if (customerId && !purged) {
         try {
             await sb.from('interactions').insert({
                 customer_id: customerId,
@@ -141,8 +154,9 @@ export async function POST(req: Request) {
         }
     }
 
-    // 3b. Negative outcome → file it into the admin's Rejected CRM queue.
-    if (NEGATIVE_META.includes(status)) {
+    // 3b. Negative outcome → file it into the admin's Rejected CRM queue (unless
+    //     a reject was purged outright).
+    if (NEGATIVE_META.includes(status) && !purged) {
         try {
             await sb.from('crm_rejections').insert({
                 customer_id: customerId,
@@ -192,5 +206,5 @@ export async function POST(req: Request) {
         sheetError = e instanceof Error ? e.message : 'sheet_write_failed'
     }
 
-    return NextResponse.json({ ok: true, customerId, sheetWritten, sheetError })
+    return NextResponse.json({ ok: true, customerId: purged ? null : customerId, purged, sheetWritten, sheetError })
 }

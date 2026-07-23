@@ -23,6 +23,7 @@ import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { currentProfile } from '@/lib/api-auth'
 import { buildEntryDescription, isCrmTagKey, negativeOf } from '@/lib/crm-tags'
+import { purgeRejectedCustomer } from '@/lib/purge-rejected'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -95,6 +96,17 @@ export async function POST(req: Request) {
 
         if (existing) {
             customerId = existing.id
+            // This number was already in the system under another agent, and
+            // the admin deliberately distributed it to THIS worker. Hand the
+            // customer over to her (created_by → her) so it shows as her own
+            // number, exactly like the recycle flow. The old agent's
+            // `interactions` rows are NOT touched — the earlier history stays
+            // in the DB, hidden from her by the per-agent RLS on interactions
+            // and still fully visible to admin/supervisor.
+            await sb
+                .from('customers')
+                .update({ created_by: userId })
+                .eq('id', existing.id)
         } else {
             const { data: created } = await sb
                 .from('customers')
@@ -114,6 +126,19 @@ export async function POST(req: Request) {
         await sb.from('customers').update({ name: customerName }).eq('id', customerId)
     }
 
+    const negatives = negativeOf(tags)
+
+    // 2b. Reject → purge the number from the system entirely (guarded). Done
+    //     before logging so we don't write an interaction only to delete it.
+    //     If the customer has real history (orders / accounting / complaints)
+    //     the purge is refused and we fall through to the normal reject flow.
+    if (tags.includes('rejected')) {
+        const res = await purgeRejectedCustomer(sb, { customerId, leadId })
+        if (res.purged) {
+            return NextResponse.json({ ok: true, customerId: null, purged: true })
+        }
+    }
+
     // 3. Log the interaction (notes and/or quick-status tags).
     if (customerId && (notes.trim() || tags.length > 0)) {
         await sb.from('interactions').insert({
@@ -126,7 +151,6 @@ export async function POST(req: Request) {
     }
 
     // 3b. Negative outcome → file it into the admin's Rejected CRM queue.
-    const negatives = negativeOf(tags)
     if (negatives.length > 0) {
         await sb.from('crm_rejections').insert({
             customer_id: customerId,

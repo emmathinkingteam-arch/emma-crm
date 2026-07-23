@@ -69,6 +69,11 @@ export default function RejectedCrmPage() {
     const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
     const [deletingId, setDeletingId] = useState<string | null>(null)
 
+    // multi-select / bulk-delete state
+    const [selected, setSelected] = useState<Set<string>>(new Set())
+    const [confirmBulk, setConfirmBulk] = useState(false)
+    const [bulkDeleting, setBulkDeleting] = useState(false)
+
     const load = useCallback(async () => {
         setLoading(true)
         let q = supabase
@@ -149,11 +154,12 @@ export default function RejectedCrmPage() {
                 body: JSON.stringify({ rejectionId: r.id }),
             })
             const j = await res.json()
-            if (!j.ok) {
-                if (j.error === 'has_history') {
+            if (!j.ok || j.deleted === 0) {
+                const skipped = (j.skipped || [])[0]
+                if (skipped?.reason === 'has_history') {
                     alert('Cannot delete: this number belongs to a paying client with order / accounting history. Deleting it would corrupt your records.')
                 } else {
-                    alert('Could not delete: ' + (j.error || 'unknown'))
+                    alert('Could not delete: ' + (j.error || skipped?.reason || 'unknown'))
                 }
                 return
             }
@@ -172,6 +178,58 @@ export default function RejectedCrmPage() {
         const q = search.toLowerCase()
         return r.phone.includes(q) || (r.customer_name?.toLowerCase() || '').includes(q)
     })
+
+    const toggleSelect = (id: string) => {
+        setSelected(prev => {
+            const next = new Set(prev)
+            if (next.has(id)) next.delete(id)
+            else next.add(id)
+            return next
+        })
+    }
+
+    // "select all" acts on the currently-visible (filtered) rows.
+    const visibleIds = displayed.map(r => r.id)
+    const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selected.has(id))
+    const toggleSelectAll = () => {
+        setSelected(prev => {
+            const next = new Set(prev)
+            if (allVisibleSelected) visibleIds.forEach(id => next.delete(id))
+            else visibleIds.forEach(id => next.add(id))
+            return next
+        })
+    }
+
+    const handleBulkDelete = async () => {
+        if (bulkDeleting || selected.size === 0) return
+        setBulkDeleting(true)
+        try {
+            const ids = Array.from(selected)
+            const res = await fetch('/api/leads/purge', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rejectionIds: ids }),
+            })
+            const j = await res.json()
+            if (!j.ok) {
+                alert('Bulk delete failed: ' + (j.error || 'unknown'))
+                return
+            }
+            const skippedIds = new Set((j.skipped || []).map((s: { id: string }) => s.id))
+            const protectedCount = (j.skipped || []).filter((s: { reason: string }) => s.reason === 'has_history').length
+            // Remove the actually-deleted rows; keep the skipped (e.g. paying clients).
+            setRows(prev => prev.filter(x => !selected.has(x.id) || skippedIds.has(x.id)))
+            setSelected(new Set(skippedIds as Set<string>))
+            setConfirmBulk(false)
+            setDoneMsg(
+                `${j.deleted} number${j.deleted === 1 ? '' : 's'} permanently deleted.` +
+                (protectedCount ? ` ${protectedCount} kept — paying client${protectedCount === 1 ? '' : 's'} with order history.` : '')
+            )
+            setTimeout(() => setDoneMsg(null), 8000)
+        } finally {
+            setBulkDeleting(false)
+        }
+    }
 
     return (
         <div className="space-y-4">
@@ -212,6 +270,62 @@ export default function RejectedCrmPage() {
                 <span className="ml-auto text-xs text-gray-400 font-medium">{displayed.length} numbers</span>
             </div>
 
+            {/* Select-all + bulk delete */}
+            {displayed.length > 0 && (
+                <div className="flex items-center gap-3 flex-wrap px-1">
+                    <label className="flex items-center gap-2 text-xs font-bold text-gray-500 cursor-pointer select-none">
+                        <input
+                            type="checkbox"
+                            checked={allVisibleSelected}
+                            onChange={toggleSelectAll}
+                            className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500 cursor-pointer"
+                        />
+                        Select all
+                    </label>
+                    {selected.size > 0 && (
+                        <>
+                            <span className="text-xs font-bold text-gray-600">{selected.size} selected</span>
+                            <button
+                                onClick={() => setSelected(new Set())}
+                                className="text-[11px] font-bold text-gray-400 hover:text-gray-700"
+                            >
+                                Clear
+                            </button>
+                            {!confirmBulk ? (
+                                <button
+                                    onClick={() => setConfirmBulk(true)}
+                                    className="ml-auto flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[11px] font-bold text-white bg-red-600 hover:bg-red-700 active:scale-95 transition-all"
+                                >
+                                    <Trash2 size={12} /> Delete selected ({selected.size})
+                                </button>
+                            ) : (
+                                <div className="ml-auto flex items-center gap-2 flex-wrap bg-red-50 border border-red-100 rounded-full pl-3 pr-1.5 py-1">
+                                    <AlertTriangle size={13} className="text-red-500" />
+                                    <span className="text-[11px] font-bold text-red-700">
+                                        Permanently delete {selected.size}? Can't be undone.
+                                    </span>
+                                    <button
+                                        onClick={() => setConfirmBulk(false)}
+                                        disabled={bulkDeleting}
+                                        className="px-3 py-1 rounded-full text-[11px] font-bold text-gray-500 bg-white border border-gray-200 hover:bg-gray-50"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={handleBulkDelete}
+                                        disabled={bulkDeleting}
+                                        className="flex items-center gap-1.5 px-4 py-1 rounded-full text-[11px] font-bold text-white bg-red-600 hover:bg-red-700 active:scale-95 transition-all disabled:opacity-60"
+                                    >
+                                        {bulkDeleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                                        Delete permanently
+                                    </button>
+                                </div>
+                            )}
+                        </>
+                    )}
+                </div>
+            )}
+
             {doneMsg && (
                 <div className="bg-green-50 border border-green-100 rounded-xl px-3 py-2.5 text-xs font-bold text-green-700 flex items-center gap-2">
                     <CheckCircle2 size={14} /> {doneMsg}
@@ -239,6 +353,13 @@ export default function RejectedCrmPage() {
                             <div key={r.id} className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
                                 <div className="p-4">
                                     <div className="flex items-start justify-between gap-3 flex-wrap">
+                                        <div className="flex items-start gap-3 min-w-0">
+                                            <input
+                                                type="checkbox"
+                                                checked={selected.has(r.id)}
+                                                onChange={() => toggleSelect(r.id)}
+                                                className="mt-1 w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500 cursor-pointer flex-shrink-0"
+                                            />
                                         <div className="min-w-0">
                                             <div className="flex items-center gap-2 flex-wrap">
                                                 <span className="text-sm font-bold text-gray-800 font-mono flex items-center gap-1.5">
@@ -268,6 +389,7 @@ export default function RejectedCrmPage() {
                                                     {r.reason}
                                                 </p>
                                             )}
+                                        </div>
                                         </div>
 
                                         <div className="flex items-center gap-3 flex-shrink-0">

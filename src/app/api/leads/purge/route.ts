@@ -32,43 +32,51 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 })
     }
 
-    let body: { rejectionId: string }
+    let body: { rejectionId?: string; rejectionIds?: string[] }
     try {
         body = await req.json()
     } catch {
         return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 })
     }
 
-    const { rejectionId } = body
-    if (!rejectionId) {
+    // Accept a single id or a batch. De-dupe and drop empties.
+    const ids = Array.from(
+        new Set([...(body.rejectionIds || []), ...(body.rejectionId ? [body.rejectionId] : [])].filter(Boolean)),
+    )
+    if (ids.length === 0) {
         return NextResponse.json({ ok: false, error: 'missing_fields' }, { status: 400 })
     }
 
     const sb = supabaseAdmin()
 
-    const { data: rejection, error: rErr } = await sb
-        .from('crm_rejections')
-        .select('id, customer_id')
-        .eq('id', rejectionId)
-        .single()
+    let deleted = 0
+    const skipped: { id: string; reason: string }[] = []
 
-    if (rErr || !rejection) {
-        return NextResponse.json({ ok: false, error: 'rejection_not_found' }, { status: 404 })
+    for (const id of ids) {
+        const { data: rejection, error: rErr } = await sb
+            .from('crm_rejections')
+            .select('id, customer_id')
+            .eq('id', id)
+            .single()
+
+        if (rErr || !rejection) {
+            skipped.push({ id, reason: 'not_found' })
+            continue
+        }
+
+        // No linked customer → just drop this queue row.
+        if (!rejection.customer_id) {
+            const { error } = await sb.from('crm_rejections').delete().eq('id', id)
+            if (error) skipped.push({ id, reason: 'error' })
+            else deleted++
+            continue
+        }
+
+        // Hard-delete the whole customer (crm_rejections cascades away with it).
+        const res = await purgeRejectedCustomer(sb, { customerId: rejection.customer_id })
+        if (res.purged) deleted++
+        else skipped.push({ id, reason: res.reason || 'error' }) // has_history = paying client
     }
 
-    // No linked customer → just drop this queue row.
-    if (!rejection.customer_id) {
-        const { error } = await sb.from('crm_rejections').delete().eq('id', rejectionId)
-        if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 })
-        return NextResponse.json({ ok: true })
-    }
-
-    // Hard-delete the whole customer (crm_rejections cascades away with it).
-    const res = await purgeRejectedCustomer(sb, { customerId: rejection.customer_id })
-    if (!res.purged) {
-        // has_history → paying/complaint customer we must not destroy.
-        return NextResponse.json({ ok: false, error: res.reason || 'error' }, { status: 409 })
-    }
-
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({ ok: true, deleted, skipped })
 }

@@ -21,15 +21,18 @@
 // Only orders with status='active' count — expired packages don't get chased.
 // ============================================================================
 
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
-import { HeartHandshake, Phone, ChevronRight, Check, MessageCircle } from 'lucide-react'
+import {
+  HeartHandshake, Phone, ChevronRight, Check, MessageCircle,
+  CalendarDays, ChevronLeft, CheckCircle2,
+} from 'lucide-react'
 import Link from 'next/link'
 import { formatPhoneDisplay } from '@/lib/country-codes'
-import { buildWaLink, openWaLink } from '@/lib/utils'
+import { buildWaLink, openWaLink, fmtTime } from '@/lib/utils'
 
 const DAY_MS = 86_400_000
 
@@ -71,14 +74,92 @@ function localDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
 }
 
+// YYYY-MM-DD for a given date, in the viewer's local timezone (Sri Lanka).
+function toDateInput(d: Date): string {
+  const off = d.getTimezoneOffset() * 60_000
+  return new Date(d.getTime() - off).toISOString().slice(0, 10)
+}
+
+// A completed follow-up (an interaction stamped with the "Follow-up done" marker).
+interface CompletedRow {
+  id: string
+  customerId: string | null
+  name: string | null
+  phone: string | null
+  description: string
+  createdAt: string
+  agentName: string | null
+}
+
 export default function FollowUpPage() {
   const { user, role } = useAuthStore()
+  const [tab, setTab] = useState<'due' | 'completed'>('due')
   const [rows, setRows] = useState<DueRow[]>([])
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [doneId, setDoneId] = useState<string | null>(null)
 
+  // Completed-tab state.
+  const isAdminView = role === 'admin' || role === 'team_leader'
+  const [selectedDate, setSelectedDate] = useState<string>(() => toDateInput(new Date()))
+  const [agents, setAgents] = useState<{ id: string; full_name: string }[]>([])
+  const [agentFilter, setAgentFilter] = useState('')
+  const [completed, setCompleted] = useState<CompletedRow[]>([])
+  const [completedLoading, setCompletedLoading] = useState(false)
+
   useEffect(() => { fetchData() }, [user])
+
+  // Admins/team leaders can pick whose follow-ups to review.
+  useEffect(() => {
+    if (!isAdminView) return
+    supabase.from('users').select('id, full_name').eq('is_active', true).order('full_name')
+      .then(({ data }) => { if (data) setAgents(data as any) })
+  }, [isAdminView])
+
+  // Load completed follow-ups for the chosen day (and agent, for admins).
+  useEffect(() => {
+    if (tab !== 'completed' || !user) return
+    let cancelled = false
+    ;(async () => {
+      setCompletedLoading(true)
+      const start = new Date(`${selectedDate}T00:00:00`)
+      const end = new Date(start.getTime() + DAY_MS)
+      let q = supabase
+        .from('interactions')
+        .select('id, customer_id, description, created_at, customer:customers(name, phone), agent:users!created_by(full_name)')
+        .ilike('description', '%Follow-up done%')
+        .gte('created_at', start.toISOString())
+        .lt('created_at', end.toISOString())
+        .order('created_at', { ascending: false })
+      // Back office sees only her own; admins see everyone or a picked agent.
+      if (isAdminView) {
+        if (agentFilter) q = q.eq('created_by', agentFilter)
+      } else {
+        q = q.eq('created_by', user.id)
+      }
+      const { data } = await q
+      if (cancelled) return
+      const mapped: CompletedRow[] = (data || []).map((i: any) => ({
+        id: i.id,
+        customerId: i.customer_id,
+        name: i.customer?.name ?? null,
+        phone: i.customer?.phone ?? null,
+        description: i.description,
+        createdAt: i.created_at,
+        agentName: i.agent?.full_name ?? null,
+      }))
+      setCompleted(mapped)
+      setCompletedLoading(false)
+    })()
+    return () => { cancelled = true }
+  }, [tab, selectedDate, agentFilter, isAdminView, user])
+
+  const shiftDay = (delta: number) => {
+    const d = new Date(`${selectedDate}T00:00:00`)
+    d.setDate(d.getDate() + delta)
+    setSelectedDate(toDateInput(d))
+  }
+  const isToday = selectedDate === toDateInput(new Date())
 
   const fetchData = async () => {
     if (!user) return
@@ -195,12 +276,41 @@ export default function FollowUpPage() {
           </div>
           <div>
             <h1 className="text-base font-extrabold text-gray-800 leading-none">Follow Up</h1>
-            <p className="text-[10px] text-gray-400 font-semibold mt-0.5">Active customers due for a check-in</p>
+            <p className="text-[10px] text-gray-400 font-semibold mt-0.5">
+              {tab === 'due' ? 'Active customers due for a check-in' : 'Follow-ups already completed'}
+            </p>
           </div>
         </div>
 
+        {/* Tab switcher */}
+        <div className="bg-gray-50 rounded-2xl p-1 inline-flex gap-1 my-3">
+          {(['due', 'completed'] as const).map(t => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all ${tab === t ? 'bg-white text-pink-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+            >
+              {t === 'due' ? 'Due now' : 'Completed'}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'completed' ? (
+          <CompletedView
+            isAdminView={isAdminView}
+            selectedDate={selectedDate}
+            setSelectedDate={setSelectedDate}
+            shiftDay={shiftDay}
+            isToday={isToday}
+            agents={agents}
+            agentFilter={agentFilter}
+            setAgentFilter={setAgentFilter}
+            completed={completed}
+            completedLoading={completedLoading}
+          />
+        ) : (<>
         {/* Cadence legend */}
-        <div className="flex flex-wrap gap-1.5 my-3">
+        <div className="flex flex-wrap gap-1.5 mb-3">
           {(['platinum', 'premium', 'standard', 'basic'] as const).map(t => (
             <span key={t} className={`px-2.5 py-1 rounded-full text-[9px] font-bold ${TIER_STYLE[t]}`}>
               {TIER_LABEL[t]} · every {TIER_INTERVAL_DAYS[t]}d
@@ -289,8 +399,128 @@ export default function FollowUpPage() {
             View only — you can see who's due but only Back Office can send follow-ups.
           </div>
         )}
+        </>)}
       </div>
       <BottomNav />
     </div>
+  )
+}
+
+// ── Completed follow-ups for a chosen day ───────────────────────────────────
+function CompletedView(props: {
+  isAdminView: boolean
+  selectedDate: string
+  setSelectedDate: (d: string) => void
+  shiftDay: (delta: number) => void
+  isToday: boolean
+  agents: { id: string; full_name: string }[]
+  agentFilter: string
+  setAgentFilter: (v: string) => void
+  completed: CompletedRow[]
+  completedLoading: boolean
+}) {
+  const {
+    isAdminView, selectedDate, setSelectedDate, shiftDay, isToday,
+    agents, agentFilter, setAgentFilter, completed, completedLoading,
+  } = props
+
+  return (
+    <>
+      {/* Date + agent filters */}
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        <div className="flex items-center bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <button
+            onClick={() => shiftDay(-1)}
+            className="px-2 py-2 text-gray-400 hover:text-pink-600 hover:bg-gray-50"
+            aria-label="Previous day"
+          >
+            <ChevronLeft size={15} />
+          </button>
+          <label className="flex items-center gap-1.5 px-2 border-x border-gray-100">
+            <CalendarDays size={14} className="text-pink-400" />
+            <input
+              type="date"
+              value={selectedDate}
+              max={toDateInput(new Date())}
+              onChange={e => setSelectedDate(e.target.value)}
+              className="text-xs font-bold text-gray-700 outline-none bg-transparent py-2"
+            />
+          </label>
+          <button
+            onClick={() => shiftDay(1)}
+            disabled={isToday}
+            className="px-2 py-2 text-gray-400 hover:text-pink-600 hover:bg-gray-50 disabled:opacity-30 disabled:hover:bg-transparent"
+            aria-label="Next day"
+          >
+            <ChevronRight size={15} />
+          </button>
+        </div>
+
+        {!isToday && (
+          <button
+            onClick={() => setSelectedDate(toDateInput(new Date()))}
+            className="text-[11px] font-bold text-pink-600 hover:underline"
+          >
+            Today
+          </button>
+        )}
+
+        {isAdminView && (
+          <select
+            value={agentFilter}
+            onChange={e => setAgentFilter(e.target.value)}
+            className="text-xs border border-gray-200 rounded-xl px-3 py-2 bg-white outline-none font-semibold"
+          >
+            <option value="">Everyone</option>
+            {agents.map(a => <option key={a.id} value={a.id}>{a.full_name}</option>)}
+          </select>
+        )}
+
+        <span className="ml-auto text-[11px] font-bold text-gray-400">
+          {completed.length} done
+        </span>
+      </div>
+
+      {completedLoading ? (
+        <div className="space-y-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="skeleton h-[60px] rounded-2xl" />
+          ))}
+        </div>
+      ) : completed.length === 0 ? (
+        <div className="text-center py-16">
+          <CalendarDays size={28} className="text-gray-200 mx-auto mb-2" />
+          <p className="text-sm font-extrabold text-gray-500">No follow-ups logged</p>
+          <p className="text-[11px] font-semibold text-gray-400 mt-1">
+            Nothing was completed on {new Date(`${selectedDate}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' })}.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2 animate-fade-in">
+          {completed.map(c => (
+            <Link
+              key={c.id}
+              href={c.customerId ? `/dashboard/customers/${c.customerId}` : '#'}
+              className="flex items-center gap-3 rounded-2xl border border-gray-100 bg-white p-3 hover:border-pink-100 transition-all"
+            >
+              <div className="w-9 h-9 rounded-xl bg-green-50 flex items-center justify-center flex-shrink-0">
+                <CheckCircle2 size={16} className="text-green-500" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-extrabold text-gray-800 truncate">
+                  {c.name || (c.phone ? formatPhoneDisplay(c.phone) : 'Unknown')}
+                </p>
+                <p className="text-[10px] font-semibold text-gray-400 truncate">
+                  {isAdminView && c.agentName ? `${c.agentName} · ` : ''}{c.description.replace(/^📲\s*/, '')}
+                </p>
+              </div>
+              <span className="text-[10px] font-bold text-gray-400 flex-shrink-0">
+                {fmtTime(c.createdAt)}
+              </span>
+            </Link>
+          ))}
+        </div>
+      )}
+    </>
   )
 }

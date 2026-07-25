@@ -7,7 +7,7 @@ import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import Link from 'next/link'
-import { Loader2, Camera, LogOut, MapPin, FileText, Download, ClipboardList, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react'
+import { Loader2, Camera, LogOut, MapPin, FileText, Download, ClipboardList, ChevronDown, ChevronUp, ExternalLink, AlertOctagon } from 'lucide-react'
 import { canPunchOut, currentMonthYear, fmtDate } from '@/lib/utils'
 import { recordPing } from '@/lib/location'
 import { Attendance, RewardMilestone } from '@/types'
@@ -725,6 +725,12 @@ export default function ProfilePage() {
             </div>
           )}
         </div>
+
+        {/* Complaints */}
+        <Link href="/dashboard/complaints"
+          className="w-full border border-gray-100 text-gray-500 rounded-full py-3 text-xs font-semibold flex items-center justify-center gap-2">
+          <AlertOctagon size={14} /> My Complaints
+        </Link>
 
         {/* Logout */}
         <button onClick={handleLogout}

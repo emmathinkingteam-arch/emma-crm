@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Users, CalendarRange,
-  PlusCircle, Wallet, Award, ClipboardList, Search, MessageCircle,
+  PlusCircle, Wallet, Award, ClipboardList, Search,
   ArrowDownToLine, ListOrdered, Landmark, Receipt, DollarSign, ShieldCheck,
   HeartHandshake
 } from 'lucide-react'
@@ -29,7 +29,6 @@ const NAV_CONFIG = {
     { href: '/dashboard/customers', icon: Users, label: 'Clients' },
     { href: '/dashboard/wallet', icon: Wallet, label: 'Wallet' },
     { href: '/dashboard/profile', icon: Award, label: 'Profile' },
-    { href: '/dashboard/chat', icon: MessageCircle, label: 'Chat' },
   ],
   back_office: [
     { href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
@@ -38,7 +37,6 @@ const NAV_CONFIG = {
     { href: '/dashboard/legacy-history', icon: Search, label: 'Search' },
     { href: '/dashboard/calendar', icon: CalendarRange, label: 'Plan' },
     { href: '/dashboard/profile', icon: Award, label: 'Profile' },
-    { href: '/dashboard/chat', icon: MessageCircle, label: 'Chat' },
   ],
   counselor: [
     { href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
@@ -46,7 +44,6 @@ const NAV_CONFIG = {
     { href: '/dashboard/calendar', icon: CalendarRange, label: 'Plan' },
     { href: '/dashboard/wallet', icon: Wallet, label: 'Wallet' },
     { href: '/dashboard/profile', icon: Award, label: 'Profile' },
-    { href: '/dashboard/chat', icon: MessageCircle, label: 'Chat' },
   ],
   manager: [
     { href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
@@ -54,7 +51,6 @@ const NAV_CONFIG = {
     { href: '/dashboard/tasks', icon: ClipboardList, label: 'Tasks' },
     { href: '/dashboard/calendar', icon: CalendarRange, label: 'Plan' },
     { href: '/dashboard/profile', icon: Award, label: 'Profile' },
-    { href: '/dashboard/chat', icon: MessageCircle, label: 'Chat' },
   ],
   designer: [
     { href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
@@ -62,7 +58,6 @@ const NAV_CONFIG = {
     { href: '/dashboard/calendar', icon: CalendarRange, label: 'Plan' },
     { href: '/dashboard/wallet', icon: Wallet, label: 'Wallet' },
     { href: '/dashboard/profile', icon: Award, label: 'Profile' },
-    { href: '/dashboard/chat', icon: MessageCircle, label: 'Chat' },
   ],
   // Team Leader is hybrid (team lead + CRM): she gets the full CRM workspace
   // nav plus a shortcut back to the Admin panel.
@@ -71,7 +66,6 @@ const NAV_CONFIG = {
     { href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
     { href: '/entry', icon: PlusCircle, label: 'Entry' },
     { href: '/dashboard/customers', icon: Users, label: 'Clients' },
-    { href: '/dashboard/chat', icon: MessageCircle, label: 'Chat' },
     { href: '/dashboard/profile', icon: Award, label: 'Profile' },
   ],
 }

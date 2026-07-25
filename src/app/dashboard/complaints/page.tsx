@@ -107,7 +107,7 @@ export default function ComplaintsPage() {
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2.5">
                             <button
-                                onClick={() => router.push('/dashboard/chat')}
+                                onClick={() => router.push('/dashboard/profile')}
                                 className="w-8 h-8 rounded-full bg-white/70 flex items-center justify-center text-gray-500 active:scale-95 transition-transform flex-shrink-0"
                             >
                                 <ArrowLeft size={15} />

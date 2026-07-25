@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Users, ClipboardList, History,
   MapPin, Briefcase, UserPlus, BarChart2,
   CalendarRange, ShieldCheck, Settings, LogOut,
-  Bell, DollarSign, Target, Archive, MessageSquare, MessageCircle, MessagesSquare, AlertOctagon,
+  Bell, DollarSign, Target, Archive, MessageSquare, MessageCircle, AlertOctagon,
   Wallet, Megaphone, Eye, Headphones, FileSignature, Facebook, ReceiptText, Sparkles,
   UserCircle2, Menu, X, PlusCircle,
 } from 'lucide-react'
@@ -43,7 +43,6 @@ const SECTIONS: Section[] = [
   {
     title: 'Team',
     items: [
-      { href: '/admin/team-chat', icon: MessagesSquare, label: 'Team Chat' },
       { href: '/admin/workers', icon: Users, label: 'Workers' },
       { href: '/admin/attendance', icon: CalendarRange, label: 'Attendance' },
       { href: '/admin/tasks', icon: ClipboardList, label: 'Tasks' },
@@ -105,7 +104,6 @@ const TEAM_LEADER_CRM: Section = {
     { href: '/dashboard', icon: LayoutDashboard, label: 'CRM Dashboard' },
     { href: '/entry', icon: PlusCircle, label: 'New Entry' },
     { href: '/dashboard/customers', icon: Users, label: 'My Clients' },
-    { href: '/dashboard/chat', icon: MessageCircle, label: 'Chat' },
   ],
 }
 
@@ -124,7 +122,7 @@ const ACTIVE_PREFIXES = [
   '/admin/workers', '/admin/documents', '/admin/crm-entries', '/admin/attendance',
   '/admin/tasks', '/admin/calendar', '/dashboard/legacy-history',
   '/dashboard/profile', '/dashboard/wallet',
-  '/dashboard/customers', '/dashboard/chat', '/entry',
+  '/dashboard/customers', '/entry',
 ]
 
 function isActive(href: string, pathname: string): boolean {

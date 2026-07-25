@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
-import LowInterestAlert from '@/components/shared/LowInterestAlert'
 import {
   Building2, CheckCircle2, AlertTriangle,
   ClipboardList, UserPlus, AlertOctagon, Users2,
@@ -78,7 +77,6 @@ function BankReminder() {
 export default function AdminDashboardPage() {
   const { role } = useAuthStore()
   const [stats, setStats] = useState({ activeOrders: 0, newToday: 0, overdue: 0, punchedIn: 0, monthCommission: 0, leavePending: 0, totalCustomers: 0, livePosts: 0 })
-  const [overdueItems, setOverdueItems] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -93,14 +91,12 @@ export default function AdminDashboardPage() {
       supabase.from('leave_requests').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
       supabase.from('customers').select('id', { count: 'exact', head: true }),
       supabase.from('orders').select('id', { count: 'exact', head: true }).eq('status', 'active').not('published_at', 'is', null),
-      supabase.from('order_steps').select('*, order:orders(customer:customers(name,phone)), assigned_user:users!assigned_to(full_name)').eq('is_overdue', true).neq('status', 'done').limit(5),
-    ]).then(([ao, nt, ov, pi, mc, lp, tc, lv, oi]) => {
+    ]).then(([ao, nt, ov, pi, mc, lp, tc, lv]) => {
       setStats({
         activeOrders: (ao as any).count ?? 0, newToday: (nt as any).count ?? 0, overdue: (ov as any).count ?? 0,
         punchedIn: (pi as any).count ?? 0, monthCommission: ((mc as any).data ?? []).reduce((s: number, r: any) => s + r.amount, 0),
         leavePending: (lp as any).count ?? 0, totalCustomers: (tc as any).count ?? 0, livePosts: (lv as any).count ?? 0,
       })
-      if ((oi as any).data) setOverdueItems((oi as any).data)
       setLoading(false)
     })
   }, [])
@@ -183,8 +179,6 @@ export default function AdminDashboardPage() {
         <p className="text-sm text-gray-400 font-medium mt-0.5">{dateStr}</p>
       </div>
 
-      {role === 'admin' && <LowInterestAlert />}
-
       <BankReminder />
 
       {/* KPI grid */}
@@ -200,42 +194,6 @@ export default function AdminDashboardPage() {
             <p className="text-[10px] text-gray-400 font-semibold mt-1 uppercase tracking-wide">{k.label}</p>
           </div>
         ))}
-      </div>
-
-      {/* Overdue alerts */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-        <div className="flex items-center gap-2 mb-4">
-          <AlertOctagon size={15} className={overdueItems.length > 0 ? 'text-red-400' : 'text-gray-300'} />
-          <h2 className="text-sm font-bold text-gray-700">Overdue alerts</h2>
-          {overdueItems.length > 0 && (
-            <span className="ml-auto text-[9px] font-bold bg-red-100 text-red-500 px-2 py-0.5 rounded-full">
-              {overdueItems.length} overdue
-            </span>
-          )}
-        </div>
-        {overdueItems.length === 0 ? (
-          <div className="py-8 text-center">
-            <CheckCircle2 size={28} className="text-emerald-200 mx-auto mb-2" />
-            <p className="text-xs font-bold text-gray-400">All clear — no overdue items</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {overdueItems.map(item => (
-              <div key={item.id} className="flex items-center justify-between bg-red-50 border border-red-100 rounded-xl px-4 py-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-red-100 flex items-center justify-center flex-shrink-0">
-                    <AlertOctagon size={14} className="text-red-400" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-gray-800">{item.order?.customer?.name || item.order?.customer?.phone}</p>
-                    <p className="text-[9px] text-gray-400 font-medium mt-0.5">{item.step_name} · {item.assigned_user?.full_name || 'Unassigned'}</p>
-                  </div>
-                </div>
-                <span className="text-[8px] font-bold bg-red-100 text-red-500 px-2.5 py-1 rounded-full flex-shrink-0">Overdue</span>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   )

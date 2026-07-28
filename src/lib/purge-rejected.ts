@@ -9,8 +9,8 @@
 // still use.
 //
 // Because a hard-delete is IRREVERSIBLE, it is deliberately GUARDED: a customer
-// that carries financial or support history (orders, accounting entries,
-// per-customer costs, support complaints) is NEVER deleted — wiping those rows
+// that carries financial history (orders, accounting entries, per-customer
+// costs) is NEVER deleted — wiping those rows
 // would corrupt the books / lose a real client's record. For those the caller
 // falls back to the normal "file into Rejected CRM" behaviour.
 //
@@ -18,8 +18,8 @@
 //   crm_rejections .............. CASCADE   (auto)
 //   location_pings .............. SET NULL  (auto)
 //   second_post_requests ........ SET NULL  (auto)
-//   interactions / leads / meta_leads  NO ACTION → must be deleted first
-//   orders / acc_* / support_complaints  NO ACTION → guarded above, never here
+//   interactions / leads ........ NO ACTION  → must be deleted first
+//   orders / acc_* .............. NO ACTION  → guarded above, never here
 //
 // Returns:
 //   { purged: true }               — customer + all its numbers were deleted
@@ -37,7 +37,7 @@ export interface PurgeResult {
 }
 
 // Tables whose presence means the customer is NOT safe to hard-delete.
-const PROTECTED_TABLES = ['orders', 'acc_entries', 'acc_customer_costs', 'support_complaints'] as const
+const PROTECTED_TABLES = ['orders', 'acc_entries', 'acc_customer_costs'] as const
 
 async function hasProtectedHistory(sb: AnyClient, customerId: string): Promise<boolean> {
     for (const table of PROTECTED_TABLES) {
@@ -52,15 +52,14 @@ async function hasProtectedHistory(sb: AnyClient, customerId: string): Promise<b
 
 export async function purgeRejectedCustomer(
     sb: AnyClient,
-    opts: { customerId: string | null; leadId?: string; metaLeadId?: string },
+    opts: { customerId: string | null; leadId?: string },
 ): Promise<PurgeResult> {
-    const { customerId, leadId, metaLeadId } = opts
+    const { customerId, leadId } = opts
 
     if (!customerId) {
         // No linked customer — at most a raw lead row to drop so the number
         // leaves the pallet.
         if (leadId) await sb.from('leads').delete().eq('id', leadId)
-        if (metaLeadId) await sb.from('meta_leads').delete().eq('id', metaLeadId)
         return { purged: false, reason: 'no_customer' }
     }
 
@@ -70,11 +69,9 @@ export async function purgeRejectedCustomer(
 
     // Delete the FK = NO ACTION children first, then the customer itself.
     await sb.from('interactions').delete().eq('customer_id', customerId)
-    await sb.from('meta_leads').delete().eq('customer_id', customerId)
     await sb.from('leads').delete().eq('customer_id', customerId)
     // The row currently being processed may not be linked to the customer yet.
     if (leadId) await sb.from('leads').delete().eq('id', leadId)
-    if (metaLeadId) await sb.from('meta_leads').delete().eq('id', metaLeadId)
 
     const { error } = await sb.from('customers').delete().eq('id', customerId)
     if (error) return { purged: false, reason: 'error' }

@@ -19,7 +19,7 @@ import { sendSmsRaw } from '@/lib/sms'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 
 const CONSULTANT_NAME = 'Mashi'
-const CONSULTANT_CONTACT = '0744120715'
+const CONSULTANT_CONTACT = '0744120721'
 
 function buildMessage(customerNameWithTitle: string, packageName: string): string {
     return [

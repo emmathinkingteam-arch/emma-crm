@@ -14,7 +14,6 @@ import LowInterestAlert from '@/components/shared/LowInterestAlert'
 import CountUp from '@/components/shared/CountUp'
 import Link from 'next/link'
 import { type Lead, leadCountdown, leadPenaltySoFar } from '@/lib/leads'
-import { type MetaLead, metaCountdown, META_STATUS_META } from '@/lib/meta-leads'
 
 // A step joined with its order + customer + package (what fetchMyWork returns).
 type StepWithOrder = OrderStep & {
@@ -62,8 +61,6 @@ export default function DashboardPage() {
   // Phone leads the agent marked call-back / no-answer on an earlier day —
   // they bounce back onto the dashboard to be chased again (no penalty).
   const [callBacks, setCallBacks] = useState<Lead[]>([])
-  const [metaLeads, setMetaLeads] = useState<MetaLead[]>([])
-  const [tierClients, setTierClients] = useState<MetaLead[]>([])
   // CRM agents shown as photo circles under the hero (me first, then the rest)
   const [team, setTeam] = useState<{ id: string; full_name: string; profile_photo_url?: string; is_supervisor?: boolean }[]>([])
   // ── Inspector: bulk-move "Leads to call" → another agent's CRM ──────────────
@@ -100,10 +97,28 @@ export default function DashboardPage() {
     // Only the inspector needs the list of agents to hand this bulk over to.
     if (inspecting) fetchMoveTargets()
 
-    // Poll every 60s: ask the server to release any due leads (respecting
-    // punch-in + the meter), then re-read what's now active.
-    const id = setInterval(refreshLeads, 60_000)
-    return () => clearInterval(id)
+    // Poll the server to release any due leads (respecting punch-in + the
+    // meter), then re-read what's now active.
+    //
+    // Every agent leaves this page open all day, so this interval is the single
+    // biggest source of background server load in the app. Two guards keep it
+    // cheap: a 3-minute cadence (leads are released on an hourly timer, so a
+    // faster poll buys nothing), and a visibility check so a backgrounded tab
+    // stops polling entirely. A refresh also runs the moment the tab is
+    // re-focused, so an agent coming back sees current data straight away.
+    const id = setInterval(() => {
+      if (document.visibilityState === 'visible') refreshLeads()
+    }, 180_000)
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshLeads()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [user])
 
   // Re-read the Completed list whenever the chosen month changes.
@@ -143,39 +158,6 @@ export default function DashboardPage() {
       .lt('responded_at', todayStart)
       .order('responded_at', { ascending: true })
     setCallBacks((cbacks as Lead[]) || [])
-
-    // Pull any brand-new Facebook leads from the sheet (throttled server-side so
-    // many agents polling = one cheap import), then start this agent's 1h timers
-    // (punch-gated), then read what's still open for them.
-    try {
-      await fetch('/api/meta-leads/auto-sync', { method: 'POST' })
-    } catch {
-      // non-fatal
-    }
-    try {
-      await fetch('/api/meta-leads/release', { method: 'POST' })
-    } catch {
-      // non-fatal
-    }
-    const { data: meta } = await supabase
-      .from('meta_leads')
-      .select('*')
-      .eq('assigned_to', user.id)
-      .in('stage', ['new', 'active'])
-      .order('due_at', { ascending: true, nullsFirst: false })
-    setMetaLeads((meta as MetaLead[]) || [])
-
-    // Tier Clients — Meta leads this agent marked no-answer / call-back on an
-    // earlier day. They stay with this agent (stage='followup') and re-surface
-    // here every day until closed with a different status. Never go to admin.
-    const { data: tier } = await supabase
-      .from('meta_leads')
-      .select('*')
-      .eq('assigned_to', user.id)
-      .eq('stage', 'followup')
-      .lt('responded_at', todayStart)
-      .order('responded_at', { ascending: true, nullsFirst: false })
-    setTierClients((tier as MetaLead[]) || [])
   }
 
   // CRM agent circles: logged-in user first, then teammates alphabetically.
@@ -618,86 +600,6 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* New customers — Meta-ad leads. Pallet: Job · Age · Name · Number */}
-        {metaLeads.length > 0 && (
-          <div className="border-2 border-teal-200 rounded-2xl overflow-hidden">
-            <div className="px-4 py-2.5 bg-teal-600 flex items-center gap-2">
-              <UserPlus size={14} className="text-white" />
-              <p className="text-xs font-bold text-white uppercase tracking-wide">New customers</p>
-              <span className="ml-auto text-[9px] font-bold bg-white/25 text-white px-2 py-0.5 rounded-full">{metaLeads.length}</span>
-            </div>
-            <div className="p-2 space-y-2">
-              {metaLeads.map((ml) => {
-                const cd = metaCountdown(ml.due_at)
-                return (
-                  <Link
-                    key={ml.id}
-                    href={`/dashboard/meta-leads/${ml.id}`}
-                    className={`block rounded-xl p-3 border active:scale-[0.98] transition-all ${cd.overdue ? 'bg-red-50 border-red-100' : 'bg-teal-50 border-teal-100'}`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-gray-800 truncate">
-                          {ml.full_name || ml.phone_display || ml.phone}
-                          {ml.age != null && <span className="text-gray-400 font-semibold"> · {ml.age}</span>}
-                        </p>
-                        <p className="text-[10px] font-semibold text-gray-500 truncate flex items-center gap-1">
-                          <Briefcase size={9} /> {ml.job_title || '—'}
-                          <span className="font-mono text-gray-400">· {ml.phone_display || ml.phone}</span>
-                        </p>
-                        <p className="text-[10px] font-semibold">
-                          <span className={cd.overdue ? 'text-red-500' : 'text-gray-400'}>{cd.label}</span>
-                        </p>
-                      </div>
-                      <ChevronRight size={14} className="text-teal-300 flex-shrink-0 ml-2" />
-                    </div>
-                  </Link>
-                )
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Tier Clients — Meta leads you marked no-answer / call-back on an
-            earlier day. They stay with you and bounce back here to chase again. */}
-        {tierClients.length > 0 && (
-          <div className="border-2 border-amber-200 rounded-2xl overflow-hidden">
-            <div className="px-4 py-2.5 bg-amber-500 flex items-center gap-2">
-              <PhoneCall size={14} className="text-white" />
-              <p className="text-xs font-bold text-white uppercase tracking-wide">Tier Clients — call back</p>
-              <span className="ml-auto text-[9px] font-bold bg-white/25 text-white px-2 py-0.5 rounded-full">{tierClients.length}</span>
-            </div>
-            <div className="p-2 space-y-2">
-              {tierClients.map((tc) => {
-                const sm = META_STATUS_META[tc.status]
-                return (
-                  <Link
-                    key={tc.id}
-                    href={`/dashboard/meta-leads/${tc.id}`}
-                    className="block rounded-xl p-3 border bg-amber-50 border-amber-100 active:scale-[0.98] transition-all"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-gray-800 truncate">
-                          {tc.full_name || tc.phone_display || tc.phone}
-                          {tc.age != null && <span className="text-gray-400 font-semibold"> · {tc.age}</span>}
-                        </p>
-                        <p className="text-[10px] font-semibold text-gray-500 truncate flex items-center gap-1">
-                          <Briefcase size={9} /> {tc.job_title || '—'}
-                          <span className="font-mono text-gray-400">· {tc.phone_display || tc.phone}</span>
-                        </p>
-                        <div className="flex items-center gap-1.5 mt-1">
-                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${sm.cls}`}>{sm.label}</span>
-                        </div>
-                      </div>
-                      <ChevronRight size={14} className="text-amber-300 flex-shrink-0 ml-2" />
-                    </div>
-                  </Link>
-                )
-              })}
-            </div>
-          </div>
-        )}
 
         {/* 2nd Post requests — distinct indigo, sits above normal work */}
         {secondPosts.length > 0 && (

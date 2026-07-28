@@ -24,7 +24,23 @@ import { createSupabaseServerClient } from '@/lib/supabase-server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { uploadFile } from '@/lib/backblaze'
 import { loadLedgers } from '@/lib/accounting'
-import { toClaudeImage } from '@/lib/whatsapp-media'
+
+// Claude only accepts jpeg/png/gif/webp for image blocks, so anything else is
+// labelled as jpeg and left for Claude to sniff. (Previously shared with the
+// WhatsApp bot's media helper, which was removed with the bot.)
+function toClaudeImage(media: { buffer: Buffer; mimeType: string }) {
+    const mt = /^image\/(jpeg|png|gif|webp)$/.test(media.mimeType)
+        ? media.mimeType
+        : 'image/jpeg'
+    return {
+        type: 'image' as const,
+        source: {
+            type: 'base64' as const,
+            media_type: mt,
+            data: media.buffer.toString('base64'),
+        },
+    }
+}
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -160,8 +176,7 @@ async function readSlip(buf: Buffer, mime: string, isPdf: boolean): Promise<Extr
         })
         .join('\n')
 
-    // Reuse the same image-block helper the WhatsApp bot uses (it guards the
-    // media type). PDFs go as a document block, which that helper doesn't cover.
+    // PDFs go as a document block; images go through the guard above.
     const fileBlock = isPdf
         ? {
             type: 'document',

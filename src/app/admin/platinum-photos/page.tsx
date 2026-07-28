@@ -7,6 +7,27 @@
 import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 
+// Shrink to 1080x1080 in the browser so we never hit Vercel's ~4.5MB upload
+// limit (the generator renders at 1080 anyway). PNG, or JPEG if still large.
+async function resizeForUpload(file: File): Promise<File> {
+  try {
+    const bmp = await createImageBitmap(file)
+    const S = 1080
+    const canvas = document.createElement('canvas')
+    canvas.width = S; canvas.height = S
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return file
+    ctx.drawImage(bmp, 0, 0, S, S)
+    bmp.close?.()
+    let blob: Blob | null = await new Promise(r => canvas.toBlob(r, 'image/png'))
+    if (blob && blob.size > 4 * 1024 * 1024) {
+      blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.92))
+    }
+    if (blob) return new File([blob], 'photo.png', { type: 'image/png' })
+  } catch { /* fall back to original */ }
+  return file
+}
+
 export default function PlatinumPhotosPage() {
   const [country, setCountry] = useState('')
   const [number, setNumber] = useState(1)
@@ -49,8 +70,9 @@ export default function PlatinumPhotosPage() {
     if (!c) { setMsg('Enter a country (letters only, e.g. korea)'); return }
     setBusy(true); setMsg('')
     try {
+      const ready = await resizeForUpload(file)
       const fd = new FormData()
-      fd.append('file', file); fd.append('country', c); fd.append('number', String(number))
+      fd.append('file', ready); fd.append('country', c); fd.append('number', String(number))
       const r = await fetch('/api/platinum/upload', { method: 'POST', body: fd })
       const j = await r.json()
       if (!r.ok) throw new Error(j.error || 'Upload failed')

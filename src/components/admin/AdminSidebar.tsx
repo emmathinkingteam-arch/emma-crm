@@ -5,10 +5,10 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Users, ClipboardList, History,
-  MapPin, Briefcase, UserPlus, BarChart2,
+  MapPin, Briefcase, UserPlus,
   CalendarRange, ShieldCheck, Settings, LogOut,
-  Bell, DollarSign, Target, Archive, MessageSquare, MessageCircle, AlertOctagon,
-  Wallet, Megaphone, Eye, Headphones, FileSignature, Facebook, ReceiptText, Sparkles,
+  Bell, DollarSign, Target, Archive, MessageSquare, AlertOctagon,
+  Wallet, Megaphone, Eye, Sparkles,
   UserCircle2, Menu, X, PlusCircle,
 } from 'lucide-react'
 
@@ -34,7 +34,6 @@ const SECTIONS: Section[] = [
       { href: '/admin/crm-entries', icon: History, label: 'CRM Entries' },
       { href: '/admin/leads', icon: Megaphone, label: 'Lead Distribution' },
       { href: '/admin/orders', icon: ClipboardList, label: 'Orders' },
-      { href: '/admin/orders/slips', icon: ReceiptText, label: 'Slip Audit' },
       { href: '/dashboard/legacy-history', icon: Archive, label: 'Legacy History' },
       { href: '/admin/approvals', icon: ShieldCheck, label: 'Approvals', badge: true },
       { href: '/admin/complaints', icon: AlertOctagon, label: 'Complaints', badge: true },
@@ -52,12 +51,6 @@ const SECTIONS: Section[] = [
     ],
   },
   {
-    title: 'Documents',
-    items: [
-      { href: '/admin/documents', icon: FileSignature, label: 'E-Sign' },
-    ],
-  },
-  {
     title: 'Finance',
     items: [
       { href: '/admin/accounts', icon: Wallet, label: 'Accounts' },
@@ -69,12 +62,7 @@ const SECTIONS: Section[] = [
     title: 'Config',
     items: [
       { href: '/admin/packages', icon: Briefcase, label: 'Packages' },
-      { href: '/admin/facebook', icon: Facebook, label: 'Connect Facebook' },
       { href: '/admin/platinum-photos', icon: Sparkles, label: 'Platinum Photos' },
-      { href: '/admin/whatsapp', icon: MessageCircle, label: 'WhatsApp' },
-      { href: '/admin/whatsapp/delivery', icon: BarChart2, label: 'WA Delivery' },
-      { href: '/admin/whatsapp/support', icon: Headphones, label: 'WA Support' },
-      { href: '/admin/whatsapp/complaints', icon: AlertOctagon, label: 'WA Complaints' },
       { href: '/admin/notifications', icon: MessageSquare, label: 'Notifications' },
       { href: '/admin/settings', icon: Settings, label: 'Settings' },
     ],

@@ -19,8 +19,26 @@ const TEAM_LEADER_ADMIN_PREFIXES = [
   '/admin/add-worker', // add workers + team leaders
 ]
 
+// Routes that never need a session. Checked BEFORE the Supabase client is
+// built, so a public hit costs no JWT verification and no database round trip.
+const PUBLIC_PREFIXES = [
+  '/invoice',
+  '/track',
+  '/platinum',
+  '/api/track',
+  '/api/public-media',
+  '/api/sms/process-overdue',   // guarded by CRON_SECRET
+  '/api/whatsapp/webhook',      // Meta callback
+]
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
+
+  // Anonymous routes short-circuit immediately.
+  if (PUBLIC_PREFIXES.some(p => pathname.startsWith(p))) {
+    return NextResponse.next()
+  }
+
   let response = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -44,15 +62,19 @@ export async function middleware(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  const publicRoutes = ['/auth/login', '/invoice', '/track', '/api/track', '/api/public-media', '/platinum', '/api/sms/process-overdue', '/api/whatsapp/webhook']
-  const isPublic = publicRoutes.some(r => pathname.startsWith(r))
+  const isLoginPage = pathname === '/auth/login'
 
-  // 1. Not logged in -> only public routes allowed.
-  if (!user && !isPublic) {
+  // 1. Not logged in -> only the login page is allowed.
+  if (!user && !isLoginPage) {
     return NextResponse.redirect(new URL('/auth/login', request.url))
   }
 
-  if (user) {
+  // The role is only needed to gate /admin and to pick the post-login landing
+  // page. Querying it on every request (including every API call and every
+  // agent dashboard poll) was a database round trip per request for nothing.
+  const needsRole = pathname.startsWith('/admin') || isLoginPage
+
+  if (user && needsRole) {
     // Look up the role ONCE per request, server-side. This is the single
     // source of truth that decides admin access -- the client store can lag
     // or be stale, the server role check cannot be bypassed.
@@ -75,14 +97,12 @@ export async function middleware(request: NextRequest) {
       // Back office may view the All Orders page (and order detail/fix), but
       // nothing else under /admin.
       const backOfficeOk =
-        role === 'back_office' &&
-        pathname.startsWith('/admin/orders') &&
-        !pathname.startsWith('/admin/orders/slips')
+        role === 'back_office' && pathname.startsWith('/admin/orders')
       // Team Leader gets a phone-friendly slice of the admin panel: the CRM
       // overview, alerts, entries, leads, orders, approvals/complaints, and
       // the team tools (attendance/tasks/calendar/locations/add-worker).
-      // Everything else under /admin (accounts, finance, config, e-sign,
-      // packages, whatsapp, notifications, settings) stays admin-only.
+      // Everything else under /admin (accounts, finance, config, packages,
+      // notifications, settings) stays admin-only.
       const teamLeaderOk =
         role === 'team_leader' &&
         (pathname === '/admin' ||
@@ -110,5 +130,15 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|emma-logo.png).*)'],
+  matcher: [
+    // Everything except Next's build output and static assets. The trailing
+    // extension rule drops /public files (logo, platinum photos, feedback
+    // templates, fonts, css) — each of those used to spin up a middleware
+    // invocation and verify a JWT to serve a static image.
+    '/((?!api|_next/static|_next/image|favicon\\.ico|.*\\.[A-Za-z0-9]+$).*)',
+    // API routes are matched unconditionally: several of them still rely on
+    // this middleware for their auth, and their paths can legitimately end in
+    // a file extension (e.g. /api/media/slips/receipt.pdf).
+    '/api/:path*',
+  ],
 }

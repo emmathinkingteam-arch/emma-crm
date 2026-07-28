@@ -1,26 +1,32 @@
 // ============================================================================
 // GET / POST  /api/whatsapp/webhook
 // ============================================================================
+//
+// Meta requires a subscribed webhook to stay reachable, so this endpoint still
+// exists — but it no longer has any work to do:
+//
+//   • Inbound customer messages used to run the Maashi AI bot (removed).
+//   • Status callbacks (sent/delivered/read/failed) used to be stored for the
+//     delivery viewer (removed).
+//
+// Meta sends up to four status callbacks per broadcast message, and the old
+// handler did a SELECT + UPSERT per callback. That was a large share of the
+// function CPU bill for data nothing reads any more. It now acknowledges and
+// returns without parsing the body or touching the database.
+//
+// Sending broadcasts does NOT depend on this endpoint. The real fix is to
+// unsubscribe the "messages" webhook field in the Meta app so these callbacks
+// stop being sent at all; this route is only here so Meta does not see errors
+// while it is still subscribed.
+// ============================================================================
 
 import { NextResponse } from 'next/server'
-import crypto from 'crypto'
-import { supabaseAdmin } from '@/lib/supabase-admin'
-import { processInbound, InboundMsg } from '@/lib/maashi-inbound'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
-export const maxDuration = 60   // AI turn + media + delays can take a few seconds
-
-const STATUS_RANK: Record<string, number> = {
-    accepted: 1,
-    sent: 2,
-    delivered: 3,
-    read: 4,
-    failed: 5,
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GET — verification handshake
+// GET — verification handshake (needed if the webhook is ever re-verified)
 // ─────────────────────────────────────────────────────────────────────────────
 export async function GET(req: Request) {
     const url = new URL(req.url)
@@ -41,202 +47,12 @@ export async function GET(req: Request) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Parsing helpers  (defined BEFORE POST so they are in scope)
+// POST — acknowledge and discard
 // ─────────────────────────────────────────────────────────────────────────────
-
-interface WaError {
-    code?: number
-    title?: string
-    message?: string
-    error_data?: { details?: string }
-}
-interface WaStatus {
-    id?: string
-    status: string
-    timestamp?: string
-    recipient_id?: string
-    conversation?: { id?: string }
-    pricing?: { category?: string }
-    errors?: WaError[]
-}
-
-function extractStatuses(body: unknown): WaStatus[] {
-    const out: WaStatus[] = []
-    const b = body as {
-        entry?: Array<{ changes?: Array<{ value?: { statuses?: WaStatus[] } }> }>
-    }
-    if (!b?.entry) return out
-    for (const entry of b.entry) {
-        for (const change of entry.changes ?? []) {
-            for (const st of change.value?.statuses ?? []) {
-                out.push(st)
-            }
-        }
-    }
-    return out
-}
-
-interface RawMsg {
-    id?: string
-    from?: string
-    type?: string
-    text?: { body?: string }
-    image?: { id?: string; caption?: string }
-    audio?: { id?: string }
-    voice?: { id?: string }
-    document?: { id?: string; caption?: string }
-    interactive?: unknown
-}
-
-function extractInboundMessages(body: unknown): InboundMsg[] {
-    const out: InboundMsg[] = []
-    const b = body as {
-        entry?: Array<{
-            changes?: Array<{
-                value?: {
-                    messages?: RawMsg[]
-                    contacts?: Array<{ profile?: { name?: string }; wa_id?: string }>
-                }
-            }>
-        }>
-    }
-    for (const entry of b?.entry ?? []) {
-        for (const change of entry.changes ?? []) {
-            const val = change.value
-            for (const msg of val?.messages ?? []) {
-                if (!msg.from || !msg.id) continue
-                const name = val?.contacts?.find(c => c.wa_id === msg.from)?.profile?.name
-
-                const base = { metaMessageId: msg.id, from: msg.from, name }
-
-                switch (msg.type) {
-                    case 'text':
-                        out.push({ ...base, type: 'text', text: msg.text?.body ?? '' })
-                        break
-                    case 'image':
-                        out.push({ ...base, type: 'image', text: msg.image?.caption, mediaId: msg.image?.id })
-                        break
-                    case 'audio':
-                        out.push({ ...base, type: 'audio', mediaId: msg.audio?.id ?? msg.voice?.id })
-                        break
-                    case 'document':
-                        out.push({ ...base, type: 'document', text: msg.document?.caption, mediaId: msg.document?.id })
-                        break
-                    default:
-                        // interactive / unsupported → still give the bot the text if any
-                        out.push({ ...base, type: 'other', text: msg.text?.body })
-                }
-            }
-        }
-    }
-    return out
-}
-
+// The body is deliberately not read and the signature deliberately not checked:
+// there is nothing here to protect and nothing to parse. Meta retries anything
+// that is not a 2xx, so always acknowledge.
 // ─────────────────────────────────────────────────────────────────────────────
-// POST — inbound messages + status callbacks
-// ─────────────────────────────────────────────────────────────────────────────
-export async function POST(req: Request) {
-    const raw = await req.text()
-
-    // Optional signature check
-    const appSecret = process.env.WHATSAPP_APP_SECRET
-    if (appSecret) {
-        const sigHeader = req.headers.get('x-hub-signature-256') || ''
-        const expected =
-            'sha256=' +
-            crypto.createHmac('sha256', appSecret).update(raw).digest('hex')
-        const ok =
-            sigHeader.length === expected.length &&
-            crypto.timingSafeEqual(Buffer.from(sigHeader), Buffer.from(expected))
-        if (!ok) {
-            console.error('[WA webhook] bad signature — rejecting')
-            return NextResponse.json({ ok: false, reason: 'bad_signature' })
-        }
-    }
-
-    let body: unknown
-    try {
-        body = JSON.parse(raw)
-    } catch {
-        return NextResponse.json({ ok: false, reason: 'bad_json' })
-    }
-
-    try {
-        const statuses = extractStatuses(body)
-
-        if (statuses.length === 0) {
-            // Inbound customer message — handle with Maashi AI
-            const inbound = extractInboundMessages(body)
-            console.log('[WA webhook] inbound messages:', inbound.length)
-            // Parallel so the per-conversation debounce collapses a burst into one reply
-            await Promise.all(inbound.map(msg => processInbound(msg).catch(e =>
-                console.error('[WA webhook] processInbound failed', e)
-            )))
-            return NextResponse.json({ ok: true, processed: inbound.length })
-        }
-
-        // Status updates for broadcast messages
-        const sb = supabaseAdmin()
-        let processed = 0
-
-        for (const s of statuses) {
-            const wamid = s.id
-            if (!wamid) continue
-
-            const err = Array.isArray(s.errors) && s.errors.length ? s.errors[0] : null
-            const rank = STATUS_RANK[s.status] ?? 0
-
-            const { data: existing } = await sb
-                .from('whatsapp_message_status')
-                .select('status_rank')
-                .eq('wamid', wamid)
-                .maybeSingle()
-
-            const existingRank = existing?.status_rank ?? 0
-            const keepHigher = rank >= existingRank || s.status === 'failed'
-
-            const row: Record<string, unknown> = {
-                wamid,
-                recipient: s.recipient_id ?? null,
-                conversation_id: s.conversation?.id ?? null,
-                pricing_category: s.pricing?.category ?? null,
-                raw: s,
-                updated_at: new Date().toISOString(),
-            }
-
-            if (keepHigher) {
-                row.status = s.status
-                row.status_rank = Math.max(rank, existingRank)
-            }
-            if (err) {
-                row.error_code = err.code ?? null
-                row.error_title = err.title ?? null
-                row.error_message =
-                    err.error_data?.details ?? err.message ?? err.title ?? null
-            }
-
-            const { error: upErr } = await sb
-                .from('whatsapp_message_status')
-                .upsert(row, { onConflict: 'wamid' })
-
-            if (upErr) {
-                console.error('[WA webhook] upsert failed for', wamid, upErr.message)
-            } else {
-                processed++
-            }
-
-            if (s.status === 'failed') {
-                console.error(
-                    `[WA webhook] FAILED ${wamid} → ${s.recipient_id} ` +
-                    `code=${err?.code} "${err?.error_data?.details ?? err?.message}"`
-                )
-            }
-        }
-
-        return NextResponse.json({ ok: true, processed })
-    } catch (e) {
-        const msg = e instanceof Error ? e.message : 'unknown'
-        console.error('[WA webhook] handler error:', msg)
-        return NextResponse.json({ ok: false, reason: msg })
-    }
+export async function POST() {
+    return NextResponse.json({ ok: true })
 }

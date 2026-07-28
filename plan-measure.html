@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plan Measurement Tool</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #1a1a1a; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  #toolbar {
+    background: #2a2a2a;
+    border-bottom: 1px solid #3a3a3a;
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+
+  .tool-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-right: 10px;
+    border-right: 1px solid #3a3a3a;
+  }
+  .tool-group:last-child { border-right: none; }
+
+  button {
+    background: #3a3a3a;
+    color: #e0e0e0;
+    border: 1px solid #4a4a4a;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+  }
+  button:hover { background: #4a4a4a; }
+  button.active { background: #1a6fb5; border-color: #2a8fd5; color: #fff; }
+  button.danger { background: #7a2020; border-color: #a03030; }
+  button.danger:hover { background: #902020; }
+
+  label { font-size: 12px; color: #aaa; }
+  input[type="file"] { display: none; }
+
+  #scale-display {
+    font-size: 12px;
+    color: #4fc3f7;
+    background: #1a3a50;
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid #2a5a7a;
+  }
+
+  #main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  #canvas-container {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+    cursor: crosshair;
+    background: #111;
+  }
+
+  #canvas-container.pan-mode { cursor: grab; }
+  #canvas-container.pan-mode:active { cursor: grabbing; }
+
+  canvas { display: block; }
+
+  #sidebar {
+    width: 280px;
+    background: #242424;
+    border-left: 1px solid #3a3a3a;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  #sidebar-header {
+    padding: 10px 12px;
+    border-bottom: 1px solid #3a3a3a;
+    font-size: 13px;
+    font-weight: 600;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  #measurements-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+
+  .measurement-item {
+    background: #2e2e2e;
+    border: 1px solid #3a3a3a;
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .measurement-item:hover { border-color: #555; }
+  .measurement-item.selected { border-color: #1a6fb5; background: #1a2a3a; }
+
+  .measurement-item .m-label {
+    font-weight: 600;
+    color: #e0e0e0;
+    margin-bottom: 3px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .measurement-item .m-value {
+    font-size: 16px;
+    font-weight: 700;
+    margin: 4px 0;
+  }
+  .measurement-item .m-type {
+    font-size: 11px;
+    color: #888;
+  }
+
+  .m-delete {
+    background: none;
+    border: none;
+    color: #666;
+    cursor: pointer;
+    padding: 2px 4px;
+    font-size: 14px;
+    line-height: 1;
+  }
+  .m-delete:hover { color: #e05050; background: none; }
+
+  #summary {
+    border-top: 1px solid #3a3a3a;
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+  #summary .total-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 4px;
+  }
+  #summary .total-val { font-weight: 700; color: #4fc3f7; }
+
+  #status-bar {
+    background: #1e1e1e;
+    border-top: 1px solid #3a3a3a;
+    padding: 4px 12px;
+    font-size: 11px;
+    color: #888;
+    flex-shrink: 0;
+    display: flex;
+    gap: 16px;
+  }
+
+  #modal-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+  #modal-overlay.hidden { display: none; }
+
+  .modal {
+    background: #2a2a2a;
+    border: 1px solid #4a4a4a;
+    border-radius: 10px;
+    padding: 24px;
+    width: 360px;
+    max-width: 90vw;
+  }
+  .modal h3 { margin-bottom: 12px; font-size: 15px; }
+  .modal p { font-size: 13px; color: #aaa; margin-bottom: 16px; line-height: 1.5; }
+  .modal input[type="number"], .modal input[type="text"] {
+    width: 100%;
+    background: #1a1a1a;
+    border: 1px solid #4a4a4a;
+    color: #e0e0e0;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 14px;
+    margin-bottom: 12px;
+  }
+  .modal select {
+    width: 100%;
+    background: #1a1a1a;
+    border: 1px solid #4a4a4a;
+    color: #e0e0e0;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 14px;
+    margin-bottom: 12px;
+  }
+  .modal-btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+  .modal-btns button { min-width: 80px; justify-content: center; }
+  .btn-primary { background: #1a6fb5 !important; border-color: #2a8fd5 !important; color: #fff !important; }
+  .btn-primary:hover { background: #2a8fd5 !important; }
+
+  .color-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 4px;
+  }
+
+  #drop-hint {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    pointer-events: none;
+  }
+  #drop-hint.hidden { display: none; }
+  #drop-hint .big-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.3; }
+  #drop-hint p { color: #555; font-size: 14px; }
+
+  .export-btn { margin-top: 8px; width: 100%; justify-content: center; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <div class="tool-group">
+    <label>Plan:</label>
+    <button onclick="document.getElementById('file-input').click()">📂 Load Image</button>
+    <input type="file" id="file-input" accept="image/*">
+  </div>
+
+  <div class="tool-group">
+    <label>Scale:</label>
+    <button id="btn-scale" onclick="startScaleMode()" title="Click 2 points on the plan and enter the real distance">📏 Set Scale</button>
+    <span id="scale-display">Not set</span>
+  </div>
+
+  <div class="tool-group">
+    <label>Measure:</label>
+    <button id="btn-length" class="active" onclick="setMode('length')" title="Click points along a line, double-click to finish">📐 Length</button>
+    <button id="btn-area" onclick="setMode('area')" title="Click points around an area, double-click to finish">⬜ Area</button>
+    <button id="btn-pan" onclick="setMode('pan')" title="Pan/scroll the image">✋ Pan</button>
+  </div>
+
+  <div class="tool-group">
+    <button onclick="undoLastPoint()" title="Remove last point">↩ Undo Point</button>
+    <button onclick="cancelCurrent()" title="Cancel current drawing">✕ Cancel</button>
+  </div>
+
+  <div class="tool-group">
+    <label>Zoom:</label>
+    <button onclick="zoom(1.2)">+</button>
+    <button onclick="zoom(0.8)">−</button>
+    <button onclick="resetView()">Fit</button>
+  </div>
+</div>
+
+<div id="main">
+  <div id="canvas-container">
+    <canvas id="canvas"></canvas>
+    <div id="drop-hint">
+      <div class="big-icon">🗺️</div>
+      <p>Load a plan image to get started</p>
+      <p style="margin-top:8px; font-size:12px;">File → Load Image &nbsp;|&nbsp; or drag & drop here</p>
+    </div>
+  </div>
+
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <span>Measurements</span>
+      <span id="m-count" style="color:#888; font-size:12px;">0 items</span>
+    </div>
+    <div id="measurements-list">
+      <p style="color:#555; font-size:12px; text-align:center; margin-top:20px;">No measurements yet.<br>Use Length or Area tool to start.</p>
+    </div>
+    <div id="summary">
+      <div class="total-row"><span>Total Length:</span><span class="total-val" id="total-length">0.00 m</span></div>
+      <div class="total-row"><span>Total Area:</span><span class="total-val" id="total-area">0.00 m²</span></div>
+      <button class="export-btn" onclick="exportCSV()">⬇ Export CSV</button>
+    </div>
+  </div>
+</div>
+
+<div id="status-bar">
+  <span id="status-mode">Mode: Length</span>
+  <span id="status-coords">x: — , y: —</span>
+  <span id="status-hint">Load a plan image to begin</span>
+</div>
+
+<div id="modal-overlay" class="hidden">
+  <div class="modal" id="modal-content"></div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const container = document.getElementById('canvas-container');
+
+let img = null;
+let scale = { set: false, pixelsPerMeter: 1 };
+let mode = 'length';
+let currentPoints = [];
+let measurements = [];
+let selectedId = null;
+let measureIdCounter = 0;
+
+let view = { x: 0, y: 0, zoom: 1 };
+let isPanning = false;
+let panStart = { x: 0, y: 0 };
+let mousePos = { x: 0, y: 0 };
+let isSettingScale = false;
+let scalePoints = [];
+
+const COLORS = ['#4fc3f7','#81c784','#ffb74d','#f06292','#ce93d8','#80cbc4','#fff176','#ff8a65'];
+let colorIndex = 0;
+
+function getColor() {
+  return COLORS[colorIndex++ % COLORS.length];
+}
+
+function resizeCanvas() {
+  const rect = container.getBoundingClientRect();
+  canvas.width = rect.width;
+  canvas.height = rect.height;
+  render();
+}
+
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+document.getElementById('file-input').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  const image = new Image();
+  image.onload = () => {
+    img = image;
+    document.getElementById('drop-hint').classList.add('hidden');
+    resetView();
+  };
+  image.src = url;
+  e.target.value = '';
+});
+
+container.addEventListener('dragover', e => { e.preventDefault(); });
+container.addEventListener('drop', e => {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0];
+  if (!file || !file.type.startsWith('image/')) return;
+  const url = URL.createObjectURL(file);
+  const image = new Image();
+  image.onload = () => {
+    img = image;
+    document.getElementById('drop-hint').classList.add('hidden');
+    resetView();
+  };
+  image.src = url;
+});
+
+function resetView() {
+  if (!img) return;
+  const cw = canvas.width, ch = canvas.height;
+  const scaleX = cw / img.width, scaleY = ch / img.height;
+  const z = Math.min(scaleX, scaleY) * 0.95;
+  view.zoom = z;
+  view.x = (cw - img.width * z) / 2;
+  view.y = (ch - img.height * z) / 2;
+  render();
+}
+
+function zoom(factor) {
+  const cx = canvas.width / 2, cy = canvas.height / 2;
+  view.x = cx - (cx - view.x) * factor;
+  view.y = cy - (cy - view.y) * factor;
+  view.zoom *= factor;
+  render();
+}
+
+function canvasToImg(cx, cy) {
+  return { x: (cx - view.x) / view.zoom, y: (cy - view.y) / view.zoom };
+}
+
+function imgToCanvas(ix, iy) {
+  return { x: ix * view.zoom + view.x, y: iy * view.zoom + view.y };
+}
+
+container.addEventListener('mousemove', e => {
+  const rect = canvas.getBoundingClientRect();
+  const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+  mousePos = { x: cx, y: cy };
+  const ip = canvasToImg(cx, cy);
+  document.getElementById('status-coords').textContent = `x: ${ip.x.toFixed(0)}px , y: ${ip.y.toFixed(0)}px`;
+
+  if (isPanning) {
+    view.x += cx - panStart.x;
+    view.y += cy - panStart.y;
+    panStart = { x: cx, y: cy };
+  }
+  render();
+});
+
+container.addEventListener('mousedown', e => {
+  if (e.button === 1 || (e.button === 0 && mode === 'pan')) {
+    isPanning = true;
+    const rect = canvas.getBoundingClientRect();
+    panStart = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    e.preventDefault();
+  }
+});
+
+container.addEventListener('mouseup', () => { isPanning = false; });
+
+container.addEventListener('wheel', e => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+  const factor = e.deltaY < 0 ? 1.1 : 0.9;
+  view.x = cx - (cx - view.x) * factor;
+  view.y = cy - (cy - view.y) * factor;
+  view.zoom *= factor;
+  render();
+}, { passive: false });
+
+container.addEventListener('click', e => {
+  if (isPanning) return;
+  const rect = canvas.getBoundingClientRect();
+  const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+  const ip = canvasToImg(cx, cy);
+
+  if (isSettingScale) {
+    scalePoints.push(ip);
+    if (scalePoints.length === 2) {
+      const dx = scalePoints[1].x - scalePoints[0].x;
+      const dy = scalePoints[1].y - scalePoints[0].y;
+      const pixDist = Math.sqrt(dx*dx + dy*dy);
+      showScaleInputModal(pixDist);
+    }
+    render();
+    return;
+  }
+
+  if (mode === 'length' || mode === 'area') {
+    if (!img) return;
+    currentPoints.push(ip);
+    render();
+  }
+});
+
+container.addEventListener('dblclick', e => {
+  if (mode === 'length' || mode === 'area') {
+    if (currentPoints.length < 2) { currentPoints = []; render(); return; }
+    currentPoints.pop();
+    finalizeMeasurement();
+  }
+});
+
+function setMode(m) {
+  mode = m;
+  cancelCurrent();
+  isSettingScale = false;
+  scalePoints = [];
+  document.getElementById('canvas-container').className = m === 'pan' ? 'pan-mode' : '';
+  ['length','area','pan'].forEach(id => {
+    document.getElementById('btn-'+id).classList.toggle('active', id === m);
+  });
+  document.getElementById('status-mode').textContent = 'Mode: ' + m.charAt(0).toUpperCase() + m.slice(1);
+  const hints = { length: 'Click to add points, double-click to finish', area: 'Click to add points, double-click to close and finish', pan: 'Click and drag to pan. Scroll to zoom.' };
+  document.getElementById('status-hint').textContent = hints[m];
+}
+
+function startScaleMode() {
+  cancelCurrent();
+  isSettingScale = true;
+  scalePoints = [];
+  document.getElementById('btn-scale').classList.add('active');
+  document.getElementById('status-hint').textContent = 'Click point 1 on the plan...';
+  document.getElementById('status-mode').textContent = 'Mode: Set Scale';
+}
+
+function showScaleInputModal(pixDist) {
+  const html = `
+    <h3>Set Scale</h3>
+    <p>You selected a distance of <strong>${pixDist.toFixed(1)} pixels</strong>.<br>What is the real-world distance of this line?</p>
+    <input type="number" id="real-dist" placeholder="e.g. 5" step="0.01" min="0.001" style="margin-bottom:8px">
+    <select id="real-unit">
+      <option value="1">Metres (m)</option>
+      <option value="0.001">Millimetres (mm)</option>
+      <option value="0.3048">Feet (ft)</option>
+    </select>
+    <div class="modal-btns">
+      <button onclick="closeModal()">Cancel</button>
+      <button class="btn-primary" onclick="applyScale(${pixDist})">Apply</button>
+    </div>
+  `;
+  showModal(html);
+}
+
+function applyScale(pixDist) {
+  const realDist = parseFloat(document.getElementById('real-dist').value);
+  const unit = parseFloat(document.getElementById('real-unit').value);
+  if (!realDist || realDist <= 0) { alert('Please enter a valid distance.'); return; }
+  const realMetres = realDist * unit;
+  scale.pixelsPerMeter = pixDist / realMetres;
+  scale.set = true;
+  const unitName = document.getElementById('real-unit').options[document.getElementById('real-unit').selectedIndex].text;
+  document.getElementById('scale-display').textContent = `1m = ${scale.pixelsPerMeter.toFixed(1)}px`;
+  closeModal();
+  isSettingScale = false;
+  scalePoints = [];
+  document.getElementById('btn-scale').classList.remove('active');
+  setMode('length');
+}
+
+function pxToM(px) { return px / scale.pixelsPerMeter; }
+
+function finalizeMeasurement() {
+  if (!scale.set) {
+    showNameModal(null);
+    return;
+  }
+  showNameModal(null);
+}
+
+function showNameModal() {
+  const typeLabel = mode === 'length' ? 'Length' : 'Area';
+  const html = `
+    <h3>Save Measurement</h3>
+    <p>Give this ${typeLabel.toLowerCase()} measurement a label (e.g. "Rubble wall - Axis A")</p>
+    <input type="text" id="m-label" placeholder="${typeLabel} measurement" value="${typeLabel} ${measurements.length + 1}">
+    <div class="modal-btns">
+      <button onclick="cancelCurrent(); closeModal();">Cancel</button>
+      <button class="btn-primary" onclick="saveMeasurement()">Save</button>
+    </div>
+  `;
+  showModal(html);
+  setTimeout(() => { const el = document.getElementById('m-label'); if(el) { el.focus(); el.select(); } }, 50);
+}
+
+function saveMeasurement() {
+  const label = document.getElementById('m-label').value || 'Measurement ' + (measurements.length + 1);
+  const pts = [...currentPoints];
+  const type = mode;
+  const color = getColor();
+  let value = 0;
+
+  if (type === 'length') {
+    let px = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const dx = pts[i].x - pts[i-1].x, dy = pts[i].y - pts[i-1].y;
+      px += Math.sqrt(dx*dx + dy*dy);
+    }
+    value = scale.set ? pxToM(px) : px;
+  } else {
+    let area = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const j = (i + 1) % pts.length;
+      area += pts[i].x * pts[j].y;
+      area -= pts[j].x * pts[i].y;
+    }
+    const pxArea = Math.abs(area) / 2;
+    value = scale.set ? pxArea / (scale.pixelsPerMeter * scale.pixelsPerMeter) : pxArea;
+  }
+
+  measurements.push({ id: ++measureIdCounter, label, type, pts, value, color, unit: scale.set ? (type === 'length' ? 'm' : 'm²') : (type === 'length' ? 'px' : 'px²') });
+  currentPoints = [];
+  closeModal();
+  updateSidebar();
+  render();
+}
+
+function cancelCurrent() { currentPoints = []; render(); }
+
+function undoLastPoint() { if (currentPoints.length > 0) { currentPoints.pop(); render(); } }
+
+function deleteMeasurement(id) {
+  measurements = measurements.filter(m => m.id !== id);
+  if (selectedId === id) selectedId = null;
+  updateSidebar();
+  render();
+}
+
+function selectMeasurement(id) {
+  selectedId = selectedId === id ? null : id;
+  updateSidebar();
+  render();
+}
+
+function updateSidebar() {
+  const list = document.getElementById('measurements-list');
+  document.getElementById('m-count').textContent = measurements.length + ' items';
+
+  if (measurements.length === 0) {
+    list.innerHTML = '<p style="color:#555; font-size:12px; text-align:center; margin-top:20px;">No measurements yet.<br>Use Length or Area tool to start.</p>';
+  } else {
+    list.innerHTML = measurements.map(m => `
+      <div class="measurement-item ${m.id === selectedId ? 'selected' : ''}" onclick="selectMeasurement(${m.id})">
+        <div class="m-label">
+          <span><span class="color-dot" style="background:${m.color}"></span>${m.label}</span>
+          <button class="m-delete" onclick="event.stopPropagation(); deleteMeasurement(${m.id})" title="Delete">✕</button>
+        </div>
+        <div class="m-value" style="color:${m.color}">${m.value.toFixed(3)} ${m.unit}</div>
+        <div class="m-type">${m.type === 'length' ? '📐 Length' : '⬜ Area'} · ${m.pts.length} points</div>
+      </div>
+    `).join('');
+  }
+
+  const totalLen = measurements.filter(m => m.type === 'length').reduce((s, m) => s + (m.unit === 'm' ? m.value : 0), 0);
+  const totalArea = measurements.filter(m => m.type === 'area').reduce((s, m) => s + (m.unit === 'm²' ? m.value : 0), 0);
+  document.getElementById('total-length').textContent = totalLen.toFixed(3) + ' m';
+  document.getElementById('total-area').textContent = totalArea.toFixed(3) + ' m²';
+}
+
+function exportCSV() {
+  if (measurements.length === 0) { alert('No measurements to export.'); return; }
+  const rows = [['Label','Type','Value','Unit','Points']];
+  measurements.forEach(m => rows.push([m.label, m.type, m.value.toFixed(4), m.unit, m.pts.length]));
+  const csv = rows.map(r => r.join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'measurements.csv'; a.click();
+}
+
+function showModal(html) {
+  document.getElementById('modal-content').innerHTML = html;
+  document.getElementById('modal-overlay').classList.remove('hidden');
+}
+function closeModal() {
+  document.getElementById('modal-overlay').classList.add('hidden');
+}
+document.getElementById('modal-overlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-overlay')) closeModal();
+});
+
+function render() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (img) {
+    ctx.save();
+    ctx.translate(view.x, view.y);
+    ctx.scale(view.zoom, view.zoom);
+    ctx.drawImage(img, 0, 0);
+    ctx.restore();
+  }
+
+  measurements.forEach(m => {
+    const pts = m.pts.map(p => imgToCanvas(p.x, p.y));
+    const isSelected = m.id === selectedId;
+    ctx.strokeStyle = m.color;
+    ctx.lineWidth = isSelected ? 3 : 2;
+    ctx.fillStyle = m.color + '30';
+    ctx.setLineDash([]);
+
+    ctx.beginPath();
+    pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+    if (m.type === 'area') ctx.closePath();
+    if (m.type === 'area') ctx.fill();
+    ctx.stroke();
+
+    pts.forEach(p => {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, isSelected ? 5 : 3, 0, Math.PI * 2);
+      ctx.fillStyle = m.color;
+      ctx.fill();
+    });
+
+    if (pts.length > 0) {
+      const mid = pts[Math.floor(pts.length / 2)];
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 12px system-ui';
+      const text = `${m.value.toFixed(2)} ${m.unit}`;
+      const tw = ctx.measureText(text).width;
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.fillRect(mid.x - tw/2 - 4, mid.y - 18, tw + 8, 20);
+      ctx.fillStyle = m.color;
+      ctx.fillText(text, mid.x - tw/2, mid.y - 3);
+    }
+  });
+
+  if (isSettingScale && scalePoints.length > 0) {
+    const p1 = imgToCanvas(scalePoints[0].x, scalePoints[0].y);
+    ctx.strokeStyle = '#ffeb3b';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 3]);
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y);
+    if (scalePoints.length === 1) {
+      ctx.lineTo(mousePos.x, mousePos.y);
+    } else {
+      const p2 = imgToCanvas(scalePoints[1].x, scalePoints[1].y);
+      ctx.lineTo(p2.x, p2.y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(p1.x, p1.y, 5, 0, Math.PI*2); ctx.fillStyle = '#ffeb3b'; ctx.fill();
+    if (scalePoints.length === 1) {
+      document.getElementById('status-hint').textContent = 'Click point 2 on the plan...';
+    }
+  }
+
+  if (currentPoints.length > 0 && (mode === 'length' || mode === 'area')) {
+    const pts = currentPoints.map(p => imgToCanvas(p.x, p.y));
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+    ctx.lineTo(mousePos.x, mousePos.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    pts.forEach((p, i) => {
+      ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI*2);
+      ctx.fillStyle = i === 0 ? '#4fc3f7' : '#fff'; ctx.fill();
+    });
+
+    let runningPx = 0;
+    for (let i = 1; i < currentPoints.length; i++) {
+      const dx = currentPoints[i].x - currentPoints[i-1].x;
+      const dy = currentPoints[i].y - currentPoints[i-1].y;
+      runningPx += Math.sqrt(dx*dx + dy*dy);
+    }
+    const lastP = pts[pts.length - 1];
+    const previewVal = scale.set ? pxToM(runningPx).toFixed(2) + ' m' : runningPx.toFixed(0) + ' px';
+    ctx.font = '12px system-ui';
+    const text = `${previewVal} (${currentPoints.length} pts — dbl-click to finish)`;
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(lastP.x + 10, lastP.y - 16, ctx.measureText(text).width + 8, 20);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(text, lastP.x + 14, lastP.y - 1);
+  }
+}
+
+setMode('length');
+</script>
+</body>
+</html>

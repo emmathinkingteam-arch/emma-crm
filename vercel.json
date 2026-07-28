@@ -1,4 +1,5 @@
 {
+  "regions": ["sin1"],
   "functions": {
     "api/generate-post.py": {
       "includeFiles": "api/_gen/**"

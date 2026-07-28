@@ -7,3 +7,5 @@ out/
 *.log
 migration/.env.migrate
 migration/dump/
+# Table dumps from scripts/backup-tables.mjs — real customer names/phones.
+migration/backup-*/

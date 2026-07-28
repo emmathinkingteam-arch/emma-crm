@@ -93,30 +93,60 @@ if (vars.size === 0) {
 // production at 9am.
 // ─────────────────────────────────────────────────────────────────────────────
 const REQUIRED = [
+    // Supabase (this CRM + the public website's separate project)
     'NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY',
-    'NEXT_PUBLIC_APP_URL', 'NEXT_PUBLIC_AGENCY_NAME', 'NEXT_PUBLIC_COUNTRY_CODE',
     'OTHER_SUPABASE_URL', 'OTHER_SUPABASE_ANON_KEY',
+    'NEXT_PUBLIC_APP_URL',
+    // WhatsApp Cloud API — sending broadcasts only
     'WHATSAPP_ACCESS_TOKEN', 'WHATSAPP_PHONE_NUMBER_ID', 'WHATSAPP_BUSINESS_ACCOUNT_ID',
-    'WHATSAPP_APP_SECRET', 'WHATSAPP_WEBHOOK_VERIFY_TOKEN', 'WHATSAPP_API_VERSION',
+    'WHATSAPP_WEBHOOK_VERIFY_TOKEN', 'WHATSAPP_API_VERSION',
     'WHATSAPP_TEMPLATE_NAME', 'WHATSAPP_TEMPLATE_LANG',
+    // SMS + the hourly wallet-debit cron
     'TEXT_LK_API_TOKEN', 'CRON_SECRET',
+    // Backblaze B2 — slips, documents, worker files
     'B2_KEY_ID', 'B2_APP_KEY', 'B2_BUCKET_ID', 'B2_BUCKET_NAME',
-    'GOOGLE_SERVICE_ACCOUNT_EMAIL', 'GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY',
-    'CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET',
-    'FB_PAGE_ID', 'FB_PAGE_ACCESS_TOKEN', 'FB_GRAPH_VERSION',
-    'AI_PROVIDER', 'ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'SLIP_READER_MODEL',
-    'GEMINI_API_KEY', 'GEMINI_MODEL',
+    // Claude — Accounts slip reader + brief translation
+    'ANTHROPIC_API_KEY',
 ]
+
+// Read by the code but safe to leave unset; listed so they are not mistaken
+// for oversights: SLIP_READER_MODEL and ANTHROPIC_MODEL are optional model
+// overrides that fall back to a sensible default.
+const OPTIONAL = ['SLIP_READER_MODEL', 'ANTHROPIC_MODEL']
 
 const missing = REQUIRED.filter(k => !vars.has(k) || vars.get(k) === '')
 if (missing.length) {
     console.log(`\n  ${missing.length} required variable(s) missing from ${ENV_FILE}:`)
     for (const k of missing) console.log(`    - ${k}`)
-    console.log('  (OPENAI_* only needed if AI_PROVIDER=openai)\n')
+    console.log(`  (optional, fine to omit: ${OPTIONAL.join(', ')})\n`)
     if (!args.includes('--allow-missing')) {
         console.error('Refusing to push a partial set. Fix the gaps, or pass --allow-missing.')
         process.exit(1)
     }
+}
+
+// Variables the app no longer reads. Carrying these into a fresh project just
+// copies live credentials somewhere they serve no purpose, so they are dropped
+// rather than pushed. (Left behind by the Meta Ads / E-Sign / Facebook /
+// Cloudinary / Maashi-bot removal.)
+const RETIRED = new Set([
+    'NEXT_PUBLIC_AGENCY_NAME', 'NEXT_PUBLIC_COUNTRY_CODE',
+    'GOOGLE_SERVICE_ACCOUNT_EMAIL', 'GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY',
+    'CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET',
+    'FB_PAGE_ID', 'FB_PAGE_ACCESS_TOKEN', 'FB_GRAPH_VERSION',
+    'AI_PROVIDER', 'GEMINI_API_KEY', 'GEMINI_MODEL',
+    'OPENAI_API_KEY', 'OPENAI_MODEL',
+    'WHATSAPP_APP_SECRET',
+])
+
+const retired = [...vars.keys()].filter(k => RETIRED.has(k))
+if (retired.length) {
+    console.log(`\n  Skipping ${retired.length} variable(s) the app no longer reads:`)
+    for (const k of retired) {
+        console.log(`    - ${k}`)
+        vars.delete(k)
+    }
+    console.log('  Revoke these at the provider once the new deployment is live.')
 }
 
 const isPublic = k => k.startsWith('NEXT_PUBLIC_')

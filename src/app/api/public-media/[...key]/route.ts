@@ -17,7 +17,10 @@ import { b2Download } from '@/lib/backblaze'
 export const runtime = 'nodejs'
 
 // Only these top-level prefixes may be served publicly.
-const PUBLIC_PREFIXES = ['documents/', 'letterheads/', 'whatsapp/', 'platinum/']
+// slip-notify/ holds public COPIES of payment slips made only when texting
+// the 0761552015 order-notification link (see /api/sms/slip-notify) — the
+// original under invoices/slips/ stays private and is never listed here.
+const PUBLIC_PREFIXES = ['documents/', 'letterheads/', 'whatsapp/', 'platinum/', 'slip-notify/']
 
 export async function GET(
   _req: NextRequest,

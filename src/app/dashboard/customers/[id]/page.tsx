@@ -833,6 +833,16 @@ export default function CustomerDetailPage() {
       body: JSON.stringify({ orderId: order.id }),
     }).then(() => fetchAll()).catch(() => { })
 
+    // 🔔 Text 0761552015 a link to the uploaded payment slip (skip when the
+    // payment method needed no slip, e.g. KOKO).
+    if (uploadedSlipUrl) {
+      fetch('/api/sms/slip-notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId: order.id }),
+      }).catch(() => { })
+    }
+
     // ── Generate 1st (or only) invoice ─────────────────────
     // For KOKO: pass package amount X (template adds 12.36% line)
     // For Installment: pass 1st installment amount

@@ -1,7 +1,6 @@
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
 import { Loader2 } from 'lucide-react'
 
 const ROLES = ['crm_agent', 'back_office', 'counselor', 'manager', 'designer', 'accountant', 'ceo', 'team_leader']
@@ -16,17 +15,18 @@ export default function AddWorkerPage() {
     e.preventDefault()
     setLoading(true)
     setError('')
-    const { data: auth, error: authErr } = await supabase.auth.signUp({ email: form.email, password: form.password, options: { data: { full_name: form.fullName, role: form.role } } })
-    if (authErr) { setError(authErr.message); setLoading(false); return }
-    if (auth.user) {
-      const { error: profErr } = await supabase.from('users').insert({
-        auth_user_id: auth.user.id, username: form.email, full_name: form.fullName,
-        role: form.role, agent_code: form.agentCode || null, meeting_link: form.meetingLink || null,
-        commission_rates: {}, wallet_balance: 0, is_active: true,
-      })
-      if (profErr) { setError(profErr.message); setLoading(false); return }
-      router.push('/admin/workers')
-    }
+    // Created server-side (see /api/workers/create). Doing this in the browser
+    // with supabase.auth.signUp() left the worker email-unconfirmed — which
+    // reads as "wrong password" at login — and logged the admin in as the new
+    // worker.
+    const res = await fetch('/api/workers/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(form),
+    })
+    const out = await res.json().catch(() => ({}))
+    if (!res.ok) { setError(out.error || 'Could not add the worker'); setLoading(false); return }
+    router.push('/admin/workers')
     setLoading(false)
   }
 

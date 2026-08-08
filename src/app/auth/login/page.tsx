@@ -20,13 +20,37 @@ export default function LoginPage() {
     setLoading(true)
     setError('')
 
+    // Trailing spaces from a phone keyboard's autocomplete are a common cause
+    // of "wrong password" reports, and Supabase stores emails lowercased.
     const { data, error: authError } = await supabase.auth.signInWithPassword({
-      email,
+      email: email.trim().toLowerCase(),
       password,
     })
 
     if (authError) {
-      setError('Invalid email or password. Please try again.')
+      // Show the real reason instead of one catch-all string.
+      //
+      // IMPORTANT (verified against this project's Supabase): an account whose
+      // email is unconfirmed does NOT report "Email not confirmed" — it reports
+      // "Invalid login credentials", byte-identical to a genuinely wrong
+      // password. That is deliberate on Supabase's side (it stops the login
+      // form revealing which emails exist), and it is exactly why unconfirmed
+      // workers were misdiagnosed as password typos for hours.
+      //
+      // So the two cases are NOT distinguishable here, and the message below
+      // must not claim otherwise. Workers are now created already-confirmed by
+      // /api/workers/create, which removes the ambiguity at the source rather
+      // than trying to guess at it here.
+      const raw = authError.message || ''
+      setError(
+        /invalid login credentials/i.test(raw)
+          ? 'Wrong email or password. If the password is right, ask the office to check the account is active.'
+          : /not confirmed/i.test(raw)
+            ? 'This account has not been verified yet. Ask the office to confirm it.'
+            : /rate limit|too many/i.test(raw)
+              ? 'Too many attempts. Please wait a minute and try again.'
+              : raw || 'Could not sign in. Please try again.'
+      )
       setLoading(false)
       return
     }

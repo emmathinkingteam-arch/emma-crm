@@ -25,7 +25,9 @@ export default function AlertsPage() {
           <Heart size={20} className="text-pink-500" fill="currentColor" />
           Low Interest Alerts
         </h1>
-        <p className="text-sm text-gray-400 mb-4">Active posts 7+ days old with fewer than 3 interests received</p>
+        <p className="text-sm text-gray-400 mb-4">
+          Active posts 7+ days old with fewer than 8 live interests received (rejected and withdrawn don&apos;t count)
+        </p>
         {/* Full list — no cap, no "+more" roll-up (this IS the destination page) */}
         <LowInterestAlert limit={1000} viewAllHref="/admin/alerts" />
       </div>

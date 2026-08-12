@@ -14,7 +14,9 @@
 // ============================================================================
 
 import { NextResponse } from 'next/server'
+import { revalidateTag } from 'next/cache'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { LOW_INTEREST_TAG } from '@/lib/cache-tags'
 
 export async function POST(req: Request) {
   let body: { customerId?: string; reposted?: boolean }
@@ -37,6 +39,10 @@ export async function POST(req: Request) {
     .eq('id', customerId)
 
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 })
+
+  // The alert list is cached for 10 min; drop it now so the "Reposted" mark
+  // survives a refresh instead of reverting until the TTL expires.
+  revalidateTag(LOW_INTEREST_TAG)
 
   return NextResponse.json({ ok: true, repostedAt })
 }

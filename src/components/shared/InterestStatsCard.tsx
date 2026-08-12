@@ -12,8 +12,18 @@ interface Stats {
 
 interface Props {
   phone: string
-  postDate?: string | null  // planned_post_date from order — to detect < 3 interests after 7 days
+  postDate?: string | null  // planned_post_date from order — to detect low interest after 7 days
 }
+
+// Alert rule — MUST stay in sync with /api/low-interest-alerts.
+// Only LIVE interest counts: total minus the dead ends (rejected + withdrawn),
+// i.e. connected + accepted + pending. Subtracting rather than adding those
+// three means a new website status still counts as live instead of silently
+// dropping out and wrongly flagging the customer.
+const THRESHOLD_DAYS = 7
+const MIN_INTERESTS = 8
+const liveCount = (r: { total: number; declined: number; withdrawn: number }) =>
+  r.total - r.declined - r.withdrawn
 
 export default function InterestStatsCard({ phone, postDate }: Props) {
   const [stats, setStats] = useState<Stats | null>(null)
@@ -31,11 +41,12 @@ export default function InterestStatsCard({ phone, postDate }: Props) {
 
   const postWentLive = postDate ? new Date(postDate) : null
   const daysSincePost = postWentLive ? (Date.now() - postWentLive.getTime()) / 86400000 : null
+  const live = stats?.received ? liveCount(stats.received) : 0
   const lowInterestAlert =
     stats?.found &&
     daysSincePost !== null &&
-    daysSincePost >= 7 &&
-    (stats.received?.total ?? 0) < 3
+    daysSincePost >= THRESHOLD_DAYS &&
+    live < MIN_INTERESTS
 
   if (loading) {
     return (
@@ -73,7 +84,8 @@ export default function InterestStatsCard({ phone, postDate }: Props) {
         <div className="bg-red-50 border border-red-200 rounded-2xl px-3 py-2 flex items-center gap-2">
           <AlertCircle size={13} className="text-red-500 flex-shrink-0" />
           <p className="text-[10px] font-bold text-red-600">
-            Low interest alert — only {r.total} interest{r.total !== 1 ? 's' : ''} received after {Math.floor(daysSincePost!)} days. Follow up needed.
+            Low interest alert — only {live} live interest{live !== 1 ? 's' : ''}
+            {r.total !== live && ` (of ${r.total} received)`} after {Math.floor(daysSincePost!)} days. Follow up needed.
           </p>
         </div>
       )}

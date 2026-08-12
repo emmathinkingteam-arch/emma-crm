@@ -23,6 +23,7 @@ const TEAM_LEADER_ADMIN_PREFIXES = [
 // built, so a public hit costs no JWT verification and no database round trip.
 const PUBLIC_PREFIXES = [
   '/invoice',
+  '/quotation',   // customer-facing quotation sheet, same public-link deal as /invoice
   '/track',
   '/platinum',
   '/api/track',

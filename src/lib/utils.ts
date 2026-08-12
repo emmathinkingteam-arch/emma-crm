@@ -84,6 +84,11 @@ export const WA = {
   send2ndInstallmentInvoice: (name: string, invoiceUrl: string) =>
     `Hi ${name},\n\nPlease find your 2nd installment invoice below for your reference.\n\n${invoiceUrl}\n\n---\n\nThank you for completing your payment.\n\nEmma Thinking (Pvt) Ltd`,
 
+  // Pre-sale quotation — sent before the customer pays, so it leads with the
+  // package and the saving they get by paying up front instead of on KOKO.
+  sendQuotation: (name: string, packageName: string, quotationUrl: string) =>
+    `Hi ${name},\n\nPlease find your quotation for the ${packageName} below.\n\n${quotationUrl}\n\nYou can pay in instalments through KOKO, or pay by bank transfer / card and save on the total.\n\n---\n\nIf you have any questions, feel free to contact me at any time.\n\nEmma Thinking (Pvt) Ltd`,
+
   sessionStart: (name: string, availability?: string | null) =>
     `Hi ${name},\n\nYour counselling session has now started and I will be your personal counselor throughout this process.\n\n${availability
       ? availability + '\n\n'

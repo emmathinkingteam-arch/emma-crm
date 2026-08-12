@@ -16,6 +16,7 @@ import { Customer, Order, OrderStep, Interaction, Package as Pkg, MONTH_CODES, g
 import { fmtDate, fmtTime, buildWaLink, openWaLink, WA, KOKO_SERVICE_CHARGE_RATE, getCounselorAvailability } from '@/lib/utils'
 import { formatPhoneDisplay } from '@/lib/country-codes'
 import InterestStatsCard from '@/components/shared/InterestStatsCard'
+import QuotationCard from '@/components/shared/QuotationCard'
 import WhatsappBoostPanel from '@/components/shared/WhatsappBoostPanel'
 import { packageTone, PACKAGE_TONE } from '@/lib/package-colors'
 import CrmTagButtons from '@/components/shared/CrmTagButtons'
@@ -1356,6 +1357,20 @@ export default function CustomerDetailPage() {
             <InterestStatsCard
               phone={customer.phone}
               postDate={activeOrder?.planned_post_date ?? null}
+            />
+          )}
+
+          {/* ── QUOTATION ───────────────────────────────────── */}
+          {/* Available on every entry — a quotation is a pre-sale document, so
+              it must not wait for an order to exist. */}
+          {customer && (
+            <QuotationCard
+              customerId={customer.id}
+              customerName={customer.name}
+              customerPhone={customer.phone}
+              onGenerated={(url, packageName, quotationNumber) =>
+                logAction(`Quotation #${quotationNumber} generated — ${packageName} | Invoice: ${url}`)
+              }
             />
           )}
 

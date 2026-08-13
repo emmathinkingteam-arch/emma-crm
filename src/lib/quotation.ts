@@ -254,11 +254,51 @@ ul.feats li::before{content:"";position:absolute;left:2px;top:7px;width:3.5px;he
 .foot{margin-top:auto;padding-top:18px;text-align:center;font-size:10px;color:#555;line-height:1.65}
 .foot .co{font-weight:800;color:#1a1a1a;font-size:10.5px}
 .foot a{color:#555;text-decoration:none}
+
+/* ── Phone ────────────────────────────────────────────────────
+   Scoped to \`screen\` so print is never affected. The A4 sheet is
+   reflowed into a readable single column instead of being shrunk to
+   fit — a 210mm sheet squeezed onto a 375px screen leaves the text
+   around 5px tall, which no one can check before sending. */
+@media screen and (max-width:820px){
+  body{background:#fff}
+  .sheet{width:100%;min-height:0;margin:0;padding:20px 16px 24px;box-shadow:none}
+  .brand img{width:150px}
+  h1.title{font-size:22px;margin:2px 0 18px}
+  .topgrid{flex-direction:column;gap:14px}
+  .meta{justify-content:start;font-size:13px}
+  .billto .lbl{font-size:13px}
+  .billto .name{font-size:13.5px}
+  .billto .sub{font-size:12px}
+  table.items th{font-size:12px;padding:8px 10px}
+  table.items td{padding:11px 10px;font-size:12.5px}
+  .pkgline{font-size:13.5px}
+  .pkgmeta{font-size:11.5px}
+  ul.feats li{font-size:12.5px;line-height:1.75}
+  ul.feats li::before{top:8px}
+  /* Money must never sit in a cramped side column on a phone. */
+  .bottom{flex-direction:column;gap:22px;margin-top:20px}
+  .paycol,.totcol{width:100%}
+  .paycol{font-size:12.5px}
+  .paycol h4{font-size:13px}
+  .paycol .fineprint{font-size:11.5px}
+  .totrow .k,.totrow .v{font-size:14px}
+  .totrow.grand .k,.totrow.grand .v{font-size:16px}
+  .foot{margin-top:26px;font-size:11px}
+  .foot .co{font-size:11.5px}
+}
+
+/* ── Print — identical on a laptop and a phone ────────────────
+   No forced 297mm height. The tallest package renders 239mm, so the
+   sheet always fits one A4 page even when a mobile browser insists on
+   adding its own page margins on top of \`@page\`. */
 @page{size:A4;margin:0}
 @media print{
   body{background:#fff}
   .bar{display:none !important}
-  .sheet{width:210mm;min-height:297mm;margin:0;box-shadow:none;padding:14mm 15mm 10mm;page-break-after:avoid}
+  .sheet{width:210mm;min-height:0;margin:0;box-shadow:none;padding:14mm 15mm 10mm;
+    break-inside:avoid;page-break-inside:avoid;page-break-after:avoid}
+  .foot{margin-top:14mm}
 }
 </style>
 </head>

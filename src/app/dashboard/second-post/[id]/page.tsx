@@ -58,6 +58,9 @@ export default function SecondPostPage() {
 
     // counselor inputs
     const [description, setDescription] = useState('')
+    // English twin of the description — designer-only, never sent to the
+    // customer and not shown in the manager review panel.
+    const [descriptionEn, setDescriptionEn] = useState('')
     const [pickManager, setPickManager] = useState('')
     const [pickCounselor, setPickCounselor] = useState('')
     // manager inputs
@@ -83,6 +86,7 @@ export default function SecondPostPage() {
         if (r) {
             setReq(r)
             setDescription(r.new_description || '')
+            setDescriptionEn(r.new_description_en || '')
             // Old post: legacy carries first_post_content; for new orders, pull the
             // 1st-pass brief from the order's last described step.
             if (r.first_post_content) {
@@ -138,6 +142,7 @@ export default function SecondPostPage() {
         setBusy(true)
         await supabase.from('second_post_requests').update({
             new_description: description.trim(),
+            new_description_en: descriptionEn.trim() || null,
             manager_id: pickManager,
             status: 'manager_review',
             updated_at: new Date().toISOString(),
@@ -301,10 +306,24 @@ export default function SecondPostPage() {
 
                                 {/* New description */}
                                 <div>
-                                    <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">New description (not sent to customer)</label>
+                                    <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">New description · Sinhala (not sent to customer)</label>
                                     <textarea value={description} onChange={e => setDescription(e.target.value)} rows={6}
                                         placeholder="Write the new 2nd-post profile content..."
                                         className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] font-medium outline-none focus:border-indigo-300 resize-none" />
+                                </div>
+
+                                {/* English twin — designer only */}
+                                <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 space-y-1.5">
+                                    <div className="flex items-center justify-between">
+                                        <label className="block text-[9px] font-bold text-indigo-700 uppercase tracking-wide">English description</label>
+                                        <span className="text-[8px] font-bold bg-indigo-600 text-white px-2 py-0.5 rounded-full uppercase tracking-wide">Designer only</span>
+                                    </div>
+                                    <p className="text-[9px] text-indigo-600 font-medium leading-relaxed">
+                                        The same description in English. Not shown to the manager — the designer builds the English post from it.
+                                    </p>
+                                    <textarea value={descriptionEn} onChange={e => setDescriptionEn(e.target.value)} rows={6}
+                                        placeholder="Write the English version of the 2nd-post content..."
+                                        className="w-full bg-white border border-indigo-200 rounded-xl px-3 py-2.5 text-[13px] font-medium outline-none focus:border-indigo-400 resize-none" />
                                 </div>
                                 <div>
                                     <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Submit to manager</label>
@@ -379,9 +398,19 @@ export default function SecondPostPage() {
                             </div>
                             <div className="p-4 space-y-4">
                                 <div>
-                                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1.5">Approved brief</p>
+                                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1.5">Approved brief · Sinhala</p>
                                     <pre className="whitespace-pre-wrap font-sans text-[13px] text-gray-700 leading-relaxed bg-gray-50 border border-gray-100 rounded-xl p-3">{req.new_description || '—'}</pre>
                                 </div>
+
+                                {/* English description — shown here and nowhere else. */}
+                                {req.new_description_en && (
+                                    <div>
+                                        <p className="text-[9px] font-bold text-indigo-700 uppercase tracking-wide mb-1.5">
+                                            English description <span className="text-indigo-400 normal-case font-medium">· designer only — build the English post from this</span>
+                                        </p>
+                                        <pre className="whitespace-pre-wrap font-sans text-[13px] text-gray-700 leading-relaxed bg-indigo-50 border border-indigo-200 rounded-xl p-3">{req.new_description_en}</pre>
+                                    </div>
+                                )}
 
                                 <div>
                                     <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Post date</label>

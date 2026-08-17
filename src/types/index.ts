@@ -113,6 +113,10 @@ export interface OrderStep {
   extension_reason?: string
   extended_by_days?: number
   description?: string
+  // English version of the brief. Counsellor writes it alongside the Sinhala
+  // one; it is NEVER sent to the customer and is not shown to the manager —
+  // it exists so the designer can build a second, English post.
+  description_en?: string
   brief_version: number
   planned_post_date?: string
   status: StepStatus

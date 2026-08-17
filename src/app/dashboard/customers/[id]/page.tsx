@@ -104,10 +104,12 @@ export default function CustomerDetailPage() {
   // The latest completed step that has a brief — used to show the brief
   // and plan summary in read-only mode AFTER the designer has locked the plan.
   const [completedBrief, setCompletedBrief] = useState<string | null>(null)
+  const [completedBriefEn, setCompletedBriefEn] = useState<string | null>(null)
   const [plannedSlot, setPlannedSlot] = useState<{ slot_date: string; slot_time: string; post_id_code: string } | null>(null)
   // Per-order post metadata (brief + planned slot) used by the in-history
   // "Boosting" panels. Only loaded for back office / admin.
   const [postBriefByOrder, setPostBriefByOrder] = useState<Record<string, string>>({})
+  const [postBriefEnByOrder, setPostBriefEnByOrder] = useState<Record<string, string>>({})
   const [postSlotByOrder, setPostSlotByOrder] = useState<Record<string, { code: string | null; date: string | null }>>({})
   const [orderCreator, setOrderCreator] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -157,6 +159,10 @@ export default function CustomerDetailPage() {
 
   // Counselor
   const [brief, setBrief] = useState('')
+  // English twin of the brief. Written by the counsellor in a second box,
+  // carried through every hand-off, but only ever SHOWN to the designer —
+  // never WhatsApp'd to the customer, never rendered in the manager panel.
+  const [briefEn, setBriefEn] = useState('')
   const [meetingDate, setMeetingDate] = useState('')
   const [meetingTime, setMeetingTime] = useState('')
   const [customerApproved, setCustomerApproved] = useState(false)
@@ -183,6 +189,7 @@ export default function CustomerDetailPage() {
   const [showPartnerLink, setShowPartnerLink] = useState(false)
   const [showPostBuilder, setShowPostBuilder] = useState(false)
   const [postBuilderPrefill, setPostBuilderPrefill] = useState('')
+  const [postBuilderPrefillEn, setPostBuilderPrefillEn] = useState('')
   // Order the Post Builder should target. null = the active order (default).
   // Set to a specific (often old / completed) order so back office can build
   // its post with AI even after the order is no longer the active one.
@@ -419,7 +426,10 @@ export default function CustomerDetailPage() {
     data?: Partial<OrderStep>,
     assignTo?: string,
     logMsg?: string,
-    nextDescription?: string
+    nextDescription?: string,
+    // English brief for the NEW step row. Always forwarded (even by roles that
+    // never see it) so it survives every hand-off and reaches the designer.
+    nextDescriptionEn?: string
   ) => {
     if (!activeStep || !activeOrder) return
     setActionLoading(true)
@@ -441,6 +451,7 @@ export default function CustomerDetailPage() {
         status: 'pending',
         assigned_to: assignTo || null,
         description: nextDescription || null,
+        description_en: nextDescriptionEn || null,
         deadline: deadline,
         // Forward sub_step from caller so the NEW step row carries it.
         // Critical for the counselor → back-office return on silver_bronze:
@@ -1097,7 +1108,7 @@ export default function CustomerDetailPage() {
           const [{ data: stepRows }, { data: slotRows }] = await Promise.all([
             supabase
               .from('order_steps')
-              .select('order_id, description, step_number')
+              .select('order_id, description, description_en, step_number')
               .in('order_id', orderIds)
               .not('description', 'is', null)
               .order('step_number', { ascending: false }),
@@ -1108,14 +1119,17 @@ export default function CustomerDetailPage() {
               .order('planned_at', { ascending: false }),
           ])
           const briefMap: Record<string, string> = {}
+          const briefEnMap: Record<string, string> = {}
           for (const s of (stepRows as any[]) || []) {
             if (!briefMap[s.order_id] && s.description) briefMap[s.order_id] = s.description
+            if (!briefEnMap[s.order_id] && s.description_en) briefEnMap[s.order_id] = s.description_en
           }
           const slotMap: Record<string, { code: string | null; date: string | null }> = {}
           for (const s of (slotRows as any[]) || []) {
             if (!slotMap[s.order_id]) slotMap[s.order_id] = { code: s.post_id_code ?? null, date: s.slot_date ?? null }
           }
           setPostBriefByOrder(briefMap)
+          setPostBriefEnByOrder(briefEnMap)
           setPostSlotByOrder(slotMap)
         }
       }
@@ -1140,8 +1154,10 @@ export default function CustomerDetailPage() {
         if (stepData) {
           setActiveStep(stepData as any)
           if (stepData.description) setBrief(stepData.description)
+          if (stepData.description_en) setBriefEn(stepData.description_en)
           // there's still active work — clear the read-only summary state
           setCompletedBrief(null)
+          setCompletedBriefEn(null)
           setPlannedSlot(null)
         } else {
           setActiveStep(null)
@@ -1151,7 +1167,7 @@ export default function CustomerDetailPage() {
           const [{ data: lastStep }, { data: slotRow }] = await Promise.all([
             supabase
               .from('order_steps')
-              .select('description, step_number')
+              .select('description, description_en, step_number')
               .eq('order_id', active.id)
               .eq('status', 'done')
               .not('description', 'is', null)
@@ -1167,6 +1183,7 @@ export default function CustomerDetailPage() {
               .maybeSingle(),
           ])
           setCompletedBrief(lastStep?.description ?? null)
+          setCompletedBriefEn((lastStep as any)?.description_en ?? null)
           setPlannedSlot(slotRow ?? null)
         }
       } else {
@@ -1743,7 +1760,10 @@ export default function CustomerDetailPage() {
                           <button onClick={() => {
                             const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'manager'
                             const finalBrief = activeStep.description || brief
-                            doComplete(5, { description: finalBrief }, selectedAssignee, `Brief submitted to manager: ${name} — 6hr deadline set`, finalBrief)
+                            // Back office never sees the English brief — but it must
+                            // still ride along to the manager and on to the designer.
+                            const finalBriefEn = activeStep.description_en || briefEn
+                            doComplete(5, { description: finalBrief, description_en: finalBriefEn || null } as any, selectedAssignee, `Brief submitted to manager: ${name} — 6hr deadline set`, finalBrief, finalBriefEn)
                           }} disabled={!selectedAssignee || actionLoading}
                             className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
                             {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Transfer to manager'}
@@ -1798,10 +1818,36 @@ export default function CustomerDetailPage() {
                         Send confirmation + meet link
                       </button>
                       <div>
-                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Creative brief</label>
+                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+                          Creative brief <span className="text-gray-300 normal-case font-medium">· Sinhala — goes to customer + manager + designer</span>
+                        </label>
                         <textarea value={brief} onChange={e => setBrief(e.target.value)}
                           placeholder="Paste or type the full brief here..." rows={12}
                           className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none resize-y leading-relaxed" />
+                      </div>
+
+                      {/* ── ENGLISH BRIEF — designer only ──────────────────────
+                          Same description, other language. It is NOT sent to the
+                          customer and is not shown in the manager review panel —
+                          it travels straight through to the designer, who builds
+                          a second (English) post from it. */}
+                      <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <label className="block text-[9px] font-bold text-indigo-700 uppercase tracking-wide">
+                            English description
+                          </label>
+                          <span className="text-[8px] font-bold bg-indigo-600 text-white px-2 py-0.5 rounded-full uppercase tracking-wide">
+                            Designer only
+                          </span>
+                        </div>
+                        <p className="text-[9px] text-indigo-600 font-medium leading-relaxed">
+                          The same description in English. Not sent to the customer and not shown to the manager —
+                          the designer uses it to build the English post.
+                        </p>
+                        <textarea value={briefEn} onChange={e => setBriefEn(e.target.value)}
+                          placeholder={'Type the English version of the description here...\ne.g.\n42 | Male\nColombo\nBuddhist\nEngineer\n\n(caption)\n\n(long description)\n\n(short description)'}
+                          rows={12}
+                          className="w-full bg-white border border-indigo-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none focus:border-indigo-400 resize-y leading-relaxed" />
                       </div>
                       {activeOrder.step_variant === 'standard' && (
                         <button disabled={!brief} onClick={async () => {
@@ -1832,7 +1878,7 @@ export default function CustomerDetailPage() {
                           </div>
                           <button onClick={() => {
                             const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'manager'
-                            doComplete(5, { description: brief }, selectedAssignee, `Brief submitted to manager: ${name} — 6hr deadline set`, brief)
+                            doComplete(5, { description: brief, description_en: briefEn || null } as any, selectedAssignee, `Brief submitted to manager: ${name} — 6hr deadline set`, brief, briefEn)
                           }} disabled={!selectedAssignee || actionLoading}
                             className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
                             {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Submit to manager'}
@@ -1851,7 +1897,7 @@ export default function CustomerDetailPage() {
                           </div>
                           <button onClick={() => {
                             const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'back office'
-                            doComplete(3, { description: brief, sub_step: 'customer_facing' }, selectedAssignee, `Returned to back office: ${name}`, brief)
+                            doComplete(3, { description: brief, description_en: briefEn || null, sub_step: 'customer_facing' } as any, selectedAssignee, `Returned to back office: ${name}`, brief, briefEn)
                           }} disabled={!selectedAssignee || actionLoading}
                             className="w-full bg-purple-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
                             Return to Back Office
@@ -1872,7 +1918,7 @@ export default function CustomerDetailPage() {
                           </div>
                           <button onClick={() => {
                             const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'designer'
-                            doComplete(6, { description: brief }, selectedAssignee, `🆓 Free post — assigned to designer: ${name}`, brief)
+                            doComplete(6, { description: brief, description_en: briefEn || null } as any, selectedAssignee, `🆓 Free post — assigned to designer: ${name}`, brief, briefEn)
                           }} disabled={!selectedAssignee || actionLoading}
                             className="w-full bg-purple-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
                             {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Assign to designer'}
@@ -2016,8 +2062,11 @@ export default function CustomerDetailPage() {
                         const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'designer'
                         // Pass the possibly-edited brief — manager edits flow forward to designer.
                         const finalBrief = brief || activeStep.description || ''
+                        // The English brief is deliberately NOT shown in this panel —
+                        // pass the stored value straight through, untouched.
+                        const finalBriefEn = activeStep.description_en || ''
                         const lockNote = isInstallmentPending ? ' — post locked pending 2nd installment' : ''
-                        doComplete(6, { description: finalBrief }, selectedAssignee, `Manager approved — assigned to designer: ${name}${lockNote}`, finalBrief)
+                        doComplete(6, { description: finalBrief }, selectedAssignee, `Manager approved — assigned to designer: ${name}${lockNote}`, finalBrief, finalBriefEn)
                       }} disabled={!selectedAssignee || actionLoading || editingBrief}
                         className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
                         {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Approve and assign to designer'}
@@ -2043,7 +2092,9 @@ export default function CustomerDetailPage() {
                             <button onClick={() => {
                               const name = workers.find(w => w.id === rejectAssignee)?.full_name || 'counselor'
                               const briefWithFeedback = `${activeStep.description || ''}\n\n---\nManager feedback: ${rejectReason}`
-                              doComplete(4, {}, rejectAssignee, `Brief rejected by manager — returned to ${name}: "${rejectReason}"`, briefWithFeedback)
+                              // Hand the English brief back to the counsellor too, so a
+                              // rejection doesn't wipe the work they already did on it.
+                              doComplete(4, {}, rejectAssignee, `Brief rejected by manager — returned to ${name}: "${rejectReason}"`, briefWithFeedback, activeStep.description_en || '')
                             }} disabled={!rejectReason || !rejectAssignee || actionLoading}
                               className="w-full bg-red-400 text-white rounded-lg px-3 py-2 text-xs font-bold disabled:opacity-40">
                               Send back to counselor
@@ -2067,7 +2118,7 @@ export default function CustomerDetailPage() {
                   )}
                   {stepAccepted && (
                     <>
-                      <DesignerBriefPanel description={activeStep.description || ''} postCode={selectedCell ? generatePostCode(selectedCell.split('-').slice(0, 3).join('-'), selectedCell.split('-')[3]) : (plannedSlot?.post_id_code || null)} />
+                      <DesignerBriefPanel description={activeStep.description || ''} descriptionEn={activeStep.description_en || ''} postCode={selectedCell ? generatePostCode(selectedCell.split('-').slice(0, 3).join('-'), selectedCell.split('-')[3]) : (plannedSlot?.post_id_code || null)} />
                       {isInstallmentPending ? (
                         <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4 flex items-start gap-3">
                           <Lock size={18} className="text-amber-600 mt-0.5 flex-shrink-0" />
@@ -2254,14 +2305,22 @@ export default function CustomerDetailPage() {
           {(role === 'designer' || role === 'back_office' || role === 'counselor' || role === 'admin') && activeOrder && (
             <div className="flex gap-2">
               <button
-                onClick={() => { setPostBuilderPrefill(''); setPostBuilderOrder(null); setShowPostBuilder(true) }}
+                onClick={() => {
+                  // Sinhala box stays blank (counsellor/back office paste into it),
+                  // but the designer builds BOTH posts here — hand them the English
+                  // text from the order so they never have to re-type it.
+                  setPostBuilderPrefill('')
+                  setPostBuilderPrefillEn(activeStep?.description_en || '')
+                  setPostBuilderOrder(null)
+                  setShowPostBuilder(true)
+                }}
                 className="flex-1 border-2 border-pink-200 text-pink-700 rounded-2xl py-3 text-xs font-bold flex items-center justify-center gap-2 bg-pink-50 active:scale-95 transition-all"
               >
                 <span>🗂️</span> Post Builder
               </button>
               {completedBrief && (
                 <button
-                  onClick={() => { setPostBuilderPrefill(completedBrief); setPostBuilderOrder(null); setShowPostBuilder(true) }}
+                  onClick={() => { setPostBuilderPrefill(completedBrief); setPostBuilderPrefillEn(completedBriefEn || ''); setPostBuilderOrder(null); setShowPostBuilder(true) }}
                   className="flex-none border-2 border-violet-200 text-violet-700 rounded-2xl px-4 py-3 text-xs font-bold flex items-center justify-center gap-1.5 bg-violet-50 active:scale-95 transition-all"
                   title="Auto-fill from existing brief"
                 >
@@ -2736,7 +2795,7 @@ export default function CustomerDetailPage() {
                         )}
                       </div>
                       <button
-                        onClick={() => { setPostBuilderPrefill(brief); setPostBuilderOrder(o); setShowPostBuilder(true) }}
+                        onClick={() => { setPostBuilderPrefill(brief); setPostBuilderPrefillEn(postBriefEnByOrder[o.id] || ''); setPostBuilderOrder(o); setShowPostBuilder(true) }}
                         className="w-full bg-gradient-to-r from-pink-600 to-violet-600 text-white rounded-xl py-2.5 text-[11px] font-bold flex items-center justify-center gap-2 active:scale-95 transition-all"
                       >
                         <span>✦</span> Build post with AI
@@ -2911,9 +2970,11 @@ export default function CustomerDetailPage() {
           onClose={() => { setShowPostBuilder(false); setPostBuilderOrder(null); fetchAll() }}
           role={role || ''}
           initialDesc={postBuilderPrefill}
+          initialDescEn={postBuilderPrefillEn}
           defaultProfileUrl={savedProfileLink}
           orderId={postBuilderTarget?.id || ''}
           initialImageUrl={(postBuilderTarget as any)?.post_image_url || ''}
+          initialImageUrlEn={(postBuilderTarget as any)?.post_image_url_en || ''}
           packageName={(() => {
             // Free-campaign orders point at the zero-price "Free Post" package and
             // render as Princess Pass. Fake filler posts are also step_variant
@@ -2945,7 +3006,10 @@ export default function CustomerDetailPage() {
 //   1. A language-converter button (Sinhala ↔ English via Claude API)
 //   2. A "PROFILE FIELDS COPY" section so the designer can copy individual
 //      fields directly into the CRM platform — now includes the Post ID code.
-function DesignerBriefPanel({ description, postCode }: { description: string; postCode: string | null }) {
+//   3. The counsellor's ENGLISH description, when they wrote one. It is shown
+//      here and nowhere else (customer + manager never see it) — the designer
+//      builds the second, English post from it.
+function DesignerBriefPanel({ description, descriptionEn = '', postCode }: { description: string; descriptionEn?: string; postCode: string | null }) {
   const [translating, setTranslating] = useState(false)
   const [translated, setTranslated] = useState<string | null>(null)
   const [showTranslated, setShowTranslated] = useState(false)
@@ -3031,6 +3095,33 @@ function DesignerBriefPanel({ description, postCode }: { description: string; po
           <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap">{displayText}</p>
         </div>
       </div>
+
+      {/* ── ENGLISH DESCRIPTION (counsellor-written, designer-only) ──
+          This is the counsellor's own English copy — not the machine
+          translation above. Build the English post from this text. */}
+      {descriptionEn && (
+        <div className="bg-indigo-50 border border-indigo-200 rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-indigo-100">
+            <div>
+              <p className="text-[9px] font-bold text-indigo-700 uppercase tracking-wide">
+                English description
+              </p>
+              <p className="text-[8px] text-indigo-500 font-medium">
+                Written by the counsellor · designer only — build the English post from this
+              </p>
+            </div>
+            <button
+              onClick={() => copyField(descriptionEn, 'English brief')}
+              className="flex-shrink-0 text-[9px] font-bold text-indigo-600 bg-white border border-indigo-200 px-2 py-1 rounded-lg"
+            >
+              {copyFeedback === 'English brief' ? '✓ Copied' : 'Copy'}
+            </button>
+          </div>
+          <div className="p-3">
+            <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap">{descriptionEn}</p>
+          </div>
+        </div>
+      )}
 
       {/* ── PROFILE FIELDS COPY ── */}
       {(parsedFields.length > 0 || postCode) && (
@@ -3219,6 +3310,8 @@ function pbToFM(text: string): string {
 }
 
 const WA_LINE = 'මෙම Profile Link එක හරහා අදාළ පුද්ගලයා සමඟ ඍජුව සම්බන්ධ විය හැක.'
+// English post uses the same closing line, in English.
+const WA_LINE_EN = 'You can connect directly with this person through the Profile Link above.'
 const TAGS = '#EmmaThinking #MatchmakingSriLanka #VerifiedMatchmaking #DateArrangement #DatingCounselling'
 
 function pbParse(raw: string) {
@@ -3277,17 +3370,31 @@ interface PostBuilderModalProps {
   onClose: () => void
   role: string
   initialDesc?: string
+  initialDescEn?: string
   defaultProfileUrl?: string
   orderId?: string
   initialImageUrl?: string
+  initialImageUrlEn?: string
   plannedDate?: string | null
   packageName?: string
   initialPlatinumCountry?: string
   initialPlatinumTemplate?: string
 }
 
-function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultProfileUrl = '', orderId = '', initialImageUrl = '', plannedDate = null, packageName = '', initialPlatinumCountry = '', initialPlatinumTemplate = '' }: PostBuilderModalProps) {
+function PostBuilderModal({ postCode, onClose, role, initialDesc = '', initialDescEn = '', defaultProfileUrl = '', orderId = '', initialImageUrl = '', initialImageUrlEn = '', plannedDate = null, packageName = '', initialPlatinumCountry = '', initialPlatinumTemplate = '' }: PostBuilderModalProps) {
   const [desc, setDesc] = useState(initialDesc)
+  // Second language. Same post, English copy — the counsellor writes it in
+  // their own English box and only the designer ever sees it.
+  const [descEn, setDescEn] = useState(initialDescEn)
+  const [lang, setLang] = useState<'si' | 'en'>('si')
+  const isEn = lang === 'en'
+  // Everything below (parsing, parts, AI generation, Facebook) works off the
+  // language currently selected, so the English post is built exactly the
+  // same way as the Sinhala one.
+  const activeDesc = isEn ? descEn : desc
+  const setActiveDesc = isEn ? setDescEn : setDesc
+  // FM Malithi only makes sense for Sinhala — English copies as plain Unicode.
+  const toPostFont = (t: string) => (isEn ? (t || '') : pbToFM(t))
   const [profileUrl, setProfileUrl] = useState(defaultProfileUrl || 'https://www.emmathinking.com/profile/')
   const [copiedId, setCopiedId] = useState<string | null>(null)
   // Princess wins over platinum: a "Princess Platinum" (or Princess Silver/
@@ -3327,8 +3434,14 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
   // ── Design artwork (the "AI" image grab) ───────────────────────────────────
   // The designer saves the Illustrator export named exactly as `saveAsName`,
   // then we read it from the local "Posts Api" folder and upload to B2.
-  const saveAsName = (postCode || orderId || 'post').replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'post'
-  const [imageUrl, setImageUrl] = useState(initialImageUrl)
+  // The English post is a separate export, so it gets its own "-EN" file name
+  // and its own stored artwork — building one never clobbers the other.
+  const saveAsBase = (postCode || orderId || 'post').replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'post'
+  const saveAsName = isEn ? `${saveAsBase}-EN` : saveAsBase
+  const [imageUrlSi, setImageUrlSi] = useState(initialImageUrl)
+  const [imageUrlEn, setImageUrlEn] = useState(initialImageUrlEn)
+  const imageUrl = isEn ? imageUrlEn : imageUrlSi
+  const setImageUrl = isEn ? setImageUrlEn : setImageUrlSi
   const [imgBusy, setImgBusy] = useState(false)
   const [imgMsg, setImgMsg] = useState<string | null>(null)
   const [folderReady, setFolderReady] = useState(false)
@@ -3346,7 +3459,9 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
       const fd = new FormData()
       fd.append('file', ready)
       fd.append('orderId', orderId)
-      fd.append('code', saveAsName)
+      fd.append('code', saveAsBase)
+      // Tells the route which column to save into (post_image_url_en for English).
+      fd.append('lang', lang)
       const res = await fetch('/api/post-image/upload', { method: 'POST', body: fd })
 
       // The body can be JSON (our route) OR plain text (a platform-level error
@@ -3371,7 +3486,7 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
   // existing uploadDesign() (which compresses, uploads to B2 and saves the URL).
   const generateAI = async () => {
     if (!orderId) { setImgMsg('Open this from an active order first.'); return }
-    if (!desc.trim()) { setImgMsg('No brief text to generate from.'); return }
+    if (!activeDesc.trim()) { setImgMsg(`No ${isEn ? 'English ' : ''}brief text to generate from.`); return }
     setImgBusy(true); setImgMsg('Generating…')
     let file: File
     try {
@@ -3379,7 +3494,7 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          brief: desc, package: packageName, code: postCode,
+          brief: activeDesc, package: packageName, code: postCode,
           opts: { ...(isPlatinum && platinumTemplate ? { template: platinumTemplate } : {}) },
         }),
       })
@@ -3415,7 +3530,7 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
     }
   }
 
-  const d = pbParse(desc)
+  const d = pbParse(activeDesc)
 
   const copy = async (text: string, id: string) => {
     try {
@@ -3425,9 +3540,12 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
     } catch { }
   }
 
+  // Closing line follows the post's language.
+  const waLine = isEn ? WA_LINE_EN : WA_LINE
+
   const buildPart1 = () => {
     if (!d) return ''
-    return `${d.caption} | ${postCode}\n\n${d.longDesc}\n\n${profileUrl}\n\n${WA_LINE}\n\n${TAGS}`
+    return `${d.caption} | ${postCode}\n\n${d.longDesc}\n\n${profileUrl}\n\n${waLine}\n\n${TAGS}`
   }
 
   const isBackOffice = role === 'back_office' || role === 'admin'
@@ -3477,7 +3595,9 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
         </button>
         <div>
           <p className="text-xs font-extrabold text-gray-800">Post Builder</p>
-          <p className="text-[9px] text-gray-400 font-medium">Split description into copy-ready parts</p>
+          <p className="text-[9px] text-gray-400 font-medium">
+            {isEn ? 'Building the English post' : 'Split description into copy-ready parts'}
+          </p>
         </div>
         {postCode && (
           <span className="ml-auto bg-pink-50 border border-pink-200 text-pink-700 text-[9px] font-bold px-2 py-1 rounded-lg">{postCode}</span>
@@ -3487,6 +3607,32 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
       {/* Scrollable body */}
       <div className="flex-1 overflow-y-auto bg-gray-50">
         <div className="p-4 space-y-4 max-w-lg mx-auto">
+
+          {/* ── LANGUAGE SWITCH ──────────────────────────────────────────
+              Two posts, same customer: the Sinhala one (sent to the customer
+              and reviewed by the manager) and the English one (counsellor's
+              English box, designer-only). Everything below — parts, artwork,
+              publishing — follows whichever tab is selected. */}
+          <div className="bg-white border border-gray-200 rounded-2xl p-1.5 flex gap-1.5">
+            {([
+              { key: 'si' as const, label: 'සිංහල', sub: 'Sinhala post' },
+              { key: 'en' as const, label: 'English', sub: 'English post' },
+            ]).map(t => (
+              <button
+                key={t.key}
+                onClick={() => setLang(t.key)}
+                className={`flex-1 rounded-xl py-2 transition-all ${lang === t.key ? 'bg-pink-600 text-white' : 'bg-gray-50 text-gray-400'}`}
+              >
+                <span className="block text-[11px] font-extrabold">{t.label}</span>
+                <span className={`block text-[8px] font-semibold ${lang === t.key ? 'text-pink-100' : 'text-gray-300'}`}>{t.sub}</span>
+              </button>
+            ))}
+          </div>
+          {isEn && (
+            <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-3 py-2 text-[10px] text-indigo-700 font-semibold leading-relaxed">
+              English post — built from the counsellor&apos;s English description. Text copies as plain Unicode (no FM font), and the artwork is saved separately from the Sinhala post.
+            </div>
+          )}
 
           {/* Role banners */}
           {role === 'back_office' && (
@@ -3651,12 +3797,14 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
           {/* Description — counselor / admin */}
           <div className="bg-white border border-gray-100 rounded-2xl p-4 space-y-2">
             <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">
-              Description <span className="text-blue-500">← Counsellor pastes here</span>
+              {isEn ? 'English description' : 'Description'} <span className="text-blue-500">← Counsellor pastes here</span>
             </p>
             <textarea
-              value={desc}
-              onChange={e => setDesc(e.target.value)}
-              placeholder={'Paste the full description here…\ne.g.\n42 | Male\nColombo\nBuddhist\nEngineer\n\n(caption)\n\n(long description)\n\n(short description)'}
+              value={activeDesc}
+              onChange={e => setActiveDesc(e.target.value)}
+              placeholder={isEn
+                ? 'Paste the English description here…\ne.g.\n42 | Male\nColombo\nBuddhist\nEngineer\n\n(caption)\n\n(long description)\n\n(short description)'
+                : 'Paste the full description here…\ne.g.\n42 | Male\nColombo\nBuddhist\nEngineer\n\n(caption)\n\n(long description)\n\n(short description)'}
               rows={6}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none resize-none focus:border-pink-300"
               style={{ fontFamily: 'inherit' }}
@@ -3665,7 +3813,7 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
 
           {!d && (
             <div className="text-center text-gray-400 text-xs font-medium py-4">
-              Paste a description above to see the split parts.
+              Paste {isEn ? 'the English' : 'a'} description above to see the split parts.
             </div>
           )}
 
@@ -3702,24 +3850,27 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
 
               {/* Caption — FM copy */}
               <div className="bg-white border border-gray-100 rounded-2xl p-4 space-y-3">
-                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">Caption <span className="text-gray-300 font-normal">— copies as FM font</span></p>
+                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">Caption <span className="text-gray-300 font-normal">— copies as {isEn ? 'plain text' : 'FM font'}</span></p>
                 <div className="bg-pink-50 border border-pink-100 rounded-xl px-3 py-2.5 text-sm font-semibold text-gray-800" style={{ fontFamily: "'Noto Sans Sinhala', sans-serif" }}>
                   {d.caption || '—'}
                 </div>
-                <div className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-[11px] text-gray-400" style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
-                  {pbToFM(d.caption) || '—'}
-                </div>
+                {/* FM preview is Sinhala-only — English would have its punctuation mangled. */}
+                {!isEn && (
+                  <div className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-[11px] text-gray-400" style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                    {pbToFM(d.caption) || '—'}
+                  </div>
+                )}
                 <button
-                  onClick={() => copy(pbToFM(d.caption), 'caption')}
+                  onClick={() => copy(toPostFont(d.caption), 'caption')}
                   className={`w-full rounded-xl py-2.5 text-xs font-bold transition-all ${copiedId === 'caption' ? 'bg-green-500 text-white' : 'bg-pink-600 text-white'}`}
                 >
-                  {copiedId === 'caption' ? '✓ Copied FM text' : 'Copy Caption FM'}
+                  {copiedId === 'caption' ? '✓ Copied' : (isEn ? 'Copy Caption' : 'Copy Caption FM')}
                 </button>
               </div>
 
               {/* Part 1 — full post */}
               <div className="bg-white border border-gray-100 rounded-2xl p-4 space-y-3">
-                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">Part 1 — Caption post <span className="text-gray-300 font-normal">copies as Unicode</span></p>
+                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">Part 1 — Caption post <span className="text-gray-300 font-normal">copies as Unicode{isEn ? ' · English' : ''}</span></p>
 
                 {/* Profile URL (read view for non-back-office) */}
                 {!isBackOffice && (
@@ -3743,7 +3894,7 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
                   {'\n\n'}
                   <span className="text-pink-600">{profileUrl || '…'}</span>
                   {'\n\n'}
-                  <span className="text-gray-400 text-[11px]">{WA_LINE}</span>
+                  <span className="text-gray-400 text-[11px]">{waLine}</span>
                   {'\n\n'}
                   <span className="text-pink-300 text-[11px]">{TAGS}</span>
                 </div>
@@ -3802,18 +3953,20 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', defaultPr
 
               {/* Part 2 — short desc FM */}
               <div className="bg-white border border-gray-100 rounded-2xl p-4 space-y-3">
-                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">Part 2 — Short description <span className="text-gray-300 font-normal">copies as FM font</span></p>
+                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">Part 2 — Short description <span className="text-gray-300 font-normal">copies as {isEn ? 'plain text' : 'FM font'}</span></p>
                 <div className="bg-pink-50 border border-pink-100 rounded-xl px-3 py-2.5 text-sm text-gray-800 leading-relaxed" style={{ fontFamily: "'Noto Sans Sinhala', sans-serif" }}>
                   {d.shortDesc || '—'}
                 </div>
-                <div className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-[11px] text-gray-400" style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
-                  {pbToFM(d.shortDesc) || '—'}
-                </div>
+                {!isEn && (
+                  <div className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-[11px] text-gray-400" style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                    {pbToFM(d.shortDesc) || '—'}
+                  </div>
+                )}
                 <button
-                  onClick={() => copy(pbToFM(d.shortDesc), 'part2')}
+                  onClick={() => copy(toPostFont(d.shortDesc), 'part2')}
                   className={`w-full rounded-xl py-2.5 text-xs font-bold transition-all ${copiedId === 'part2' ? 'bg-green-500 text-white' : 'bg-pink-600 text-white'}`}
                 >
-                  {copiedId === 'part2' ? '✓ Copied FM text' : 'Copy Part 2 FM'}
+                  {copiedId === 'part2' ? '✓ Copied' : (isEn ? 'Copy Part 2' : 'Copy Part 2 FM')}
                 </button>
               </div>
 

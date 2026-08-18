@@ -13,8 +13,8 @@ import {
   CreditCard, AlertCircle, Pencil, Receipt, Building2
 } from 'lucide-react'
 import { Customer, Order, OrderStep, Interaction, Package as Pkg, MONTH_CODES, getSlotLabel, slotInstantISO } from '@/types'
-import { fmtDate, fmtTime, buildWaLink, openWaLink, WA, KOKO_SERVICE_CHARGE_RATE, getCounselorAvailability } from '@/lib/utils'
-import { formatPhoneDisplay } from '@/lib/country-codes'
+import { fmtDate, fmtTime, buildWaLink, openWaLink, WA, KOKO_SERVICE_CHARGE_RATE, getCounselorAvailability, normalisePhone } from '@/lib/utils'
+import { formatPhoneDisplay, detectCountryFromPaste } from '@/lib/country-codes'
 import InterestStatsCard from '@/components/shared/InterestStatsCard'
 import QuotationCard from '@/components/shared/QuotationCard'
 import WhatsappBoostPanel from '@/components/shared/WhatsappBoostPanel'
@@ -138,9 +138,12 @@ export default function CustomerDetailPage() {
   const [orderTimer, setOrderTimer] = useState(600)
   const [timerActive, setTimerActive] = useState(false)
 
-  // Customer name inline edit (header)
+  // Customer name + phone inline edit (header)
   const [editingName, setEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState('')
+  const [phoneDraft, setPhoneDraft] = useState('')
+  const [savingDetails, setSavingDetails] = useState(false)
+  const [detailsError, setDetailsError] = useState('')
 
   // Installment
   const [installmentType, setInstallmentType] = useState<'full' | 'installment'>('full')
@@ -1206,6 +1209,76 @@ export default function CustomerDetailPage() {
     })
   }
 
+  // ── Header edit: customer name + phone number ──────────────
+  // Opens the inline editor with both fields pre-filled. The phone is shown
+  // in "+<intl digits>" form so an agent can retype the whole number
+  // (country code included) without guessing our storage format.
+  const openDetailsEdit = () => {
+    if (!customer) return
+    setNameDraft(customer.name || '')
+    setPhoneDraft(customer.phone ? `+${customer.phone.replace(/\D/g, '')}` : '')
+    setDetailsError('')
+    setEditingName(true)
+  }
+
+  // Saves whichever of the two fields actually changed. The phone goes
+  // through the same normalisation the entry page uses (paste detection
+  // first, then a Sri Lanka default) so it lands in storage as bare
+  // international digits — anything else breaks the WhatsApp links and the
+  // website-interest matching, which both key on this exact string.
+  const saveDetails = async () => {
+    if (!customer || savingDetails) return
+    const newName = nameDraft.trim()
+
+    const raw = phoneDraft.trim()
+    const detected = detectCountryFromPaste(raw)
+    const newPhone = detected ? detected.dial + detected.local : normalisePhone(raw, '94')
+    if (!newPhone || newPhone.length < 9) {
+      setDetailsError('Enter a valid number with its country code (e.g. +94 77 123 4567)')
+      return
+    }
+
+    setSavingDetails(true)
+    setDetailsError('')
+
+    const phoneChanged = newPhone !== customer.phone
+    const nameChanged = (newName || null) !== (customer.name || null)
+
+    // Two entries on the same number would split one customer's history in
+    // two, so block the rename instead of creating the duplicate.
+    if (phoneChanged) {
+      const { data: clash } = await supabase
+        .from('customers')
+        .select('id')
+        .eq('phone', newPhone)
+        .neq('id', customer.id)
+        .maybeSingle()
+      if (clash) {
+        setSavingDetails(false)
+        setDetailsError('Another entry already uses this number')
+        return
+      }
+    }
+
+    if (nameChanged || phoneChanged) {
+      const { error } = await supabase
+        .from('customers')
+        .update({ name: newName || null, phone: newPhone })
+        .eq('id', customer.id)
+      if (error) {
+        setSavingDetails(false)
+        setDetailsError(error.message)
+        return
+      }
+      setCustomer(c => c ? { ...c, name: newName || undefined, phone: newPhone } : c)
+      if (nameChanged) await logAction(newName ? `Customer name updated: ${newName}` : 'Customer name cleared')
+      if (phoneChanged) await logAction(`Customer number updated: ${formatPhoneDisplay(customer.phone)} → ${formatPhoneDisplay(newPhone)}`)
+    }
+
+    setSavingDetails(false)
+    setEditingName(false)
+  }
+
   // History filter
   const filteredInteractions = interactions.filter(i =>
     historyFilter === 'all' ? true : i.type === historyFilter
@@ -1279,37 +1352,43 @@ export default function CustomerDetailPage() {
               </div>
               <div className="flex-1 min-w-0">
                 {editingName ? (
-                  <div className="flex items-center gap-1.5">
+                  <div className="space-y-1.5">
                     <input
                       autoFocus
                       type="text"
                       value={nameDraft}
                       onChange={e => setNameDraft(e.target.value)}
                       placeholder="Customer name"
-                      onKeyDown={async e => {
-                        if (e.key === 'Enter') {
-                          const v = nameDraft.trim()
-                          await supabase.from('customers').update({ name: v || null }).eq('id', customer.id)
-                          setCustomer(c => c ? { ...c, name: v || undefined } : c)
-                          await logAction(v ? `Customer name updated: ${v}` : 'Customer name cleared')
-                          setEditingName(false)
-                        }
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') saveDetails()
                         if (e.key === 'Escape') setEditingName(false)
                       }}
-                      className="flex-1 bg-white border border-pink-200 rounded-lg px-2 py-1 text-sm font-bold outline-none focus:border-pink-400"
+                      className="w-full bg-white border border-pink-200 rounded-lg px-2 py-1 text-sm font-bold outline-none focus:border-pink-400"
                     />
-                    <button
-                      onClick={async () => {
-                        const v = nameDraft.trim()
-                        await supabase.from('customers').update({ name: v || null }).eq('id', customer.id)
-                        setCustomer(c => c ? { ...c, name: v || undefined } : c)
-                        await logAction(v ? `Customer name updated: ${v}` : 'Customer name cleared')
-                        setEditingName(false)
+                    <input
+                      type="tel"
+                      inputMode="tel"
+                      value={phoneDraft}
+                      onChange={e => { setPhoneDraft(e.target.value); setDetailsError('') }}
+                      placeholder="+94 77 123 4567"
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') saveDetails()
+                        if (e.key === 'Escape') setEditingName(false)
                       }}
-                      className="text-[9px] font-bold text-pink-600 px-2 py-1 bg-white rounded-lg border border-pink-200">Save</button>
-                    <button
-                      onClick={() => setEditingName(false)}
-                      className="text-[9px] font-bold text-gray-400 px-2 py-1 bg-white rounded-lg border border-gray-200">Cancel</button>
+                      className="w-full bg-white border border-pink-200 rounded-lg px-2 py-1 text-xs font-medium outline-none focus:border-pink-400"
+                    />
+                    {detailsError && <p className="text-[9px] font-bold text-red-500">{detailsError}</p>}
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={saveDetails}
+                        disabled={savingDetails}
+                        className="text-[9px] font-bold text-pink-600 px-2 py-1 bg-white rounded-lg border border-pink-200 disabled:opacity-50">
+                        {savingDetails ? 'Saving…' : 'Save'}
+                      </button>
+                      <button
+                        onClick={() => setEditingName(false)}
+                        className="text-[9px] font-bold text-gray-400 px-2 py-1 bg-white rounded-lg border border-gray-200">Cancel</button>
+                    </div>
                   </div>
                 ) : (
                   <>
@@ -1319,8 +1398,8 @@ export default function CustomerDetailPage() {
                       </p>
                       {(isCrmWorker || role === 'admin') && (
                         <button
-                          onClick={() => { setNameDraft(customer.name || ''); setEditingName(true) }}
-                          title="Edit customer name"
+                          onClick={openDetailsEdit}
+                          title="Edit customer name & number"
                           className="text-gray-400 hover:text-pink-500 flex-shrink-0">
                           <Pencil size={12} />
                         </button>

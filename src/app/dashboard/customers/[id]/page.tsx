@@ -10,7 +10,7 @@ import BottomNav from '@/components/shared/BottomNav'
 import {
   Loader2, ArrowLeft, Star, Phone, MessageCircle, PhoneCall,
   ThumbsUp, ShoppingCart, Lock, Upload, CheckCircle, ExternalLink, Filter,
-  CreditCard, AlertCircle, Pencil, Receipt, Building2
+  CreditCard, AlertCircle, Pencil, Receipt, Building2, PauseCircle, PlayCircle
 } from 'lucide-react'
 import { Customer, Order, OrderStep, Interaction, Package as Pkg, MONTH_CODES, getSlotLabel, slotInstantISO } from '@/types'
 import { fmtDate, fmtTime, buildWaLink, openWaLink, WA, KOKO_SERVICE_CHARGE_RATE, getCounselorAvailability, normalisePhone } from '@/lib/utils'
@@ -171,6 +171,14 @@ export default function CustomerDetailPage() {
   const [customerApproved, setCustomerApproved] = useState(false)
 
   // Manager reject
+  // ── Abandoned customers ──────────────────────────────────
+  // A customer who stopped replying gets parked instead of sitting overdue
+  // forever. The step leaves the active queues and lands on the Abandoned tab;
+  // the overdue cron skips it, so no more penalties and no more nagging SMS.
+  const [abandonedStep, setAbandonedStep] = useState<any | null>(null)
+  const [showAbandon, setShowAbandon] = useState(false)
+  const [abandonReason, setAbandonReason] = useState('')
+
   const [showReject, setShowReject] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
   const [rejectAssignee, setRejectAssignee] = useState('')
@@ -319,6 +327,12 @@ export default function CustomerDetailPage() {
   const stepAccepted = activeStep?.status === 'in_progress'
   const isActiveStep = canAct()
   const countdown = activeStep ? getCountdown(activeStep.deadline, activeStep.extended_deadline) : null
+  // Abandoning is only offered once the customer has actually gone past the
+  // deadline — it's an escape hatch for silence, not a way to duck live work.
+  const stepIsOverdue = !!activeStep && (countdown === 'Overdue' || activeStep.is_overdue || activeStep.status === 'overdue')
+  // Only the counsellor holding the step (or an admin) can park or restart it.
+  const canResumeAbandoned = !!abandonedStep && !!user &&
+    (abandonedStep.assigned_to === user.id || role === 'admin')
   const isInstallmentPending = (activeOrder as any)?.installment_status === 'partial'
   // Free Post campaign order — drives the purple theme + the shortened
   // Back Office → Counselor → Designer pipeline (no Manager step).
@@ -482,6 +496,74 @@ export default function CustomerDetailPage() {
     if (logMsg) await logAction(logMsg)
     setSelectedAssignee(''); setCustomerApproved(false)
     setShowReject(false); setRejectReason(''); setRejectAssignee('')
+    await fetchAll()
+    setActionLoading(false)
+  }
+
+  // Park an unresponsive customer. The WhatsApp notice fires FIRST, in the
+  // click gesture — any await before openWa and mobile Safari kills the tab.
+  const doAbandon = async () => {
+    if (!activeStep || !activeOrder || !customer || !user) return
+
+    openWa(buildWaLink(customer.phone, WA.abandonNotice(customer.name || customer.phone)))
+
+    setActionLoading(true)
+    const reason = abandonReason.trim()
+    const { error } = await supabase.from('order_steps').update({
+      status: 'abandoned',
+      abandoned_at: new Date().toISOString(),
+      abandoned_by: user.id,
+      abandoned_reason: reason || null,
+      // Clear the overdue flag too, otherwise the parked step keeps showing up
+      // in the admin Overdue Alerts list. The deadline itself is left alone as
+      // a record of what it was when the customer went quiet.
+      is_overdue: false,
+    }).eq('id', activeStep.id)
+
+    if (error) {
+      alert('Could not abandon this customer:\n• ' + error.message +
+        '\n\nThe process was NOT paused. Please tell admin.')
+      setActionLoading(false)
+      return
+    }
+
+    await logAction(`⏸ Customer abandoned — process paused${reason ? ` · ${reason}` : ''} · notice sent via WhatsApp`)
+    setShowAbandon(false); setAbandonReason('')
+    await fetchAll()
+    setActionLoading(false)
+  }
+
+  // The customer came back. Put the step back exactly where it was, with a
+  // clean deadline so she isn't instantly overdue for the silence.
+  const doResume = async () => {
+    if (!abandonedStep) return
+    setActionLoading(true)
+
+    // Already accepted before the pause → straight back to In Progress.
+    // Never accepted → back to New, so accepting re-sends the start message.
+    const backTo = abandonedStep.started_at ? 'in_progress' : 'pending'
+
+    const { error } = await supabase.from('order_steps').update({
+      status: backTo,
+      abandoned_at: null,
+      abandoned_reason: null,
+      // abandoned_by is kept on purpose — it's the audit trail of who parked it.
+      deadline: makeDeadline(abandonedStep.step_number),
+      // A stale extension from before the pause would re-overdue it instantly.
+      extended_deadline: null,
+      extension_reason: null,
+      extended_by_days: null,
+      is_overdue: false,
+    }).eq('id', abandonedStep.id)
+
+    if (error) {
+      alert('Could not resume this customer:\n• ' + error.message +
+        '\n\nThe process is still paused. Please tell admin.')
+      setActionLoading(false)
+      return
+    }
+
+    await logAction('▶️ Customer returned — process resumed with a fresh deadline')
     await fetchAll()
     setActionLoading(false)
   }
@@ -1156,6 +1238,7 @@ export default function CustomerDetailPage() {
           .single()
         if (stepData) {
           setActiveStep(stepData as any)
+          setAbandonedStep(null)
           if (stepData.description) setBrief(stepData.description)
           if (stepData.description_en) setBriefEn(stepData.description_en)
           // there's still active work — clear the read-only summary state
@@ -1164,10 +1247,11 @@ export default function CustomerDetailPage() {
           setPlannedSlot(null)
         } else {
           setActiveStep(null)
-          // No active step: this customer is fully planned (or in a quiet state).
-          // Pull the latest completed step that has a brief so we can show
-          // the description in read-only mode, plus the planned calendar slot.
-          const [{ data: lastStep }, { data: slotRow }] = await Promise.all([
+          // No active step: this customer is fully planned, parked as
+          // abandoned, or in a quiet state. Pull the latest completed step that
+          // has a brief so we can show the description in read-only mode, the
+          // planned calendar slot, and any parked step waiting to be resumed.
+          const [{ data: lastStep }, { data: slotRow }, { data: parkedStep }] = await Promise.all([
             supabase
               .from('order_steps')
               .select('description, description_en, step_number')
@@ -1184,14 +1268,24 @@ export default function CustomerDetailPage() {
               .order('planned_at', { ascending: false })
               .limit(1)
               .maybeSingle(),
+            supabase
+              .from('order_steps')
+              .select('*, assigned_user:users!assigned_to(full_name, role)')
+              .eq('order_id', active.id)
+              .eq('status', 'abandoned')
+              .order('step_number', { ascending: false })
+              .limit(1)
+              .maybeSingle(),
           ])
           setCompletedBrief(lastStep?.description ?? null)
           setCompletedBriefEn((lastStep as any)?.description_en ?? null)
           setPlannedSlot(slotRow ?? null)
+          setAbandonedStep(parkedStep ?? null)
         }
       } else {
         setActiveOrder(null)
         setActiveStep(null)
+        setAbandonedStep(null)
       }
     }
     if (interactionsRes.data) setInteractions(interactionsRes.data as any)
@@ -1565,6 +1659,54 @@ export default function CustomerDetailPage() {
                   <ExternalLink size={13} /> View 2nd installment slip
                 </a>
               )}
+            </div>
+          )}
+
+          {/* ── PAUSED (ABANDONED) PANEL ──────────────────────
+              Replaces the step panel while the customer is parked. The whole
+              process is frozen: no deadline running, no penalties, no overdue
+              SMS. One button brings it all back. */}
+          {activeOrder && !activeStep && abandonedStep && !isExpired && (
+            <div className="border-2 border-slate-200 rounded-2xl overflow-hidden">
+              <div className="px-4 py-3 bg-slate-600 flex items-center gap-2.5">
+                <PauseCircle size={18} className="text-white" />
+                <div className="flex-1">
+                  <p className="text-sm font-extrabold text-white uppercase tracking-wide">Process paused</p>
+                  <p className="text-[10px] text-slate-200 font-medium">
+                    Abandoned
+                    {abandonedStep.abandoned_at && ` on ${fmtDate(abandonedStep.abandoned_at)}`}
+                    {abandonedStep.assigned_user?.full_name && ` · Step ${abandonedStep.step_number} · ${abandonedStep.assigned_user.full_name}`}
+                  </p>
+                </div>
+              </div>
+              <div className="p-4 space-y-3">
+                {abandonedStep.abandoned_reason && (
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wide mb-1">Reason</p>
+                    <p className="text-xs text-slate-700 font-medium">{abandonedStep.abandoned_reason}</p>
+                  </div>
+                )}
+                <p className="text-[10px] text-gray-400 font-medium leading-relaxed">
+                  No deadline is running and no overdue messages are being sent for this customer.
+                  If they get back to you, resume and the process continues from Step {abandonedStep.step_number}
+                  with a fresh deadline.
+                </p>
+                {canResumeAbandoned ? (
+                  <button onClick={doResume} disabled={actionLoading}
+                    className="w-full flex items-center justify-center gap-2 bg-green-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
+                    {actionLoading
+                      ? <Loader2 size={14} className="animate-spin" />
+                      : <><PlayCircle size={14} /> Customer came back — resume process</>}
+                  </button>
+                ) : (
+                  <div className="flex items-center justify-center gap-2 bg-gray-50 border border-gray-100 rounded-xl px-4 py-3">
+                    <Lock size={13} className="text-gray-300" />
+                    <p className="text-[10px] font-bold text-gray-400">
+                      Only {abandonedStep.assigned_user?.full_name || 'the assigned worker'} or an admin can resume this
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -2023,6 +2165,49 @@ export default function CustomerDetailPage() {
                         </div>
                       )}
                     </>
+                  )}
+
+                  {/* ── ABANDON — park a customer who stopped replying ────
+                      Only appears once the step is genuinely overdue. Parking
+                      stops the hourly penalty + SMS on this step and moves it
+                      to her Abandoned tab, where it waits to be resumed. */}
+                  {stepIsOverdue && (
+                    <div className="border-t border-gray-100 pt-2">
+                      {!showAbandon ? (
+                        <button onClick={() => setShowAbandon(true)}
+                          className="w-full flex items-center justify-center gap-2 border border-slate-200 text-slate-500 rounded-xl px-4 py-2.5 text-xs font-semibold">
+                          <PauseCircle size={13} /> Customer not responding — abandon
+                        </button>
+                      ) : (
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
+                          <div>
+                            <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">Abandon this customer</p>
+                            <p className="text-[9px] text-slate-500 font-medium leading-relaxed mt-0.5">
+                              The process pauses, the deadline stops running and you stop getting
+                              overdue messages for this one. WhatsApp will open with the notice
+                              telling them we are no longer processing their order.
+                              You can resume any time they come back.
+                            </p>
+                          </div>
+                          <input value={abandonReason} onChange={e => setAbandonReason(e.target.value)}
+                            placeholder="Reason (optional) — e.g. no reply for 3 weeks"
+                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium outline-none" />
+                          <div className="flex gap-2">
+                            <button onClick={() => { setShowAbandon(false); setAbandonReason('') }}
+                              disabled={actionLoading}
+                              className="flex-1 border border-slate-200 text-slate-400 rounded-lg px-3 py-2 text-xs font-semibold">
+                              Cancel
+                            </button>
+                            <button onClick={doAbandon} disabled={actionLoading}
+                              className="flex-1 bg-slate-600 text-white rounded-lg px-3 py-2 text-xs font-bold disabled:opacity-40">
+                              {actionLoading
+                                ? <Loader2 size={13} className="animate-spin mx-auto" />
+                                : 'Send notice + abandon'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               )}

@@ -14,7 +14,7 @@ export type UserRole =
   | 'team_leader'
 
 export type OrderStatus = 'draft' | 'active' | 'expired' | 'cancelled'
-export type StepStatus = 'pending' | 'in_progress' | 'done' | 'overdue' | 'rejected'
+export type StepStatus = 'pending' | 'in_progress' | 'done' | 'overdue' | 'rejected' | 'abandoned'
 export type AttendanceStatus = 'present' | 'late' | 'absent' | 'approved_leave' | 'holiday'
 export type PaymentType = 'cash' | 'bank_transfer' | 'card' | 'koko' | 'other'
 export type LeaveType = 'annual' | 'casual' | 'sick' | 'other'
@@ -122,6 +122,12 @@ export interface OrderStep {
   status: StepStatus
   is_overdue: boolean
   is_late_completion: boolean
+  // Set when the assigned worker parks an unresponsive customer instead of
+  // letting the step go overdue forever. Cleared again on resume — see the
+  // Abandoned tab on the dashboard.
+  abandoned_at?: string | null
+  abandoned_by?: string | null
+  abandoned_reason?: string | null
   created_at: string
   // joined
   assigned_user?: User

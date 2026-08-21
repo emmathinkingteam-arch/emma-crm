@@ -104,6 +104,12 @@ export const WA = {
   planningConfirmation: (name: string, date: string, time: string) =>
     `Hi ${name},\n\nYour post has been planned for publication on ${date} at ${time}.\n\nWe will take care of everything and notify you once it goes live.\n\nEmma Thinking (Pvt) Ltd`,
 
+  // Sent by the counsellor when she parks an unresponsive customer on the
+  // Abandoned tab. Firm but not final — the whole point is to shake a reply
+  // out of someone who has gone quiet, so it always ends with the way back in.
+  abandonNotice: (name: string) =>
+    `Hi ${name},\n\nWe have tried to reach you several times regarding your Emma Thinking counselling session, but we have not been able to get a response from you.\n\nBecause of this, your order has now been marked INACTIVE and we have PAUSED all work on your profile. Your profile will not be prepared or published while it stays in this state.\n\nIf you would still like to continue, simply reply to this message and we will resume the process for you right away.\n\n---\n\nඔබගේ Emma Thinking Counselling Session එක සම්බන්ධයෙන් අප ඔබව කිහිප වතාවක්ම සම්බන්ධ කර ගැනීමට උත්සාහ කළ නමුත්, ඔබගෙන් කිසිදු ප්‍රතිචාරයක් ලැබී නොමැත.\n\nඑම නිසා ඔබගේ Order එක දැන් INACTIVE ලෙස සලකුණු කර ඇති අතර, ඔබගේ Profile එකේ ඉදිරි කටයුතු සම්පූර්ණයෙන්ම නවතා ඇත. මෙම තත්ත්වයේ පවතින තාක් ඔබගේ Profile එක සකස් කිරීම හෝ Publish කිරීම සිදු නොකෙරේ.\n\nඔබට නැවත ඉදිරියට යාමට අවශ්‍ය නම්, කරුණාකර මෙම message එකට reply කරන්න. අපි වහාම ක්‍රියාවලිය නැවත ආරම්භ කරන්නෙමු.\n\nEmma Thinking (Pvt) Ltd`,
+
   // Combined plan + expiry confirmation — sent by the designer in one go
   planAndExpiry: (name: string, postDate: string, postTime: string, expiryDate: string) =>
     `Hi ${name},\n\nYour Emma Thinking profile post has been planned. Please find the details below.\n\n   Post Date    : ${postDate}\n   Post Time    : ${postTime}\n   Plan Expires : ${expiryDate}\n\nWe will take care of everything and notify you once your post goes live. Your post will remain active until the expiry date above.\n\nThank you for choosing Emma Thinking.\n\nEmma Thinking (Pvt) Ltd`,

@@ -93,7 +93,11 @@ async function handle(req: Request) {
             .select('id, order_id, step_number, step_name, deadline, extended_deadline, assigned_to, status, last_penalty_at, penalty_hours_deducted')
             .in('step_number', DEBITABLE_STEPS as unknown as number[])
             .not('assigned_to', 'is', null)
-            .not('status', 'in', '(done,rejected)')
+            // 'abandoned' = the assigned worker parked an unresponsive customer.
+            // Those steps are deliberately parked, so they must never be
+            // penalised or SMS'd — that endless nagging is exactly what the
+            // Abandoned tab exists to stop.
+            .not('status', 'in', '(done,rejected,abandoned)')
             .lt('deadline', now.toISOString())
             .limit(MAX_STEPS_PER_RUN)
 

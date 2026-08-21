@@ -7,7 +7,7 @@ import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import { Order, OrderStep } from '@/types'
-import { Bell, ChevronRight, ChevronLeft, CheckCircle2, Sparkles, Clock, Phone, PhoneCall, TrendingUp, Users, UserPlus, Briefcase, ArrowLeftRight, Loader2, X } from 'lucide-react'
+import { Bell, ChevronRight, ChevronLeft, CheckCircle2, Sparkles, Clock, Phone, PhoneCall, TrendingUp, Users, UserPlus, Briefcase, ArrowLeftRight, Loader2, X, PauseCircle } from 'lucide-react'
 import CrmLeaderboard from '@/components/shared/CrmLeaderboard'
 import MissingSlipsCard from '@/components/shared/MissingSlipsCard'
 import LowInterestAlert from '@/components/shared/LowInterestAlert'
@@ -23,7 +23,7 @@ type StepWithOrder = OrderStep & {
   }
 }
 
-type WorkTab = 'new' | 'in_progress' | 'completed'
+type WorkTab = 'new' | 'in_progress' | 'abandoned' | 'completed'
 
 // True when the given month (1st-of-month date) is the running calendar month.
 function isCurrentMonth(d: Date) {
@@ -47,6 +47,9 @@ export default function DashboardPage() {
   const [newWorks, setNewWorks] = useState<StepWithOrder[]>([])
   const [inProgress, setInProgress] = useState<StepWithOrder[]>([])
   const [completed, setCompleted] = useState<StepWithOrder[]>([])
+  // Customers parked because they stopped replying. Not overdue, not chased,
+  // not penalised — they just wait here until they come back.
+  const [abandoned, setAbandoned] = useState<StepWithOrder[]>([])
   // Tab number = THIS month's completed count. The inner Completed view lets you
   // step back through previous months and see each month's total separately.
   const [thisMonthCount, setThisMonthCount] = useState(0)
@@ -236,12 +239,22 @@ export default function DashboardPage() {
     setLoading(true)
 
     // ── Active steps (new + in-progress + overdue) ─────────────
-    const { data: activeSteps } = await supabase
-      .from('order_steps')
-      .select(`*, order:orders(*, customer:customers(*), package:packages(*))`)
-      .eq('assigned_to', user.id)
-      .in('status', ['pending', 'in_progress', 'overdue'])
-      .order('deadline', { ascending: true })
+    // Abandoned steps are fetched separately: they are deliberately parked, so
+    // they must not count towards New / In Progress or the overdue badge.
+    const [{ data: activeSteps }, { data: parkedSteps }] = await Promise.all([
+      supabase
+        .from('order_steps')
+        .select(`*, order:orders(*, customer:customers(*), package:packages(*))`)
+        .eq('assigned_to', user.id)
+        .in('status', ['pending', 'in_progress', 'overdue'])
+        .order('deadline', { ascending: true }),
+      supabase
+        .from('order_steps')
+        .select(`*, order:orders(*, customer:customers(*), package:packages(*))`)
+        .eq('assigned_to', user.id)
+        .eq('status', 'abandoned')
+        .order('abandoned_at', { ascending: false }),
+    ])
 
     const news: StepWithOrder[] = []
     const inProg: StepWithOrder[] = []
@@ -256,6 +269,7 @@ export default function DashboardPage() {
 
     setNewWorks(news)
     setInProgress(inProg)
+    setAbandoned(((parkedSteps as any[]) || []).filter(s => !!s.order))
     setLoading(false)
   }
 
@@ -306,13 +320,19 @@ export default function DashboardPage() {
   const tabList: { key: WorkTab; label: string; count: number }[] = [
     { key: 'new', label: 'New', count: newWorks.length },
     { key: 'in_progress', label: 'In Progress', count: inProgress.length },
+    // Only worth a tab for the roles that actually park customers (the
+    // counsellor mostly). Everyone else keeps the original three.
+    ...(abandoned.length > 0 || role === 'counselor'
+      ? [{ key: 'abandoned' as WorkTab, label: 'Abandoned', count: abandoned.length }]
+      : []),
     { key: 'completed', label: 'Completed', count: thisMonthCount },
   ]
 
   const visible: StepWithOrder[] =
     activeTab === 'new' ? newWorks
       : activeTab === 'in_progress' ? inProgress
-        : completed
+        : activeTab === 'abandoned' ? abandoned
+          : completed
 
   if (loading) {
     return (
@@ -642,14 +662,16 @@ export default function DashboardPage() {
         )}
 
         {/* Tabs */}
-        <div className="grid grid-cols-3 gap-2">
+        <div className={`grid gap-2 ${tabList.length === 4 ? 'grid-cols-4' : 'grid-cols-3'}`}>
           {tabList.map(t => (
             <button
               key={t.key}
               onClick={() => setActiveTab(t.key)}
               className={`flex flex-col items-center py-3 rounded-2xl text-[10px] font-bold uppercase tracking-wide transition-all ${
                 activeTab === t.key
-                  ? 'bg-pink-600 text-white shadow-md shadow-pink-200'
+                  ? t.key === 'abandoned'
+                    ? 'bg-slate-600 text-white shadow-md shadow-slate-200'
+                    : 'bg-pink-600 text-white shadow-md shadow-pink-200'
                   : 'bg-gray-50 border border-gray-100 text-gray-400'
               }`}
             >
@@ -667,6 +689,7 @@ export default function DashboardPage() {
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">
             {activeTab === 'new' && 'New works — accept to begin'}
             {activeTab === 'in_progress' && 'Currently working'}
+            {activeTab === 'abandoned' && 'Abandoned — paused, no deadline running'}
             {activeTab === 'completed' && 'Completed works — read only'}
           </p>
 
@@ -702,15 +725,19 @@ export default function DashboardPage() {
             <div className="bg-gray-50 rounded-2xl p-10 text-center">
               {activeTab === 'completed'
                 ? <CheckCircle2 size={28} className="text-gray-200 mx-auto mb-2" />
-                : <Bell size={28} className="text-pink-200 mx-auto mb-2" />}
+                : activeTab === 'abandoned'
+                  ? <PauseCircle size={28} className="text-slate-200 mx-auto mb-2" />
+                  : <Bell size={28} className="text-pink-200 mx-auto mb-2" />}
               <p className="text-xs font-bold text-gray-400">
                 {activeTab === 'new' && 'No new assignments'}
                 {activeTab === 'in_progress' && 'Nothing in progress'}
+                {activeTab === 'abandoned' && 'No abandoned customers'}
                 {activeTab === 'completed' && `Nothing completed in ${monthLabel}`}
               </p>
               <p className="text-[9px] text-gray-300 font-medium mt-1 uppercase tracking-wide">
                 {activeTab === 'new' && 'New customers will appear here when assigned to you'}
                 {activeTab === 'in_progress' && 'Accept a new work to start'}
+                {activeTab === 'abandoned' && 'Open an overdue customer to park them here'}
                 {activeTab === 'completed' && 'Use the arrows to check other months'}
               </p>
             </div>
@@ -732,9 +759,11 @@ export default function DashboardPage() {
                     href={`/dashboard/customers/${order.customer_id}?orderId=${order.id}`}
                     className={`block border rounded-2xl p-4 shadow-sm active:scale-[0.98] transition-all ${activeTab === 'completed'
                       ? 'bg-gray-50 border-gray-100 opacity-90'
-                      : isOverdueRow
-                        ? 'bg-red-50 border-red-100'
-                        : 'bg-white border-gray-100'
+                      : activeTab === 'abandoned'
+                        ? 'bg-slate-50 border-slate-200'
+                        : isOverdueRow
+                          ? 'bg-red-50 border-red-100'
+                          : 'bg-white border-gray-100'
                       }`}
                   >
                     <div className="flex items-center justify-between">
@@ -744,7 +773,7 @@ export default function DashboardPage() {
                           <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-pink-600 text-white tracking-wide flex-shrink-0">
                             {orderNo}
                           </span>
-                          <p className={`text-sm font-bold truncate ${activeTab === 'completed' ? 'text-gray-600' : 'text-gray-800'}`}>
+                          <p className={`text-sm font-bold truncate ${activeTab === 'completed' || activeTab === 'abandoned' ? 'text-gray-600' : 'text-gray-800'}`}>
                             {customer?.name || customer?.phone}
                           </p>
                         </div>
@@ -758,7 +787,17 @@ export default function DashboardPage() {
                           {isOverdueRow && (
                             <span className="ml-1.5 text-red-500 font-bold">· OVERDUE</span>
                           )}
+                          {activeTab === 'abandoned' && (step as any).abandoned_at && (
+                            <span className="ml-1.5 text-slate-500 font-bold">
+                              · Paused {new Date((step as any).abandoned_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                            </span>
+                          )}
                         </p>
+                        {activeTab === 'abandoned' && (step as any).abandoned_reason && (
+                          <p className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
+                            {(step as any).abandoned_reason}
+                          </p>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0 ml-2">
                         {(order as any).installment_status === 'partial' && (
@@ -766,9 +805,15 @@ export default function DashboardPage() {
                             Awaiting payment
                           </span>
                         )}
-                        <span className={`text-[8px] font-bold px-2 py-1 rounded-full border ${stepColor[step.step_number] || 'bg-gray-50 text-gray-500 border-gray-100'}`}>
-                          Step {step.step_number}
-                        </span>
+                        {activeTab === 'abandoned' ? (
+                          <span className="text-[8px] font-bold px-2 py-1 rounded-full border bg-slate-100 text-slate-600 border-slate-200 flex items-center gap-1">
+                            <PauseCircle size={9} /> Paused
+                          </span>
+                        ) : (
+                          <span className={`text-[8px] font-bold px-2 py-1 rounded-full border ${stepColor[step.step_number] || 'bg-gray-50 text-gray-500 border-gray-100'}`}>
+                            Step {step.step_number}
+                          </span>
+                        )}
                         <ChevronRight size={14} className="text-gray-300" />
                       </div>
                     </div>

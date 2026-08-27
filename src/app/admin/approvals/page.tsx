@@ -2,9 +2,10 @@
 import { useEffect, useState, Fragment } from 'react'
 import { supabase } from '@/lib/supabase'
 import { fmtDate, fmtTime } from '@/lib/utils'
-import { CheckCircle2, XCircle, Sparkles, Wallet, FileText, ChevronDown, ChevronUp, Loader2, RefreshCw, CalendarCheck, ChevronLeft, ChevronRight, Trophy, Save, Tag } from 'lucide-react'
+import { CheckCircle2, XCircle, Sparkles, Wallet, FileText, ChevronDown, ChevronUp, Loader2, RefreshCw, CalendarCheck, ChevronLeft, ChevronRight, Trophy, Save, Tag, Calculator } from 'lucide-react'
+import PayrollTab from '@/components/admin/PayrollTab'
 
-type Tab = 'leave' | 'ot' | 'advance' | 'salary' | 'second_post' | 'attendance' | 'bonus' | 'discount'
+type Tab = 'payroll' | 'leave' | 'ot' | 'advance' | 'salary' | 'second_post' | 'attendance' | 'bonus' | 'discount'
 
 // ── Salary sheet editor ────────────────────────────────────────────────────
 function SalarySheetEditor({ sheet, adminId, onDone }: { sheet: any; adminId: string; onDone: () => void }) {
@@ -16,7 +17,8 @@ function SalarySheetEditor({ sheet, adminId, onDone }: { sheet: any; adminId: st
   const setStr = (k: string, v: string) => setS((p: any) => ({ ...p, [k]: v }))
 
   const gross = ['basic_salary',
-    'ot_payment', 'sales_commission', 'monthly_bonus', 'special_allowance_01', 'special_allowance_02']
+    'ot_payment', 'sales_commission', 'monthly_bonus', 'special_allowance_01', 'special_allowance_02',
+    'wallet_adjustment'] // signed: negative when penalties are being recovered
     .reduce((acc, k) => acc + Number(s[k] || 0), 0)
 
   const totalDed = ['epf_employee', 'no_pay_deduction', 'salary_advance', 'stamp_duty',
@@ -99,6 +101,7 @@ function SalarySheetEditor({ sheet, adminId, onDone }: { sheet: any; adminId: st
                   { label: 'Monthly Bonus', key: 'monthly_bonus' },
                   { label: 'Special Allowance 01', key: 'special_allowance_01' },
                   { label: 'Special Allowance 02', key: 'special_allowance_02' },
+                  { label: 'Wallet Settlement (±)', key: 'wallet_adjustment' },
                 ].map(f => (
                   <div key={f.key} className="flex items-center gap-2">
                     <span className="text-[10px] text-gray-500 w-40 flex-shrink-0">{f.label}</span>
@@ -302,6 +305,7 @@ export default function ApprovalsPage() {
   }
 
   const tabs: { key: Tab; label: string; count?: number; color?: string }[] = [
+    { key: 'payroll', label: 'Payroll', color: 'pink' },
     { key: 'leave', label: 'Leave', count: leaves.length },
     { key: 'ot', label: 'OT', count: ots.length },
     { key: 'advance', label: 'Advance', count: advances.length, color: 'amber' },
@@ -324,6 +328,7 @@ export default function ApprovalsPage() {
           return (
             <button key={t.key} onClick={() => setTab(t.key)}
               className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${active ? `${baseActive} text-white` : 'bg-gray-100 text-gray-500'}`}>
+              {t.key === 'payroll' && <Calculator size={12} />}
               {t.key === 'advance' && <Wallet size={12} />}
               {t.key === 'salary' && <FileText size={12} />}
               {t.key === 'second_post' && <Sparkles size={12} />}
@@ -340,6 +345,9 @@ export default function ApprovalsPage() {
       </div>
 
       <div className="space-y-3">
+
+        {/* ── Payroll — every worker's salary for a month, in one pass ── */}
+        {tab === 'payroll' && <PayrollTab />}
 
         {/* ── Leave ── */}
         {tab === 'leave' && (
@@ -465,7 +473,7 @@ export default function ApprovalsPage() {
               : approvedSheets.map(s => {
                 const [yr, mo] = s.month_year.split('-')
                 const ml = new Date(Number(yr), Number(mo) - 1, 1).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
-                const gross = ['basic_salary', 'ot_payment', 'sales_commission', 'monthly_bonus', 'special_allowance_01', 'special_allowance_02'].reduce((a, k) => a + Number(s[k] || 0), 0)
+                const gross = ['basic_salary', 'ot_payment', 'sales_commission', 'monthly_bonus', 'special_allowance_01', 'special_allowance_02', 'wallet_adjustment'].reduce((a, k) => a + Number(s[k] || 0), 0)
                 const ded = ['epf_employee', 'no_pay_deduction', 'salary_advance', 'stamp_duty', 'meeting_absence', 'advance_deduction', 'late_deductions'].reduce((a, k) => a + Number(s[k] || 0), 0)
                 return (
                   <div key={s.id}>

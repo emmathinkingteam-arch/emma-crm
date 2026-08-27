@@ -37,11 +37,15 @@ export default function SalarySheetViewPage() {
     </div>
   )
 
+  // Must match the admin's editor and the Payroll tab, or the payslip would
+  // print a different net than the one that was approved.
   const gross = Number(sheet.basic_salary || 0)
     + Number(sheet.ot_payment || 0)
     + Number(sheet.sales_commission || 0)
+    + Number(sheet.monthly_bonus || 0)
     + Number(sheet.special_allowance_01 || 0)
     + Number(sheet.special_allowance_02 || 0)
+    + Number(sheet.wallet_adjustment || 0) // signed: negative recovers penalties
 
   const totalDeductions = Number(sheet.epf_employee || 0)
     + Number(sheet.no_pay_deduction || 0)
@@ -118,8 +122,10 @@ export default function SalarySheetViewPage() {
           <PayRow label="OT HOURS" value={sheet.ot_hours} plain />
           <PayRow label="OT PAYMENT" value={sheet.ot_payment} />
           <PayRow label="SALES COMMISSION" value={sheet.sales_commission} />
+          <PayRow label="MONTHLY BONUS" value={sheet.monthly_bonus} />
           <PayRow label="SPECIAL ALLOWANCE 01" value={sheet.special_allowance_01} />
           <PayRow label="SPECIAL ALLOWANCE 02" value={sheet.special_allowance_02} />
+          {Number(sheet.wallet_adjustment || 0) !== 0 && <PayRow label="WALLET SETTLEMENT" value={sheet.wallet_adjustment} />}
           <PayRow label="" value={null} />
           <PayRow label="GROSS SALARY" value={gross} bold />
         </PayTable>

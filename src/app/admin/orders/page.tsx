@@ -16,7 +16,7 @@ export default function AdminOrdersPage() {
     supabase.from('orders').select('*, customer:customers(name,phone), package:packages(name), created_by_user:users!created_by(full_name)').eq('is_fake', false).order('created_at', { ascending: false })
       .then(({ data }) => { if (data) setOrders(data); setLoading(false) })
   }, [])
-  const statusColor = (s: string) => s === 'active' ? 'bg-green-50 text-green-600' : s === 'expired' ? 'bg-gray-100 text-gray-400' : 'bg-red-50 text-red-500'
+  const statusColor = (s: string) => s === 'active' ? 'bg-green-50 text-green-600' : s === 'expired' ? 'bg-gray-100 text-gray-400' : s === 'refunded' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-500'
 
   // Dropdown options, built from whatever is actually present in the data.
   const statusOptions = useMemo(() => Array.from(new Set(orders.map(o => o.status).filter(Boolean))).sort(), [orders])

@@ -13,8 +13,8 @@ export type UserRole =
   | 'ceo'
   | 'team_leader'
 
-export type OrderStatus = 'draft' | 'active' | 'expired' | 'cancelled'
-export type StepStatus = 'pending' | 'in_progress' | 'done' | 'overdue' | 'rejected' | 'abandoned'
+export type OrderStatus = 'draft' | 'active' | 'expired' | 'cancelled' | 'refunded'
+export type StepStatus = 'pending' | 'in_progress' | 'done' | 'overdue' | 'rejected' | 'abandoned' | 'refunded'
 export type AttendanceStatus = 'present' | 'late' | 'absent' | 'approved_leave' | 'holiday'
 export type PaymentType = 'cash' | 'bank_transfer' | 'card' | 'koko' | 'other'
 export type LeaveType = 'annual' | 'casual' | 'sick' | 'other'

@@ -96,8 +96,9 @@ async function handle(req: Request) {
             // 'abandoned' = the assigned worker parked an unresponsive customer.
             // Those steps are deliberately parked, so they must never be
             // penalised or SMS'd — that endless nagging is exactly what the
-            // Abandoned tab exists to stop.
-            .not('status', 'in', '(done,rejected,abandoned)')
+            // Abandoned tab exists to stop. 'refunded' = the order was paid
+            // back, so the work no longer exists to be late for.
+            .not('status', 'in', '(done,rejected,abandoned,refunded)')
             .lt('deadline', now.toISOString())
             .limit(MAX_STEPS_PER_RUN)
 

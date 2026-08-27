@@ -85,7 +85,7 @@ export default function AdminDashboardPage() {
     Promise.all([
       supabase.from('orders').select('id', { count: 'exact', head: true }).eq('status', 'active'),
       supabase.from('customers').select('id', { count: 'exact', head: true }).gte('created_at', today),
-      supabase.from('order_steps').select('id', { count: 'exact', head: true }).eq('is_overdue', true).neq('status', 'done'),
+      supabase.from('order_steps').select('id', { count: 'exact', head: true }).eq('is_overdue', true).not('status', 'in', '(done,refunded)'),
       supabase.from('attendance').select('id', { count: 'exact', head: true }).eq('date', today).not('punch_in', 'is', null).is('punch_out', null),
       supabase.from('commissions').select('amount').eq('month_year', month),
       supabase.from('leave_requests').select('id', { count: 'exact', head: true }).eq('status', 'pending'),

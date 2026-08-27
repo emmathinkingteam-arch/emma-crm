@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
     supabase.from('users').select('id, full_name, role, commission_rates').eq('is_active', true).not('role', 'in', '("admin","ceo")'),
     supabase.from('packages').select('id, name, price'),
     supabase.from('orders')
-      .select('id, created_by, package_id, amount_paid, installment_status, installment_2_amount, is_fake, invoice_number, created_at')
+      .select('id, created_by, package_id, amount_paid, status, installment_status, installment_2_amount, is_fake, invoice_number, created_at')
       .not('created_by', 'is', null)
       .gte('created_at', start)
       .lt('created_at', end),
@@ -60,7 +60,11 @@ export async function GET(req: NextRequest) {
     const rate = rateOf(o.created_by, o.package_id)
 
     let counted = true, reason = ''
-    if (o.is_fake) { counted = false; reason = 'fake' }
+    // Refunded first: the money went back, so there is no discount to top up
+    // — and its installment_status is no longer 'partial', which would
+    // otherwise let the uncollected 2nd installment count as collected.
+    if (o.status === 'refunded' || o.status === 'cancelled') { counted = false; reason = 'refunded' }
+    else if (o.is_fake) { counted = false; reason = 'fake' }
     else if (!o.invoice_number) { counted = false; reason = 'no invoice' }
     else if (isFree) { counted = false; reason = 'free post' }
     else if (isPartial) { counted = false; reason = 'installment pending' }

@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase'
 import { fmtDate, STEP_NAMES, ROLE_LABELS } from '@/lib/utils'
 import {
     ArrowLeft, Loader2, Save, Package, CreditCard, UserCog, Users, AlertTriangle,
+    Undo2,
 } from 'lucide-react'
 
 // ── Step → expected role(s) map ───────────────────────────────
@@ -53,6 +54,11 @@ export default function FixOrderPage() {
     const [createdBy, setCreatedBy] = useState('')
     const [stepAssignments, setStepAssignments] = useState<Record<string, string | null>>({})
 
+    // ── Refund state ─────────────────────────────────────────────
+    const [refundAmount, setRefundAmount] = useState('')
+    const [refundReason, setRefundReason] = useState('')
+    const [refunding, setRefunding] = useState(false)
+
     // ── Load everything ──────────────────────────────────────────
     useEffect(() => {
         if (!id) return
@@ -89,6 +95,8 @@ export default function FixOrderPage() {
                     setPackageId(o.package_id || '')
                     setPaymentType(o.payment_type || '')
                     setAmountPaid(String(o.amount_paid ?? ''))
+                    setRefundAmount(String(o.refund_amount ?? o.amount_paid ?? ''))
+                    setRefundReason(o.refund_reason || '')
                     setPaymentBank(o.payment_bank || '')
                     setCreatedBy(o.created_by || '')
 
@@ -112,6 +120,48 @@ export default function FixOrderPage() {
     }
 
     const workersByRole = (roles: string[]) => workers.filter((w) => roles.includes(w.role))
+
+    // ── Refund ───────────────────────────────────────────────────
+    // Everything the refund touches is server-side (wallet balances and
+    // commission rows are not writable from the browser), so this is a thin
+    // call into /api/orders/refund.
+    const handleRefund = async () => {
+        if (!order) return
+        const amt = Number(refundAmount)
+        if (Number.isNaN(amt) || amt < 0) return alert('Invalid refund amount')
+
+        const ok = confirm(
+            `Refund LKR ${amt.toLocaleString()} to ${order.customer?.name || 'this customer'}?\n\n` +
+            'This stops all outstanding work on the order, takes it out of the order count ' +
+            'and the CRM agent\'s order total, and claws back the commission earned on it.\n\n' +
+            'The invoice, the payment slip and the accounts pages are left untouched — ' +
+            'the money really did come in and really did go back out.'
+        )
+        if (!ok) return
+
+        setRefunding(true)
+        setErr('')
+        try {
+            const res = await fetch('/api/orders/refund', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ orderId: order.id, amount: amt, reason: refundReason || undefined }),
+            })
+            const json = await res.json()
+            if (!res.ok) throw new Error(json.error || 'Refund failed')
+
+            const reversed = (json.commissionsReversed || []).reduce((s: number, c: any) => s + Number(c.amount || 0), 0)
+            alert(
+                `Order refunded.\n\n` +
+                `Work stopped on ${(json.stepsStopped || []).length} open step(s).\n` +
+                `Commission clawed back: LKR ${reversed.toLocaleString()}.`
+            )
+            router.push('/admin/orders')
+        } catch (e: any) {
+            setErr(e.message || 'Refund failed')
+            setRefunding(false)
+        }
+    }
 
     // ── Save ─────────────────────────────────────────────────────
     const handleSave = async () => {
@@ -385,6 +435,66 @@ export default function FixOrderPage() {
                             )
                         })}
                     </div>
+                )}
+            </div>
+
+            {/* ─── Section: Refund ─── */}
+            <div className="bg-white rounded-2xl border border-amber-200 shadow-sm p-5 mb-5">
+                <div className="flex items-center gap-2 mb-1">
+                    <Undo2 size={16} className="text-amber-600" />
+                    <h2 className="text-sm font-bold text-gray-800">Refund</h2>
+                </div>
+
+                {order.status === 'refunded' ? (
+                    <div className="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs text-amber-800">
+                        <p className="font-bold mb-1">
+                            Refunded — LKR {Number(order.refund_amount || 0).toLocaleString()}
+                        </p>
+                        <p className="text-amber-700">
+                            {fmtDate(order.refunded_at)}
+                            {order.refund_reason ? ` — ${order.refund_reason}` : ''}
+                        </p>
+                        <p className="text-[11px] text-amber-600 mt-2">
+                            This order is out of the process, out of the order count and out of the
+                            agent&apos;s wallet. It stays on the books because the money really moved.
+                        </p>
+                    </div>
+                ) : (
+                    <>
+                        <p className="text-[11px] text-gray-400 font-medium mb-4">
+                            Gave the customer their money back? This stops every outstanding step,
+                            removes the order from the order count and the agent&apos;s order total,
+                            and claws back the commission earned on it. The invoice, the payment slip
+                            and the accounts pages are left alone.
+                        </p>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <Field label="Amount refunded (LKR)">
+                                <input
+                                    type="number"
+                                    value={refundAmount}
+                                    onChange={(e) => setRefundAmount(e.target.value)}
+                                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-xs font-medium focus:outline-none focus:border-amber-400"
+                                />
+                            </Field>
+                            <Field label="Reason (optional)">
+                                <input
+                                    type="text"
+                                    value={refundReason}
+                                    onChange={(e) => setRefundReason(e.target.value)}
+                                    placeholder="e.g. VIP 14-day no-response refund"
+                                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-xs font-medium focus:outline-none focus:border-amber-400"
+                                />
+                            </Field>
+                        </div>
+                        <button
+                            onClick={handleRefund}
+                            disabled={refunding || saving}
+                            className="mt-4 px-5 py-2.5 rounded-full bg-amber-600 text-white text-xs font-bold flex items-center gap-2 hover:bg-amber-700 disabled:opacity-50 transition-all active:scale-95"
+                        >
+                            {refunding ? <Loader2 size={14} className="animate-spin" /> : <Undo2 size={14} />}
+                            {refunding ? 'Refunding…' : 'Mark as Refunded'}
+                        </button>
+                    </>
                 )}
             </div>
 

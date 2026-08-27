@@ -12,7 +12,7 @@ export default function AlertsPage() {
   useEffect(() => {
     supabase.from('order_steps')
       .select('*, order:orders(customer:customers(name,phone)), assigned_user:users!assigned_to(full_name)')
-      .eq('is_overdue', true).neq('status', 'done').order('deadline', { ascending: true })
+      .eq('is_overdue', true).not('status', 'in', '(done,refunded)').order('deadline', { ascending: true })
       .then(({ data }) => { if (data) setItems(data) })
   }, [])
 

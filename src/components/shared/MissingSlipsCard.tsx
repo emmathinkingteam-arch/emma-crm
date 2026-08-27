@@ -14,6 +14,7 @@ import { missingSlipSlots } from '@/lib/slips'
 type SlipOrderRow = {
   id: string
   customer_id: string
+  status: string | null
   payment_type: string | null
   step_variant: string | null
   payment_slip_url: string | null
@@ -36,8 +37,11 @@ export default function MissingSlipsCard({ userId }: { userId: string }) {
     if (!userId) return
     supabase
       .from('orders')
-      .select('id,customer_id,payment_type,step_variant,payment_slip_url,installment_status,installment_2_slip_url, customer:customers(name,phone)')
+      .select('id,customer_id,status,payment_type,step_variant,payment_slip_url,installment_status,installment_2_slip_url, customer:customers(name,phone)')
       .eq('created_by', userId)
+      // A refunded or cancelled order is not a sale any more, so there is no
+      // slip left to chase for it.
+      .not('status', 'in', '(refunded,cancelled)')
       .then(({ data }) => {
         if (data) setOrders(data as any)
         setLoaded(true)

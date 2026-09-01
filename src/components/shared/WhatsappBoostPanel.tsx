@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { parseBulkNumbers } from '@/lib/whatsapp'
+import { readJson } from '@/lib/fetch-json'
 
 const COST_PER_NUMBER = 25.28
 
@@ -181,9 +182,9 @@ export default function WhatsappBoostPanel({
             const imgForm = new FormData()
             imgForm.append('file', image)
             const upRes = await fetch('/api/whatsapp/upload-image', { method: 'POST', body: imgForm })
-            const upJson = await upRes.json()
-            if (!upRes.ok) throw new Error('Image upload failed: ' + (upJson.error || upRes.status))
-            const publicUrl: string = upJson.url
+            const upJson = await readJson<{ url?: string }>(upRes, 'Image upload')
+            const publicUrl = upJson.url
+            if (!publicUrl) throw new Error('Image upload returned no URL.')
 
             const { data: { session } } = await supabase.auth.getSession()
             const token = session?.access_token
@@ -201,8 +202,7 @@ export default function WhatsappBoostPanel({
                     numbers: valid,
                 }),
             })
-            const data = await res.json()
-            if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
+            const data = await readJson<{ results?: BroadcastResult[] }>(res, 'WhatsApp send')
 
             const rows = data.results || []
             setResults(rows)

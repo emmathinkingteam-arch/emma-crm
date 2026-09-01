@@ -9,7 +9,7 @@ import {
   CalendarRange, ShieldCheck, Settings, LogOut,
   Bell, DollarSign, Target, Archive, MessageSquare, AlertOctagon,
   Wallet, Megaphone, Eye, Sparkles,
-  UserCircle2, Menu, X, PlusCircle,
+  UserCircle2, Menu, X, PlusCircle, Facebook,
 } from 'lucide-react'
 
 import { supabase } from '@/lib/supabase'
@@ -62,6 +62,7 @@ const SECTIONS: Section[] = [
     title: 'Config',
     items: [
       { href: '/admin/packages', icon: Briefcase, label: 'Packages' },
+      { href: '/admin/facebook', icon: Facebook, label: 'Connect Facebook' },
       { href: '/admin/platinum-photos', icon: Sparkles, label: 'Platinum Photos' },
       { href: '/admin/notifications', icon: MessageSquare, label: 'Notifications' },
       { href: '/admin/settings', icon: Settings, label: 'Settings' },

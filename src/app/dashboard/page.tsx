@@ -438,7 +438,7 @@ export default function DashboardPage() {
         {user?.id && <MissingSlipsCard userId={user.id} />}
 
         {/* Active posts getting too little website interest — Back Office only */}
-        {role === 'back_office' && <LowInterestAlert limit={8} viewAllHref="/dashboard/customers" />}
+        {role === 'back_office' && <LowInterestAlert limit={8} viewAllHref="/dashboard/low-interest" />}
 
         {/* Stats row */}
         <div className="grid grid-cols-2 gap-3">

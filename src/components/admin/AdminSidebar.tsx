@@ -9,7 +9,7 @@ import {
   CalendarRange, ShieldCheck, Settings, LogOut,
   Bell, DollarSign, Target, Archive, MessageSquare, AlertOctagon,
   Wallet, Megaphone, Eye, Sparkles,
-  UserCircle2, Menu, X, PlusCircle, Facebook,
+  UserCircle2, Menu, X, PlusCircle, Facebook, Globe,
 } from 'lucide-react'
 
 import { supabase } from '@/lib/supabase'
@@ -37,6 +37,7 @@ const SECTIONS: Section[] = [
       { href: '/dashboard/legacy-history', icon: Archive, label: 'Legacy History' },
       { href: '/admin/approvals', icon: ShieldCheck, label: 'Approvals', badge: true },
       { href: '/admin/complaints', icon: AlertOctagon, label: 'Complaints', badge: true },
+      { href: '/admin/website-registration', icon: Globe, label: 'Website Registration' },
     ],
   },
   {

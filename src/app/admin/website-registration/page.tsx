@@ -103,7 +103,19 @@ type View = 'pending' | 'completed'
 /** Digits only — what gets pasted into the website's phone field. */
 const bareNumber = (phone: string) => (phone || '').replace(/\D/g, '')
 
-/** The brief split into its paragraph blocks, for one-click removal. */
+/**
+ * The brief split into its paragraph blocks.
+ *
+ * The counsellor writes every brief to the same shape:
+ *
+ *   0  header      "29 | Male / Italy / Roman Catholic"
+ *   1  caption     "Smart Italian Spirit"
+ *   2  long copy   the full paragraph, for the Facebook post
+ *   3  hook        "…Decent Princess කෙනෙක් ඉන්නවද?"   ← what the website wants
+ *
+ * The separator is sometimes a truly blank line and sometimes a line holding a
+ * single space, so the split has to allow whitespace inside the gap.
+ */
 const blocksOf = (text: string) =>
   (text || '').replace(/\r\n?/g, '\n').split(/\n\s*\n+/).map(b => b.trim()).filter(Boolean)
 
@@ -138,6 +150,40 @@ function PhoneChip({ phone }: { phone: string }) {
     >
       {bare}
       {copied ? <CheckCheck size={11} /> : <Copy size={11} className="opacity-50" />}
+    </button>
+  )
+}
+
+// ── Copy button, used per description part ──────────────────────────────────
+
+function CopyChip({
+  text, label, title, tone = 'quiet',
+}: {
+  text: string
+  label?: string
+  title?: string
+  tone?: 'quiet' | 'primary'
+}) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text)
+          setCopied(true)
+          setTimeout(() => setCopied(false), 1400)
+        } catch { /* clipboard blocked — the text is still selectable on screen */ }
+      }}
+      title={title || 'Copy this part'}
+      className={`inline-flex items-center gap-1 flex-shrink-0 px-2 py-1 rounded-lg text-[10px] font-bold transition-all
+        ${copied
+          ? 'bg-green-50 text-green-600'
+          : tone === 'primary'
+            ? 'bg-pink-600 text-white hover:bg-pink-700'
+            : 'text-gray-300 hover:text-pink-600 hover:bg-pink-50'}`}
+    >
+      {copied ? <CheckCheck size={11} /> : <Copy size={11} />}
+      {label && <span>{copied ? 'Copied' : label}</span>}
     </button>
   )
 }
@@ -234,28 +280,54 @@ function DescriptionBlock({
     )
   }
 
-  const lines = current.split('\n')
-  const clipped = !expanded && lines.length > 6
+  // Each part of the brief copies on its own. Copying the whole thing was
+  // never what this desk wants: the header, the caption and the long Facebook
+  // paragraph all stay behind, and only the closing hook — the last block —
+  // goes on the website. So the hook is pulled out as the primary button and
+  // everything above it is collapsed out of the way until asked for.
+  const parts = blocksOf(current)
+  const hook = parts.length ? parts[parts.length - 1] : ''
+  const rest = parts.slice(0, -1)
+
   return (
-    <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
-      <p className={`text-xs text-gray-600 whitespace-pre-wrap leading-relaxed ${clipped ? 'line-clamp-6' : ''}`}>
-        {current}
-      </p>
-      <div className="flex items-center gap-3 mt-2">
-        {lines.length > 6 && (
+    <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 space-y-2">
+      {hook && (
+        <div className="flex items-start justify-between gap-2 rounded-lg bg-white border border-pink-100 px-3 py-2">
+          <div className="min-w-0">
+            <p className="text-[8px] font-bold text-pink-400 uppercase tracking-widest mb-0.5">
+              For the website
+            </p>
+            <p className="text-xs text-gray-700 font-medium whitespace-pre-wrap leading-relaxed">{hook}</p>
+          </div>
+          <CopyChip text={hook} label="Copy" tone="primary" title="Copy just this line" />
+        </div>
+      )}
+
+      {rest.length > 0 && (
+        expanded ? (
+          <div className="space-y-1.5">
+            {rest.map((b, i) => (
+              <div key={i} className="flex items-start justify-between gap-2 px-1">
+                <p className="text-[11px] text-gray-500 whitespace-pre-wrap leading-relaxed">{b}</p>
+                <CopyChip text={b} />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="px-1 text-[11px] text-gray-400 truncate">{rest.join(' · ').replace(/\n/g, ' ')}</p>
+        )
+      )}
+
+      <div className="flex items-center gap-3 pt-0.5">
+        {rest.length > 0 && (
           <button onClick={() => setExpanded(v => !v)} className="text-[10px] font-bold text-gray-400 hover:text-gray-600">
-            {expanded ? 'Show less' : 'Show all'}
+            {expanded ? 'Hide the rest' : `Show the rest (${rest.length})`}
           </button>
         )}
         <button onClick={open} className="inline-flex items-center gap-1 text-[10px] font-bold text-pink-600 hover:text-pink-700">
           <Pencil size={10} /> Edit description
         </button>
-        <button
-          onClick={() => navigator.clipboard.writeText(current).catch(() => { })}
-          className="inline-flex items-center gap-1 text-[10px] font-bold text-gray-400 hover:text-gray-600"
-        >
-          <Copy size={10} /> Copy
-        </button>
+        {rest.length > 0 && <CopyChip text={current} label="Copy all" title="Copy the whole brief" />}
         {row.descriptionOverride !== null && (
           <span className="ml-auto text-[9px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">edited</span>
         )}

@@ -10,7 +10,10 @@
 //      straight into the website form, and the description itself.
 //
 //   2. PAYMENT — pull the customer's paid slip and file it. Needs the package,
-//      the date they bought, and the slip.
+//      the date they bought, and the slip. It also carries a WEBSITE dot: green
+//      once the number exists on emmathinking.com, red while it does not. That
+//      is the same lookup the customer page's "Website Interest Stats" card
+//      does (/api/interest-stats -> found), asked for the whole table at once.
 //
 // Both are "tick it and it goes away" lists, so each has a Pending / Completed
 // switch and the tick is reversible.
@@ -336,6 +339,39 @@ function DescriptionBlock({
   )
 }
 
+// ── Website presence dot ────────────────────────────────────────────────────
+
+/**
+ * Whether the customer already exists on the website, per phone number.
+ *
+ *   true   found on emmathinking.com
+ *   false  not there yet
+ *   undefined  not looked up (yet), or the website DB isn't wired up here
+ */
+type SiteFound = Record<string, boolean>
+
+function WebsiteDot({ state }: { state: boolean | undefined }) {
+  if (state === undefined) {
+    return (
+      <span title="Checking the website…" className="inline-flex items-center gap-1.5">
+        <span className="w-2 h-2 rounded-full bg-gray-200 animate-pulse" />
+        <span className="text-[10px] font-semibold text-gray-300">Checking…</span>
+      </span>
+    )
+  }
+  return state ? (
+    <span title="This number is registered on the website" className="inline-flex items-center gap-1.5">
+      <span className="w-2 h-2 rounded-full bg-green-500" />
+      <span className="text-[10px] font-bold text-green-600">Registered</span>
+    </span>
+  ) : (
+    <span title="No website profile found for this number" className="inline-flex items-center gap-1.5">
+      <span className="w-2 h-2 rounded-full bg-red-500" />
+      <span className="text-[10px] font-bold text-red-500">Not on site</span>
+    </span>
+  )
+}
+
 // ── Page ────────────────────────────────────────────────────────────────────
 
 export default function WebsiteRegistrationPage() {
@@ -347,6 +383,8 @@ export default function WebsiteRegistrationPage() {
   const [search, setSearch] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [downloading, setDownloading] = useState<string | null>(null)
+  // Website presence, keyed by the customer's phone exactly as stored here.
+  const [siteFound, setSiteFound] = useState<SiteFound>({})
 
   useEffect(() => {
     let alive = true
@@ -410,6 +448,38 @@ export default function WebsiteRegistrationPage() {
     })()
     return () => { alive = false }
   }, [])
+
+  const phoneList = useMemo(
+    () => Array.from(new Set(rows.map(r => r.phone).filter(Boolean))),
+    [rows],
+  )
+
+  // ── Who is already on the website? ──
+  // One request for the whole table instead of one per row. Until it answers,
+  // every dot shows "Checking…" rather than guessing red at people who are in
+  // fact registered.
+  useEffect(() => {
+    if (phoneList.length === 0) return
+    const phones = phoneList
+    let alive = true
+    ;(async () => {
+      try {
+        const res = await fetch('/api/website-profile-check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phones }),
+        })
+        const d = await res.json()
+        // `configured: false` means this deployment has no website DB — leave
+        // the dots blank instead of painting everyone red.
+        if (alive && d?.ok && d.configured !== false) setSiteFound(d.found || {})
+      } catch { /* leave the dots in their "checking" state */ }
+    })()
+    return () => { alive = false }
+    // Keyed on the numbers themselves, not on `rows` — ticking a row rebuilds
+    // the array but changes nothing the website needs to be asked about again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phoneList.join(',')])
 
   // One row per order carries both ticks, so every write is an upsert that
   // touches only the columns it means to change.
@@ -607,10 +677,10 @@ export default function WebsiteRegistrationPage() {
 
         /* ── Tab 2 — Website Payment ── */
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-x-auto animate-fade-in">
-          <table className="w-full text-xs min-w-[760px]">
+          <table className="w-full text-xs min-w-[880px]">
             <thead className="bg-gray-50 border-b border-gray-100">
               <tr>
-                {['Customer', 'Number', 'Package', 'Bought on', 'Paid', 'Slip', ''].map(h => (
+                {['Customer', 'Number', 'Website', 'Package', 'Bought on', 'Paid', 'Slip', ''].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -627,6 +697,7 @@ export default function WebsiteRegistrationPage() {
                       </Link>
                     </td>
                     <td className="px-4 py-3"><PhoneChip phone={r.phone} /></td>
+                    <td className="px-4 py-3 whitespace-nowrap"><WebsiteDot state={siteFound[r.phone]} /></td>
                     <td className="px-4 py-3 font-semibold text-gray-600">{r.packageName}</td>
                     <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{fmtDate(r.created_at)}</td>
                     <td className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">

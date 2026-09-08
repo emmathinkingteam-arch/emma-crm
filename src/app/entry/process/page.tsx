@@ -32,16 +32,22 @@ function ProcessContent() {
 
   useEffect(() => {
     if (!phone) { router.replace('/entry'); return }
-    supabase.from('customers').select('*').eq('phone', phone).single()
-      .then(({ data }) => {
-        if (data) {
-          setExistingId(data.id)
-          setCustomerName(data.name || '')
-          setTitle(data.title || '')
-          setIsPriority(data.is_priority)
-          if (data.willing_to_buy_date === todayStr) setWillingToday(true)
+    // Resolved server-side on purpose: RLS hides customers created by another
+    // agent that have no order yet, so a client query here would say "new"
+    // for a number that already exists and the save would then hit the unique
+    // index on customers.phone.
+    fetch(`/api/customer/resolve?phone=${encodeURIComponent(phone)}`)
+      .then(r => r.json())
+      .then((d) => {
+        if (d?.found) {
+          setExistingId(d.id)
+          setCustomerName(d.name || '')
+          setTitle(d.title || '')
+          setIsPriority(Boolean(d.is_priority))
+          if (d.willing_to_buy_date === todayStr) setWillingToday(true)
         }
       })
+      .catch(() => { /* treat as a new number; the save still resolves safely */ })
   }, [phone])
 
   // Quick note helpers
@@ -69,29 +75,30 @@ function ProcessContent() {
     setLoading(true)
 
     try {
-      let customerId = existingId
       const willingDate = willingToday ? todayStr : null
 
-      // ── Critical step: save the customer. If this fails, tell the agent
-      //    exactly why instead of silently doing nothing. ──────────────────
-      if (!customerId) {
-        const { data, error } = await supabase
-          .from('customers')
-          .insert({ phone, name: customerName || null, title: title || null, created_by: user.id, is_priority: isPriority, willing_to_buy_date: willingDate })
-          .select('id').single()
-        if (error) throw error
-        customerId = data?.id
-      } else {
-        const updates: any = {}
-        if (customerName) updates.name = customerName
-        updates.title = title || null
-        updates.is_priority = isPriority
-        updates.willing_to_buy_date = willingDate
-        const { error } = await supabase.from('customers').update(updates).eq('id', customerId)
-        if (error) throw error
+      // ── Critical step: save the customer. Find-or-create runs server-side
+      //    so a number another agent already owns attaches to their row
+      //    instead of colliding with the unique index on customers.phone. ──
+      const res = await fetch('/api/customer/resolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone,
+          name: customerName || null,
+          title: title || null,
+          isPriority,
+          willingToBuyDate: willingDate,
+        }),
+      })
+      const resolved = await res.json()
+      if (!res.ok || !resolved?.id) {
+        throw new Error(resolved?.error || 'Could not save the customer. Please try again.')
       }
-
-      if (!customerId) throw new Error('Could not save the customer. Please try again.')
+      const customerId: string = resolved.id
+      // Another agent's customer with no order yet is invisible to this agent
+      // under RLS — opening it would just show a broken page.
+      const canOpen: boolean = resolved.canView !== false
 
       // ── Non-critical steps: never let these block opening the customer. ──
       // GPS ping for entry history (already swallows its own errors).
@@ -130,7 +137,12 @@ function ProcessContent() {
         if (noteError) console.error('Failed to log interaction note:', noteError)
       }
 
-      router.push(`/dashboard/customers/${customerId}`)
+      if (canOpen) {
+        router.push(`/dashboard/customers/${customerId}`)
+      } else {
+        alert('Entry saved. This number is already handled by another agent, so their customer record stays with them.')
+        router.push('/dashboard')
+      }
     } catch (err: any) {
       console.error('Save & Open Customer failed:', err)
       alert(`Could not save: ${err?.message || 'Something went wrong. Please try again.'}`)

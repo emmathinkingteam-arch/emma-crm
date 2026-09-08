@@ -20,7 +20,22 @@ import QuotationCard from '@/components/shared/QuotationCard'
 import WhatsappBoostPanel from '@/components/shared/WhatsappBoostPanel'
 import { packageTone, PACKAGE_TONE } from '@/lib/package-colors'
 import CrmTagButtons from '@/components/shared/CrmTagButtons'
+import CallButton from '@/components/shared/CallButton'
 import { buildEntryDescription, categoryOf, effectiveTags, CRM_TAG_MAP, type CrmTagKey } from '@/lib/crm-tags'
+
+// One logged call, as the History bar needs it. The row itself lives in the
+// `calls` table; interaction_id is what ties it to a History entry.
+type CallRecord = {
+  id: string
+  interaction_id: string | null
+  direction: 'inbound' | 'outbound'
+  status: string
+  duration_seconds: number | null
+  billing_seconds: number | null
+  disposition: string | null
+  recording_url: string | null
+  started_at: string
+}
 
 // Slot occupancy info for the planner grid — package tier + expiry so each
 // taken cell can be coloured the same way as the FR PLAN calendar.
@@ -93,6 +108,9 @@ export default function CustomerDetailPage() {
 
   const [customer, setCustomer] = useState<Customer | null>(null)
   const [interactions, setInteractions] = useState<Interaction[]>([])
+  // Calls for this customer, keyed by the History entry they belong to, so a
+  // 'call' row can show its duration and a player without a second lookup.
+  const [callsByInteraction, setCallsByInteraction] = useState<Record<string, CallRecord>>({})
   const [packages, setPackages] = useState<Pkg[]>([])
   const [activeOrder, setActiveOrder] = useState<Order | null>(null)
   // All orders (past + active) for this customer. Used to look up
@@ -1290,6 +1308,19 @@ export default function CustomerDetailPage() {
     }
     if (interactionsRes.data) setInteractions(interactionsRes.data as any)
     if (pkgsRes.data) setPackages(pkgsRes.data)
+
+    // Calls ride alongside the History bar. Deliberately not awaited with the
+    // rest: the dialer is optional, and a UCP outage must not stop a customer
+    // page from loading.
+    fetch(`/api/ucp/calls?customerId=${id}`)
+      .then(r => (r.ok ? r.json() : { calls: [] }))
+      .then((d: { calls?: CallRecord[] }) => {
+        const map: Record<string, CallRecord> = {}
+        for (const c of d.calls ?? []) if (c.interaction_id) map[c.interaction_id] = c
+        setCallsByInteraction(map)
+      })
+      .catch(() => { /* dialer not configured — History bar renders as before */ })
+
     setLoading(false)
   }
 
@@ -1498,6 +1529,12 @@ export default function CustomerDetailPage() {
                           <Pencil size={12} />
                         </button>
                       )}
+                      {/* Dials through the softphone dock — stays on this page */}
+                      <CallButton
+                        phone={customer.phone}
+                        customerId={customer.id}
+                        label={customer.name || formatPhoneDisplay(customer.phone)}
+                      />
                       {customer.is_priority && (
                         <span className="text-[8px] font-bold bg-red-500 text-white px-2 py-0.5 rounded-full uppercase tracking-wide flex-shrink-0">Priority</span>
                       )}
@@ -3199,6 +3236,46 @@ export default function CustomerDetailPage() {
                         </div>
                       )}
                       <p className="text-[13px] text-gray-700 font-medium leading-relaxed whitespace-pre-wrap">{cleanDescription}</p>
+
+                      {/* ── Call recording ──────────────────────────────
+                          Present only on 'call' entries that have a stored
+                          recording. The src is the auth-gated /api/media
+                          proxy — the B2 bucket itself stays private, so a
+                          leaked URL is useless without a CRM session. */}
+                      {(() => {
+                        const call = callsByInteraction[interaction.id]
+                        if (!call) return null
+                        const secs = call.billing_seconds ?? call.duration_seconds ?? 0
+                        return (
+                          <div className="mt-2">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full ${call.direction === 'inbound' ? 'bg-sky-50 text-sky-600' : 'bg-indigo-50 text-indigo-600'}`}>
+                                {call.direction === 'inbound' ? '↙ Incoming' : '↗ Outgoing'}
+                              </span>
+                              {secs > 0 && (
+                                <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 tabular-nums">
+                                  {Math.floor(secs / 60)}m {secs % 60}s
+                                </span>
+                              )}
+                              {call.status === 'missed' && (
+                                <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-red-50 text-red-500">No answer</span>
+                              )}
+                              {call.disposition && (
+                                <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600">{call.disposition}</span>
+                              )}
+                            </div>
+                            {call.recording_url && (
+                              <audio
+                                controls
+                                preload="none"
+                                src={call.recording_url}
+                                className="mt-1.5 w-full h-8"
+                              />
+                            )}
+                          </div>
+                        )
+                      })()}
+
                       {(invoiceLink || slipLink) && (
                         <div className="flex flex-wrap gap-1.5 mt-2">
                           {invoiceLink && (

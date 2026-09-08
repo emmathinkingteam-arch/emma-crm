@@ -45,10 +45,12 @@ function headers(): Record<string, string> {
 }
 
 // ── Timestamps ──────────────────────────────────────────────────────────────
-// TRAP: the query params take plain Unix seconds, but timestamps *inside* CDR
-// bodies are Kazoo "Gregorian" seconds — counted from year 0, not 1970. Mixing
-// them up files every call under the year 4000.
+// Two epochs are in play on this platform. Verified against the live Dialog
+// tenant: CDR *bodies* carry plain Unix seconds, but `next_start_key` (and the
+// examples in the vendor docs) use Kazoo "Gregorian" seconds, counted from
+// year 0. Reading a Gregorian value as Unix files the call under the year 4000.
 //   63819076719 - 62167219200 = 1651857519 -> 2022-05-06 17:18:39 UTC  ✓
+// This helper accepts either, so it stays correct if the vendor changes.
 const KAZOO_EPOCH_OFFSET = 62167219200
 
 /** Kazoo Gregorian seconds -> ISO string. Passes through plain Unix seconds. */
@@ -122,6 +124,10 @@ export interface UcpCdr {
     queue_name?: string
     campaign_name?: string
     agent_disposition?: string
+    /** 'Inbound' | 'Outbound' — capitalised on the wire. */
+    direction?: string
+    call_type?: string
+    ringing_seconds?: number | string
 }
 
 interface CdrPage {
@@ -146,7 +152,7 @@ export async function fetchCdrs(
     let startKey = ''
     for (let page = 0; page < maxPages; page++) {
         const qs = new URLSearchParams({
-            starDate: String(startUnix), // sic — the API really does spell it "starDate"
+            startDate: String(startUnix),
             endDate: String(endUnix),
             pageSize: String(pageSize),
         })
@@ -158,6 +164,42 @@ export async function fetchCdrs(
         if (!startKey || rows.length === 0) break
     }
     return out
+}
+
+// ── Queue CDRs ──────────────────────────────────────────────────────────────
+// The plain /reports/cdrs feed cannot tell you WHO answered an inbound call —
+// its callee is the pilot number or an internal context, never the agent's
+// extension. This report can: it carries agent_answered_ext. Note the id field
+// is `callid`, not `call_id` as in the other report.
+export interface UcpQueueCdr {
+    callid?: string
+    queue_name?: string
+    caller_id_number?: string
+    callee_id_number?: string
+    agent_answered_ext?: string
+    agent_answered_name?: string
+    disposition?: string
+    agent_disposition?: string
+    billing_seconds?: number | string
+    media_recording_id?: string
+    timestamp?: number | string
+    abandoned?: boolean
+}
+
+export async function fetchQueueCdrs(
+    startUnix: number,
+    endUnix: number,
+    { pageSize = 200 }: { pageSize?: number } = {},
+): Promise<UcpQueueCdr[]> {
+    const qs = new URLSearchParams({
+        startDate: String(startUnix),
+        endDate: String(endUnix),
+        pageSize: String(pageSize),
+    })
+    const j = await ucpGet<{ data?: UcpQueueCdr[]; cdrs?: UcpQueueCdr[] }>(
+        `/api/v2/reports/queues_cdrs?${qs.toString()}`,
+    )
+    return j.data ?? j.cdrs ?? []
 }
 
 /** Missed / abandoned inbound calls, with the platform's own follow-up flag. */
@@ -174,7 +216,7 @@ export async function fetchMissedCalls(
     { pageSize = 200 }: { pageSize?: number } = {},
 ): Promise<UcpMissedCall[]> {
     const qs = new URLSearchParams({
-        starDate: String(startUnix),
+        startDate: String(startUnix),
         endDate: String(endUnix),
         pageSize: String(pageSize),
     })

@@ -26,6 +26,7 @@ import { supabaseAdmin } from '@/lib/supabase-admin'
 import { uploadFile } from '@/lib/backblaze'
 import {
     fetchCdrs,
+    fetchQueueCdrs,
     fetchRecording,
     kazooToIso,
     normaliseUcpPhone,
@@ -36,12 +37,18 @@ import {
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
+export const maxDuration = 60
 
 // How far back to re-read each run. Generous overlap on purpose: CDRs can land
 // a little after the call ends, and re-reading one is free (we upsert by id).
 const LOOKBACK_MINUTES = 90
-// Recordings are the expensive half — download + re-upload. Keep it small.
-const MAX_RECORDINGS_PER_RUN = 15
+// ?minutes=N widens the window for a one-off backfill of existing history.
+// Capped at 30 days so a stray URL cannot burn the whole CPU budget.
+const MAX_LOOKBACK_MINUTES = 30 * 24 * 60
+// Recordings are the expensive half — download + re-upload, measured at ~6s
+// each against the live tenant. Vercel kills the function at 60s, so cap the
+// batch well inside that; a backlog just drains over the following runs.
+const MAX_RECORDINGS_PER_RUN = 6
 
 function isAuthorized(req: Request): boolean {
     const expected = process.env.CRON_SECRET
@@ -68,8 +75,15 @@ function readParties(cdr: UcpCdr) {
     const callerPhone = normaliseUcpPhone(cdr.caller_id_number)
     const calleePhone = normaliseUcpPhone(cdr.callee_id_number)
     const callerIsExt = !callerPhone
-    // Caller is an extension -> we dialled out. Otherwise it came to us.
-    const direction: 'inbound' | 'outbound' = callerIsExt ? 'outbound' : 'inbound'
+    // Prefer the platform's own answer (it arrives capitalised, e.g. 'Outbound')
+    // and fall back to "which leg is an extension". Checked against 100 live
+    // CDRs: the two agree every time, but the explicit field is authoritative
+    // for calls where neither leg is a plain extension.
+    const stated = String(cdr.direction ?? '').toLowerCase()
+    const direction: 'inbound' | 'outbound' =
+        stated === 'inbound' || stated === 'outbound'
+            ? (stated as 'inbound' | 'outbound')
+            : callerIsExt ? 'outbound' : 'inbound'
     return {
         direction,
         counterpartyPhone: callerIsExt ? calleePhone : callerPhone,
@@ -90,8 +104,12 @@ async function handle(req: Request) {
     }
 
     const sb = supabaseAdmin()
+    const requested = Number(new URL(req.url).searchParams.get('minutes'))
+    const lookback = Number.isFinite(requested) && requested > 0
+        ? Math.min(requested, MAX_LOOKBACK_MINUTES)
+        : LOOKBACK_MINUTES
     const endUnix = Math.floor(Date.now() / 1000)
-    const startUnix = endUnix - LOOKBACK_MINUTES * 60
+    const startUnix = endUnix - lookback * 60
 
     // ── 1. Reconcile CDRs ───────────────────────────────────────────────────
     let cdrs: UcpCdr[] = []
@@ -100,6 +118,19 @@ async function handle(req: Request) {
     } catch (e) {
         console.error('[ucp/sync-cdrs] fetch failed', e)
         return NextResponse.json({ ok: false, reason: 'cdr_fetch_failed' }, { status: 502 })
+    }
+
+    // Who answered each inbound queue call. The plain CDR feed cannot say —
+    // its callee is the pilot number — so this report is the only source.
+    // A failure here is not fatal: we just lose agent attribution.
+    const answeredBy = new Map<string, string>()
+    try {
+        for (const q of await fetchQueueCdrs(startUnix, endUnix)) {
+            const ext = String(q.agent_answered_ext ?? '').replace(/\D/g, '')
+            if (q.callid && ext) answeredBy.set(q.callid, ext)
+        }
+    } catch (e) {
+        console.error('[ucp/sync-cdrs] queue cdrs unavailable', e)
     }
 
     // Extension -> CRM user, resolved once rather than per CDR.
@@ -112,6 +143,9 @@ async function handle(req: Request) {
 
     let updated = 0
     let created = 0
+    // Calls we matched to a customer but could not attribute to an agent, so
+    // they get a calls row but no History entry (created_by is NOT NULL).
+    let unattributed = 0
 
     for (const cdr of cdrs) {
         const callId = cdr.call_id || cdr.id
@@ -153,15 +187,50 @@ async function handle(req: Request) {
 
         const durationSeconds = num(cdr.duration_seconds)
         const billing = num(cdr.billing_seconds)
+        const answered = Boolean(billing && billing > 0)
+        // Outbound: the extension is right there on the CDR. Inbound: only the
+        // queue report knows, so fall back to it.
+        const agentId =
+            agentByExt.get(agentExtension) ??
+            agentByExt.get(answeredBy.get(callId) ?? '') ??
+            null
+
+        // History entry for a call the CRM never saw — an agent dialling from
+        // their desk phone, or an inbound call nobody picked up. Without this
+        // the row exists but never surfaces on the customer's timeline.
+        let interactionId: string | null = null
+        if (cust?.id && !agentId) unattributed++
+        if (cust?.id && agentId) {
+            const label = direction === 'inbound' ? 'Incoming' : 'Outgoing'
+            const secs = billing ?? durationSeconds ?? 0
+            const { data: interaction, error: interactionError } = await sb
+                .from('interactions')
+                .insert({
+                    customer_id: cust.id,
+                    type: 'call',
+                    description: answered
+                        ? `${label} call \u2014 ${Math.floor(secs / 60)}m ${secs % 60}s`
+                        : `${label} call \u2014 no answer`,
+                    created_by: agentId,
+                    created_at: kazooToIso(cdr.timestamp) ?? new Date().toISOString(),
+                })
+                .select('id')
+                .single()
+            if (interactionError) {
+                console.error('[ucp/sync-cdrs] history entry failed', callId, interactionError.message)
+            }
+            interactionId = interaction?.id ?? null
+        }
 
         const { error } = await sb.from('calls').insert({
             ucp_call_id: callId,
             direction,
             // Nobody talked -> it is a missed call, and that is exactly the
             // list worth chasing.
-            status: billing && billing > 0 ? 'completed' : 'missed',
-            user_id: agentByExt.get(agentExtension) ?? null,
+            status: answered ? 'completed' : 'missed',
+            user_id: agentId,
             customer_id: cust?.id ?? null,
+            interaction_id: interactionId,
             counterparty_phone: counterpartyPhone,
             counterparty_name: counterpartyName,
             queue_name: cdr.queue_name ?? null,
@@ -206,10 +275,11 @@ async function handle(req: Request) {
 
     return NextResponse.json({
         ok: true,
-        window: { startUnix, endUnix, lookbackMinutes: LOOKBACK_MINUTES },
+        window: { startUnix, endUnix, lookbackMinutes: lookback },
         cdrs: cdrs.length,
         updated,
         created,
+        unattributed,
         recordingsStored,
         recordingErrors: recordingErrors.slice(0, 5),
         ms: Date.now() - startedAt,

@@ -10,10 +10,13 @@
 //      straight into the website form, and the description itself.
 //
 //   2. PAYMENT — pull the customer's paid slip and file it. Needs the package,
-//      the date they bought, and the slip. It also carries a WEBSITE dot: green
-//      once the number exists on emmathinking.com, red while it does not. That
-//      is the same lookup the customer page's "Website Interest Stats" card
-//      does (/api/interest-stats -> found), asked for the whole table at once.
+//      the date they bought, and the slip.
+//
+// Both lists carry the WEBSITE dot: green once the number exists on
+// emmathinking.com, red while it does not. That is the same lookup the
+// customer page's "Website Interest Stats" card does (/api/interest-stats ->
+// found), asked for the whole page at once. Clicking it opens WhatsApp to
+// that customer, which is the next move either way.
 //
 // Both are "tick it and it goes away" lists, so each has a Pending / Completed
 // switch and the tick is reversible.
@@ -30,12 +33,12 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import {
   Globe, Search, X, Check, Copy, CheckCheck, Undo2, Pencil,
-  Download, RotateCcw, FileWarning, Loader2,
+  Download, RotateCcw, FileWarning, Loader2, MessageCircle,
 } from 'lucide-react'
 
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
-import { fmtDate } from '@/lib/utils'
+import { fmtDate, waDigits } from '@/lib/utils'
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -350,7 +353,13 @@ function DescriptionBlock({
  */
 type SiteFound = Record<string, boolean>
 
-function WebsiteDot({ state }: { state: boolean | undefined }) {
+/**
+ * The dot is also the way you act on it: whichever colour it is, the next
+ * move is a WhatsApp message to that customer — chase the ones who are not on
+ * the site yet, and confirm with the ones who are. So it opens wa.me for the
+ * number rather than being a read-only badge.
+ */
+function WebsiteDot({ state, phone }: { state: boolean | undefined; phone: string }) {
   if (state === undefined) {
     return (
       <span title="Checking the website…" className="inline-flex items-center gap-1.5">
@@ -359,16 +368,23 @@ function WebsiteDot({ state }: { state: boolean | undefined }) {
       </span>
     )
   }
-  return state ? (
-    <span title="This number is registered on the website" className="inline-flex items-center gap-1.5">
-      <span className="w-2 h-2 rounded-full bg-green-500" />
-      <span className="text-[10px] font-bold text-green-600">Registered</span>
-    </span>
-  ) : (
-    <span title="No website profile found for this number" className="inline-flex items-center gap-1.5">
-      <span className="w-2 h-2 rounded-full bg-red-500" />
-      <span className="text-[10px] font-bold text-red-500">Not on site</span>
-    </span>
+
+  const on = state === true
+  return (
+    <a
+      href={`https://wa.me/${waDigits(phone)}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={`${on ? 'This number is registered on the website' : 'No website profile found for this number'} — message them on WhatsApp`}
+      className={`group inline-flex items-center gap-1.5 px-2 py-1 -mx-2 rounded-lg transition-all
+        ${on ? 'hover:bg-green-50' : 'hover:bg-red-50'}`}
+    >
+      <span className={`w-2 h-2 rounded-full ${on ? 'bg-green-500' : 'bg-red-500'}`} />
+      <span className={`text-[10px] font-bold ${on ? 'text-green-600' : 'text-red-500'}`}>
+        {on ? 'Registered' : 'Not on site'}
+      </span>
+      <MessageCircle size={11} className={`opacity-0 group-hover:opacity-100 transition-opacity ${on ? 'text-green-600' : 'text-red-500'}`} />
+    </a>
   )
 }
 
@@ -639,6 +655,7 @@ export default function WebsiteRegistrationPage() {
                   </Link>
                   <div className="flex flex-wrap items-center gap-2 mt-1.5">
                     <PhoneChip phone={r.phone} />
+                    <WebsiteDot state={siteFound[r.phone]} phone={r.phone} />
                     <span className="text-[10px] font-bold text-gray-400">{r.packageName}</span>
                     <span className="text-[10px] text-gray-300">·</span>
                     <span className="text-[10px] text-gray-400">{fmtDate(r.created_at)}</span>
@@ -697,7 +714,7 @@ export default function WebsiteRegistrationPage() {
                       </Link>
                     </td>
                     <td className="px-4 py-3"><PhoneChip phone={r.phone} /></td>
-                    <td className="px-4 py-3 whitespace-nowrap"><WebsiteDot state={siteFound[r.phone]} /></td>
+                    <td className="px-4 py-3 whitespace-nowrap"><WebsiteDot state={siteFound[r.phone]} phone={r.phone} /></td>
                     <td className="px-4 py-3 font-semibold text-gray-600">{r.packageName}</td>
                     <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{fmtDate(r.created_at)}</td>
                     <td className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">

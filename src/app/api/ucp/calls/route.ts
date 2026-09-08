@@ -66,6 +66,10 @@ export async function POST(req: NextRequest) {
     const phone = normaliseUcpPhone(body.phone)
     const nowIso = new Date().toISOString()
 
+    // Extension-to-extension: staff ringing each other. Not a customer call,
+    // so it never becomes a calls row or a History entry.
+    if (!phone) return NextResponse.json({ ok: true, skipped: 'internal' })
+
     // Resolve the customer once: either the caller told us which record they
     // dialled from, or we match on the number.
     async function resolveCustomer(known: string | null): Promise<string | null> {
@@ -102,7 +106,7 @@ export async function POST(req: NextRequest) {
                 user_id: me.id,
                 customer_id: customerId,
                 lead_id: body.leadId ?? null,
-                counterparty_phone: phone || String(body.phone ?? '').trim() || 'unknown',
+                counterparty_phone: phone,
                 counterparty_name: body.callerName ?? null,
                 queue_name: body.queueName ?? null,
                 campaign_name: body.campaignName ?? null,
@@ -117,7 +121,7 @@ export async function POST(req: NextRequest) {
             // 'ringing' is fully handled by the insert; anything else still has
             // work to do (duration, History entry) so fall through with the row.
             if (event === 'ringing') {
-                return NextResponse.json({ ok: true, id: inserted.id, customerId })
+                return NextResponse.json({ ok: true, id: inserted.id, customerId, phone })
             }
             row = inserted
         } else if (error.code === '23505') {
@@ -130,7 +134,7 @@ export async function POST(req: NextRequest) {
             }
             row = raced
             if (event === 'ringing') {
-                return NextResponse.json({ ok: true, id: row.id, customerId: row.customer_id })
+                return NextResponse.json({ ok: true, id: row.id, customerId: row.customer_id, phone })
             }
         } else {
             console.error('[ucp/calls] insert', error)
@@ -138,7 +142,7 @@ export async function POST(req: NextRequest) {
         }
     } else if (event === 'ringing') {
         // A late 'ringing' must never clobber an 'answered' that beat it here.
-        return NextResponse.json({ ok: true, id: row.id, customerId: row.customer_id })
+        return NextResponse.json({ ok: true, id: row.id, customerId: row.customer_id, phone })
     }
 
     const customerId = await resolveCustomer(body.customerId ?? row.customer_id)
@@ -152,7 +156,7 @@ export async function POST(req: NextRequest) {
                 customer_id: customerId,
             })
             .eq('id', row.id)
-        return NextResponse.json({ ok: true, id: row.id, customerId })
+        return NextResponse.json({ ok: true, id: row.id, customerId, phone })
     }
 
     if (event === 'disposition') {
@@ -160,26 +164,34 @@ export async function POST(req: NextRequest) {
             .from('calls')
             .update({ disposition: body.disposition ?? null })
             .eq('id', row.id)
-        return NextResponse.json({ ok: true, id: row.id, customerId })
+        return NextResponse.json({ ok: true, id: row.id, customerId, phone })
     }
 
     // ── hangup ──────────────────────────────────────────────────────────────
     // Talk time is measured from answer, not from dial: 30s of ringing is not
-    // 30s of conversation, and verifying a lead response depends on the
-    // difference.
+    // 30s of conversation, and verifying a lead response depends on that.
+    //
+    // BUT this UCP build does not emit UCP_ANSWERED_CALL for OUTBOUND calls —
+    // confirmed on the live tenant, where answered calls arrived here with no
+    // answered event at all. So a missing answered_at proves nothing, and
+    // calling it "no answer" was simply wrong. When we did not observe an
+    // answer we record the call as 'ended' with an unknown outcome and let the
+    // CDR sync settle it from billing_seconds, which is ground truth.
     const answeredAt = row.answered_at ? new Date(row.answered_at).getTime() : null
-    const duration = answeredAt ? Math.max(0, Math.round((Date.now() - answeredAt) / 1000)) : 0
-    const wasAnswered = Boolean(answeredAt)
+    const observedAnswer = Boolean(answeredAt)
+    const duration = answeredAt ? Math.max(0, Math.round((Date.now() - answeredAt) / 1000)) : null
 
     // One History-bar entry per call, and only once — a duplicate hangup event
     // must not double-log.
     let interactionId = row.interaction_id
     if (!interactionId && customerId) {
         const dirLabel = (body.direction ?? 'outbound') === 'inbound' ? 'Incoming' : 'Outgoing'
-        const description = wasAnswered
-            ? `${dirLabel} call \u2014 ${humanDuration(duration)}` +
+        // No outcome claim unless we actually observed one. The CDR sync
+        // rewrites this line with the real duration a few minutes later.
+        const description = observedAnswer
+            ? `${dirLabel} call \u2014 ${humanDuration(duration ?? 0)}` +
               (body.disposition ? ` \u00b7 ${body.disposition}` : '')
-            : `${dirLabel} call \u2014 no answer`
+            : `${dirLabel} call`
 
         const { data: interaction } = await sb
             .from('interactions')
@@ -197,7 +209,9 @@ export async function POST(req: NextRequest) {
     await sb
         .from('calls')
         .update({
-            status: wasAnswered ? 'completed' : 'missed',
+            // 'ended' = finished, outcome not yet known. sync-cdrs turns this
+            // into 'completed' or 'missed' once the CDR lands.
+            status: observedAnswer ? 'completed' : 'ended',
             ended_at: nowIso,
             duration_seconds: duration,
             customer_id: customerId,
@@ -206,7 +220,7 @@ export async function POST(req: NextRequest) {
         })
         .eq('id', row.id)
 
-    return NextResponse.json({ ok: true, id: row.id, customerId, interactionId })
+    return NextResponse.json({ ok: true, id: row.id, customerId, interactionId, phone })
 }
 
 // ── GET: calls for one customer ─────────────────────────────────────────────

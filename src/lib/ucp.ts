@@ -227,6 +227,23 @@ export async function fetchMissedCalls(
 }
 
 // ── Recordings ──────────────────────────────────────────────────────────────
+/**
+ * The raw upstream response for a recording, so a route can stream it to the
+ * browser without buffering the whole file. `range` is forwarded when present
+ * so the audio scrubber can seek.
+ */
+export async function fetchRecordingResponse(
+    recordingId: string,
+    range?: string | null,
+): Promise<Response> {
+    const h: Record<string, string> = { ...headers() }
+    if (range) h.Range = range
+    return fetch(
+        `${apiBase()}/api/v2/reports/recordings/${encodeURIComponent(recordingId)}`,
+        { headers: h, cache: 'no-store' },
+    )
+}
+
 /** Download one recording as raw bytes. The response is an mp3 blob. */
 export async function fetchRecording(recordingId: string): Promise<Buffer> {
     const res = await fetch(

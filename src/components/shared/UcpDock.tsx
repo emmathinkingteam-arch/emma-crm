@@ -77,7 +77,7 @@ export default function UcpDock() {
         event: 'ringing' | 'answered' | 'hangup' | 'disposition',
         payload: Record<string, unknown>,
         attribution: PlaceCallDetail | null,
-    ): Promise<{ customerId?: string | null } | null> => {
+    ): Promise<{ customerId?: string | null; phone?: string } | null> => {
         try {
             const res = await fetch('/api/ucp/calls', {
                 method: 'POST',
@@ -143,8 +143,11 @@ export default function UcpDock() {
                 const out = await report('ringing', payload, attribution)
                 pendingRef.current = null
 
-                // Screen pop: an unknown caller stays put (no customer to open),
-                // and we never yank the agent off a page mid-outbound-call.
+                // Screen pop on RING, but only for a caller we already know —
+                // the agent gets their history while the phone is still
+                // ringing. An unknown caller waits for the answer (below), so
+                // we do not open a blank entry form for a call nobody takes.
+                // We never yank the agent off a page mid-outbound-call.
                 if (direction === 'inbound' && out?.customerId) {
                     router.push(`/dashboard/customers/${out.customerId}`)
                 }
@@ -153,7 +156,16 @@ export default function UcpDock() {
 
             if (kind === 'answered') {
                 setLive(c => (c && c.callId === callId ? { ...c, state: 'answered', startedAt: Date.now() } : c))
-                await report('answered', payload, attribution)
+                const out = await report('answered', payload, attribution)
+
+                // A stranger just got answered: open the entry form with the
+                // number already filled in, so the agent types what was said
+                // rather than re-typing the number we already know. `phone` is
+                // blank for internal extension-to-extension calls, which are
+                // not customers and must not open a form.
+                if (direction === 'inbound' && !out?.customerId && out?.phone) {
+                    router.push(`/entry/process?phone=${encodeURIComponent(out.phone)}`)
+                }
                 return
             }
 

@@ -61,6 +61,14 @@ function isAuthorized(req: Request): boolean {
     }
 }
 
+function callLine(direction: string, seconds: number | null, answered: boolean): string {
+    const label = direction === 'inbound' ? 'Incoming' : 'Outgoing'
+    if (!answered) return `${label} call \u2014 no answer`
+    const s = seconds ?? 0
+    const spoken = s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60 ? ` ${s % 60}s` : ''}`
+    return `${label} call \u2014 ${spoken}`
+}
+
 const num = (v: unknown): number | null => {
     const n = typeof v === 'string' ? Number(v) : typeof v === 'number' ? v : NaN
     return Number.isFinite(n) ? n : null
@@ -157,6 +165,11 @@ async function handle(req: Request) {
             billing_seconds: num(cdr.billing_seconds),
             hangup_cause: cdr.hangup_cause ?? null,
             recording_id: cdr.media_recording_id || null,
+            // Playable immediately: the route streams from Cybergate on demand,
+            // so nothing has to be copied first.
+            recording_url: cdr.media_recording_id
+                ? `/api/ucp/recording/${cdr.media_recording_id}`
+                : null,
             cdr_synced_at: new Date().toISOString(),
         }
         if (cdr.agent_disposition || cdr.disposition) {
@@ -165,22 +178,74 @@ async function handle(req: Request) {
 
         const { data: existing } = await sb
             .from('calls')
-            .select('id')
+            .select('id, interaction_id, direction, duration_seconds, customer_id, user_id')
             .eq('ucp_call_id', callId)
             .maybeSingle()
 
         if (existing) {
+            // The CDR is ground truth about whether anyone actually spoke.
+            // The browser cannot know this for outbound calls (no answered
+            // event), so every row it wrote lands here as 'ended' and gets
+            // settled now.
+            const billed = num(cdr.billing_seconds)
+            const spoke = Boolean(billed && billed > 0)
+            patch.status = spoke ? 'completed' : 'missed'
+            if (spoke) patch.duration_seconds = billed
+
             await sb.from('calls').update(patch).eq('id', existing.id)
+
+            const line = callLine(
+                existing.direction ?? direction,
+                billed ?? existing.duration_seconds,
+                spoke,
+            )
+
+            if (existing.interaction_id) {
+                // Rewrite the History line, which until now said either nothing
+                // about the outcome or the wrong thing.
+                await sb
+                    .from('interactions')
+                    .update({ description: line })
+                    .eq('id', existing.interaction_id)
+            } else if (existing.customer_id) {
+                // No History entry yet — an inbound call the CRM logged before
+                // it could name an owner, or one written by an older build.
+                // Backfill it now rather than leaving the call invisible.
+                const { data: owner } = await sb
+                    .from('customers')
+                    .select('created_by')
+                    .eq('id', existing.customer_id)
+                    .maybeSingle()
+                const author = existing.user_id ?? owner?.created_by ?? null
+                if (author) {
+                    const { data: made } = await sb
+                        .from('interactions')
+                        .insert({
+                            customer_id: existing.customer_id,
+                            type: 'call',
+                            description: line,
+                            created_by: author,
+                            created_at: kazooToIso(cdr.timestamp) ?? new Date().toISOString(),
+                        })
+                        .select('id')
+                        .single()
+                    if (made?.id) {
+                        await sb.from('calls').update({ interaction_id: made.id }).eq('id', existing.id)
+                    }
+                }
+            }
             updated++
             continue
         }
 
         // Unseen call — the dock was closed, or it never reached an agent.
+        // A blank counterparty means both legs were internal extensions
+        // (staff ringing each other); that is not a customer call.
         if (!counterpartyPhone) continue
 
         const { data: cust } = await sb
             .from('customers')
-            .select('id')
+            .select('id, created_by')
             .eq('phone', counterpartyPhone)
             .limit(1)
             .maybeSingle()
@@ -198,20 +263,22 @@ async function handle(req: Request) {
         // History entry for a call the CRM never saw — an agent dialling from
         // their desk phone, or an inbound call nobody picked up. Without this
         // the row exists but never surfaces on the customer's timeline.
+        // interactions.created_by is NOT NULL, so a History entry needs someone
+        // to hang it on. For an inbound call nobody in the CRM answered, the
+        // customer's own agent is the truthful owner of that conversation.
+        const historyAuthor = agentId ?? cust?.created_by ?? null
+
         let interactionId: string | null = null
-        if (cust?.id && !agentId) unattributed++
-        if (cust?.id && agentId) {
-            const label = direction === 'inbound' ? 'Incoming' : 'Outgoing'
+        if (cust?.id && !historyAuthor) unattributed++
+        if (cust?.id && historyAuthor) {
             const secs = billing ?? durationSeconds ?? 0
             const { data: interaction, error: interactionError } = await sb
                 .from('interactions')
                 .insert({
                     customer_id: cust.id,
                     type: 'call',
-                    description: answered
-                        ? `${label} call \u2014 ${Math.floor(secs / 60)}m ${secs % 60}s`
-                        : `${label} call \u2014 no answer`,
-                    created_by: agentId,
+                    description: callLine(direction, secs, answered),
+                    created_by: historyAuthor,
                     created_at: kazooToIso(cdr.timestamp) ?? new Date().toISOString(),
                 })
                 .select('id')
@@ -243,7 +310,24 @@ async function handle(req: Request) {
         else created++
     }
 
-    // ── 2. Pull recordings into private storage ─────────────────────────────
+    // ── 2. Optional archival copy into private storage ─────────────────────
+    // Off unless UCP_ARCHIVE_RECORDINGS=1. Playback does not need this — the
+    // recording streams from Cybergate — so this exists only for keeping our
+    // own copy if their retention window ever becomes a problem. It is the
+    // expensive half (~6s per file) and Vercel kills the function at 60s.
+    if (process.env.UCP_ARCHIVE_RECORDINGS !== '1') {
+        return NextResponse.json({
+            ok: true,
+            window: { startUnix, endUnix, lookbackMinutes: lookback },
+            cdrs: cdrs.length,
+            updated,
+            created,
+            unattributed,
+            archived: false,
+            ms: Date.now() - startedAt,
+        })
+    }
+
     const { data: pending } = await sb
         .from('calls')
         .select('id, recording_id')
@@ -263,9 +347,12 @@ async function handle(req: Request) {
                 bytes,
                 'audio/mpeg',
             ) // private by default -> served through /api/media to staff only
+            // Deliberately NOT overwriting recording_url: streaming stays the
+            // playback path. This only records that an archive copy exists.
+            void url
             await sb
                 .from('calls')
-                .update({ recording_url: url, recording_synced_at: new Date().toISOString() })
+                .update({ recording_synced_at: new Date().toISOString() })
                 .eq('id', call.id)
             recordingsStored++
         } catch (e) {

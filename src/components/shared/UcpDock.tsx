@@ -21,17 +21,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Phone, X, Minus } from 'lucide-react'
-import { CALL_EVENT, dialDigits, type PlaceCallDetail } from '@/lib/ucp-client'
+import { CALL_EVENT, dialDigits, loadUcpConfig, type PlaceCallDetail, type UcpConfig } from '@/lib/ucp-client'
 import { formatPhoneDisplay } from '@/lib/country-codes'
 
 const IFRAME_ID = 'ucp-iframe'
-
-interface Config {
-    configured: boolean
-    link?: string
-    origin?: string
-    extension?: string | null
-}
 
 interface LiveCall {
     callId: string
@@ -53,7 +46,7 @@ const EVENT_MAP: Record<string, 'ringing' | 'answered' | 'hangup' | 'disposition
 
 export default function UcpDock() {
     const router = useRouter()
-    const [config, setConfig] = useState<Config | null>(null)
+    const [config, setConfig] = useState<UcpConfig | null>(null)
     const [open, setOpen] = useState(false)
     const [live, setLive] = useState<LiveCall | null>(null)
     const [tick, setTick] = useState(0) // drives the on-call timer
@@ -66,8 +59,7 @@ export default function UcpDock() {
     // ── Load the magic link once ────────────────────────────────────────────
     useEffect(() => {
         let cancelled = false
-        fetch('/api/ucp/magic-link')
-            .then(r => r.json())
+        loadUcpConfig()
             .then(d => { if (!cancelled) setConfig(d) })
             .catch(() => { if (!cancelled) setConfig({ configured: false }) })
         return () => { cancelled = true }

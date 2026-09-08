@@ -14,8 +14,9 @@
 // UCP event only carries the number.
 // ============================================================================
 
+import { useEffect, useState } from 'react'
 import { Phone } from 'lucide-react'
-import { placeCall } from '@/lib/ucp-client'
+import { loadUcpConfig, placeCall } from '@/lib/ucp-client'
 
 interface Props {
     phone: string
@@ -36,7 +37,16 @@ export default function CallButton({
     variant = 'icon',
     className = '',
 }: Props) {
-    if (!phone) return null
+    // No dialer configured (no UCP credentials, no simulator) -> no button.
+    // Better to show nothing than a button that silently does nothing.
+    const [enabled, setEnabled] = useState(false)
+    useEffect(() => {
+        let alive = true
+        loadUcpConfig().then(c => { if (alive) setEnabled(Boolean(c.configured)) })
+        return () => { alive = false }
+    }, [])
+
+    if (!phone || !enabled) return null
 
     const dial = (e: React.MouseEvent) => {
         // These buttons sit inside cards and rows that are themselves clickable.

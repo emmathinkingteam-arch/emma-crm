@@ -32,3 +32,26 @@ export function placeCall(detail: PlaceCallDetail): void {
 export function dialDigits(phone: string): string {
     return String(phone || '').replace(/\D/g, '')
 }
+
+// ── Shared config lookup ────────────────────────────────────────────────────
+// Both the dock and every Call button need to know whether a dialer exists.
+// The promise is cached at module level so the answer is fetched ONCE per page
+// load, no matter how many buttons are on screen.
+export interface UcpConfig {
+    configured: boolean
+    link?: string
+    origin?: string
+    extension?: string | null
+    simulated?: boolean
+}
+
+let configPromise: Promise<UcpConfig> | null = null
+
+export function loadUcpConfig(): Promise<UcpConfig> {
+    if (!configPromise) {
+        configPromise = fetch('/api/ucp/magic-link')
+            .then(r => (r.ok ? r.json() : { configured: false }))
+            .catch(() => ({ configured: false }))
+    }
+    return configPromise
+}

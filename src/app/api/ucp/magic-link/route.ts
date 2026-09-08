@@ -7,9 +7,13 @@
 // The UCP API key never leaves the server — the browser only ever receives the
 // short-lived link. A worker with no ucp_email configured gets
 // { configured: false } and the dialer stays hidden for them.
+//
+// DEV: with UCP_SIM=1 this points the dock at the local simulator instead, so
+// the whole chain (dial -> events -> calls row -> History entry -> player) can
+// be exercised before Cybergate issue any credentials. Never set it in prod.
 // ============================================================================
 
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { currentProfile } from '@/lib/api-auth'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { getMagicLink, ucpConfigured, ucpOrigin } from '@/lib/ucp'
@@ -17,9 +21,22 @@ import { getMagicLink, ucpConfigured, ucpOrigin } from '@/lib/ucp'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
     const me = await currentProfile()
     if (!me) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    // ── Simulator ───────────────────────────────────────────────────────────
+    // Same origin as the CRM, so the dock's origin check passes unchanged and
+    // every downstream code path is the real one.
+    if (process.env.UCP_SIM === '1') {
+        return NextResponse.json({
+            configured: true,
+            link: '/dev/ucp-sim',
+            origin: req.nextUrl.origin,
+            extension: 'SIM',
+            simulated: true,
+        })
+    }
 
     if (!ucpConfigured()) {
         return NextResponse.json({ configured: false, reason: 'server' })

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { supportsFolderAccess, getPostsFolder, pickPostsFolder, hasPostsFolder, findDesignFile } from '@/lib/posts-folder'
 import { supabase } from '@/lib/supabase'
+import { readJson } from '@/lib/fetch-json'
 import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
@@ -20,6 +21,7 @@ import QuotationCard from '@/components/shared/QuotationCard'
 import WhatsappBoostPanel from '@/components/shared/WhatsappBoostPanel'
 import { packageTone, PACKAGE_TONE } from '@/lib/package-colors'
 import CrmTagButtons from '@/components/shared/CrmTagButtons'
+import OrderPaymentsPanel from '@/components/shared/OrderPaymentsPanel'
 import CallButton from '@/components/shared/CallButton'
 import { buildEntryDescription, categoryOf, effectiveTags, CRM_TAG_MAP, type CrmTagKey } from '@/lib/crm-tags'
 
@@ -152,7 +154,6 @@ export default function CustomerDetailPage() {
   const [slipUploading, setSlipUploading] = useState(false)
   const [slipUrl, setSlipUrl] = useState('')
   const [invoiceUrl, setInvoiceUrl] = useState('')
-  const [invoice2ndUrl, setInvoice2ndUrl] = useState('')
   const [orderTimer, setOrderTimer] = useState(600)
   const [timerActive, setTimerActive] = useState(false)
 
@@ -168,10 +169,6 @@ export default function CustomerDetailPage() {
   const [installment1Amount, setInstallment1Amount] = useState('')
 
   // 2nd installment payment
-  const [show2ndInstallment, setShow2ndInstallment] = useState(false)
-  const [slip2File, setSlip2File] = useState<File | null>(null)
-  const [slip2Url, setSlip2Url] = useState('')
-  const [slip2Uploading, setSlip2Uploading] = useState(false)
 
   // Extension
   const [showExtend, setShowExtend] = useState(false)
@@ -297,7 +294,7 @@ export default function CustomerDetailPage() {
   // Open order modal — reset all form fields and pre-fill customer name
   const openOrderTab = () => {
     setShowOrderForm(true); setTimerActive(true); setOrderTimer(600)
-    setSlipFile(null); setSlipUrl(''); setInvoiceUrl(''); setInvoice2ndUrl('')
+    setSlipFile(null); setSlipUrl(''); setInvoiceUrl('')
     setDiscount(0); setCustomDiscount(''); setKokoId(''); setBankName('')
     setSelectedPkg(''); setAmountPaid(''); setSelectedAssignee('')
     setInstallmentType('full'); setInstallment1Amount('')
@@ -376,28 +373,6 @@ export default function CustomerDetailPage() {
     } catch (e: any) {
       alert('Payment slip upload error: ' + (e?.message || 'unknown') + '\n\nThe slip was NOT saved.')
       setSlipUploading(false)
-      return ''
-    }
-  }
-
-  const handleSlip2Upload = async (file: File): Promise<string> => {
-    setSlip2Uploading(true)
-    try {
-      const fd = new FormData()
-      fd.append('file', file)
-      const res = await fetch('/api/slip/upload', { method: 'POST', body: fd })
-      const j = await res.json().catch(() => ({}))
-      if (!res.ok || !j?.url) {
-        alert('2nd slip upload FAILED: ' + (j?.error || 'unknown') + '\n\nThe slip was NOT saved.')
-        setSlip2Uploading(false)
-        return ''
-      }
-      setSlip2Url(j.url)
-      setSlip2Uploading(false)
-      return j.url
-    } catch (e: any) {
-      alert('2nd slip upload error: ' + (e?.message || 'unknown') + '\n\nThe slip was NOT saved.')
-      setSlip2Uploading(false)
       return ''
     }
   }
@@ -807,63 +782,6 @@ export default function CustomerDetailPage() {
     await fetchAll()
   }
 
-  // ── Pay 2nd installment ────────────────────────────────────
-  const handlePay2ndInstallment = async () => {
-    if (!activeOrder || !user) return
-    setActionLoading(true)
-
-    let uploadedSlip2Url = slip2Url
-    if (slip2File && !slip2Url) {
-      uploadedSlip2Url = await handleSlip2Upload(slip2File)
-    }
-
-    await supabase.from('orders').update({
-      installment_status: 'complete',
-      installment_2_slip_url: uploadedSlip2Url || null,
-      installment_2_paid_at: new Date().toISOString(),
-    }).eq('id', activeOrder.id)
-
-    const amt = (activeOrder as any).installment_2_amount
-    await logAction(
-      `2nd installment paid — LKR ${amt ? Number(amt).toLocaleString() : '?'}${uploadedSlip2Url ? ` | Slip: ${uploadedSlip2Url}` : ''}`
-    )
-
-    // Auto-generate 2nd installment invoice
-    try {
-      const inst1 = Number((activeOrder as any).installment_1_amount || 0)
-      const inst2 = Number(amt || 0)
-      const invRes = await fetch('/api/generate-invoice', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          orderId: activeOrder.id,
-          clientName: customer?.name || customer?.phone,
-          clientNumber: customer?.phone,
-          paymentMethod: activeOrder.payment_type === 'bank_transfer' ? 'Bank Transfer'
-            : activeOrder.payment_type === 'koko' ? 'KOKO' : 'Genie',
-          bankName: (activeOrder as any).payment_bank || undefined,
-          packageName: (activeOrder as any).package?.name || '',
-          finalAmount: inst2,
-          discountPercent: 0,
-          installmentType: '2nd',
-          packageTotal: inst1 + inst2,
-          otherInstallmentAmount: inst1,
-        })
-      })
-      if (invRes.ok) {
-        const invData = await invRes.json()
-        if (invData.invoiceUrl) {
-          setInvoice2ndUrl(invData.invoiceUrl)
-          await logAction(`2nd installment invoice generated | Invoice: ${invData.invoiceUrl}`)
-        }
-      }
-    } catch (_) { /* silent */ }
-
-    setShow2ndInstallment(false); setSlip2File(null); setSlip2Url('')
-    await fetchAll()
-    setActionLoading(false)
-  }
-
   // ── Create Order ───────────────────────────────────────────
   const handleCreateOrder = async () => {
     if (!selectedPkg || !amountPaid || !user || !customer) return
@@ -908,6 +826,9 @@ export default function CustomerDetailPage() {
       installment_status: installment ? 'partial' : 'complete',
       installment_1_amount: installment ? inst1Num : null,
       installment_2_amount: installment ? inst2Num : null,
+      // What the customer agreed to pay, AFTER discount. This is what makes a
+      // later shortfall readable as "still owes" rather than "we discounted".
+      agreed_total: installment ? (inst1Num + inst2Num) : actualPaidNum,
     }).select().single()
 
     if (orderErr || !order) {
@@ -915,6 +836,26 @@ export default function CustomerDetailPage() {
       alert('Order failed: ' + (orderErr?.message || 'unknown error'))
       setActionLoading(false)
       return
+    }
+
+    // Payment 1 as a row. The monthly team + leaderboard totals are summed from
+    // order_payments, so a sale with no payment row would count as zero — this
+    // insert is what puts the money on the board.
+    const { error: payErr } = await supabase.from('order_payments').insert({
+      order_id: order.id,
+      seq: 1,
+      amount: actualPaidNum,
+      paid_at: new Date().toISOString(),
+      payment_type: paymentType,
+      payment_bank: paymentType === 'bank_transfer' ? (bankName || null) : null,
+      slip_url: uploadedSlipUrl || null,
+      created_by: user.id,
+    })
+    if (payErr) {
+      alert(
+        'The order was created but the PAYMENT did not save: ' + payErr.message +
+        '\n\nThis order will show LKR 0 in the monthly totals until it is fixed. Please tell admin.'
+      )
     }
 
     const stepDeadline = makeDeadline(3)
@@ -1078,6 +1019,7 @@ export default function CustomerDetailPage() {
       created_by: user.id,
       agent_name: null,
       installment_status: 'complete',
+      agreed_total: 0,          // a free post owes nothing, so nothing is "due"
     }).select().single()
 
     if (orderErr || !order) {
@@ -1120,45 +1062,6 @@ export default function CustomerDetailPage() {
 
     setShowOrderForm(false); setTimerActive(false); setSelectedAssignee('')
     await fetchAll()
-    setActionLoading(false)
-  }
-
-  // ── Generate 2nd installment invoice (called from 2nd-payment panel) ──
-  const handleGenerate2ndInvoice = async () => {
-    if (!activeOrder || !customer) return
-    setActionLoading(true)
-    const inst1 = Number((activeOrder as any).installment_1_amount || 0)
-    const inst2 = Number((activeOrder as any).installment_2_amount || 0)
-    const pkgTotal = inst1 + inst2
-
-    try {
-      const invRes = await fetch('/api/generate-invoice', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          orderId: activeOrder.id,
-          clientName: customer.name || customer.phone,
-          clientNumber: customer.phone,
-          paymentMethod: activeOrder.payment_type === 'bank_transfer' ? 'Bank Transfer'
-            : activeOrder.payment_type === 'koko' ? 'KOKO' : 'Genie',
-          bankName: (activeOrder as any).payment_bank || undefined,
-          packageName: (activeOrder as any).package?.name || '',
-          finalAmount: inst2,
-          discountPercent: 0,
-          installmentType: '2nd',
-          packageTotal: pkgTotal,
-          otherInstallmentAmount: inst1,
-        })
-      })
-      if (invRes.ok) {
-        const invData = await invRes.json()
-        if (invData.invoiceUrl) {
-          setInvoice2ndUrl(invData.invoiceUrl)
-          await logAction(`2nd installment invoice generated | Invoice: ${invData.invoiceUrl}`)
-          await fetchAll()
-        }
-      }
-    } catch (_) { /* silent */ }
     setActionLoading(false)
   }
 
@@ -1608,97 +1511,27 @@ export default function CustomerDetailPage() {
             </div>
           )}
 
-          {/* ── 2ND INSTALLMENT PAYMENT PANEL ─────────────── */}
-          {isInstallmentPending && (role === 'back_office' || role === 'admin' || isCrmWorker) && (
-            <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl overflow-hidden shadow-sm">
-              <div className="px-4 py-3 bg-amber-500 flex items-center gap-2.5">
-                <CreditCard size={18} className="text-white" />
-                <div className="flex-1">
-                  <p className="text-sm font-extrabold text-white uppercase tracking-wide">2nd Installment Pending</p>
-                  <p className="text-[10px] text-amber-50 font-medium">
-                    Balance due: LKR {Number((activeOrder as any)?.installment_2_amount || 0).toLocaleString()}
-                  </p>
-                </div>
-              </div>
-              {!show2ndInstallment ? (
-                <div className="p-4">
-                  <div className="flex justify-between text-xs font-medium text-gray-600 mb-3">
-                    <span>1st installment paid:</span>
-                    <span className="font-bold">LKR {Number((activeOrder as any)?.installment_1_amount || 0).toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between text-sm font-bold text-amber-700 pb-3 border-b border-amber-200 mb-3">
-                    <span>Remaining (2nd):</span>
-                    <span>LKR {Number((activeOrder as any)?.installment_2_amount || 0).toLocaleString()}</span>
-                  </div>
-                  <button onClick={() => setShow2ndInstallment(true)}
-                    className="w-full bg-amber-500 text-white rounded-xl py-3.5 text-sm font-extrabold shadow-md shadow-amber-200">
-                    Mark 2nd Installment as Paid
-                  </button>
-                </div>
-              ) : (
-                <div className="p-4 space-y-3">
-                  {/* Slip upload */}
-                  {slip2Url ? (
-                    <div className="flex items-center gap-2 bg-green-50 border border-green-100 rounded-xl px-3 py-2.5">
-                      <CheckCircle size={14} className="text-green-500 flex-shrink-0" />
-                      <p className="text-xs font-semibold text-green-700 flex-1 truncate">Slip uploaded</p>
-                      <button onClick={() => { setSlip2File(null); setSlip2Url('') }} className="text-[9px] text-red-400 font-bold">Remove</button>
-                    </div>
-                  ) : (
-                    <label className="flex items-center gap-3 bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl px-4 py-3 cursor-pointer hover:border-amber-300 transition-all">
-                      {slip2Uploading ? <Loader2 size={16} className="animate-spin text-amber-400" /> : <Upload size={16} className="text-gray-400" />}
-                      <div>
-                        <p className="text-xs font-semibold text-gray-500">
-                          {slip2File ? slip2File.name : 'Upload 2nd payment slip'}
-                        </p>
-                        <p className="text-[9px] text-gray-400">PNG, JPG or PDF</p>
-                      </div>
-                      <input type="file" accept="image/*,.pdf" className="hidden"
-                        onChange={e => { const f = e.target.files?.[0]; if (f) { setSlip2File(f); setSlip2Url('') } }} />
-                    </label>
-                  )}
-                  <div className="flex gap-2">
-                    <button onClick={() => { setShow2ndInstallment(false); setSlip2File(null); setSlip2Url('') }}
-                      className="flex-1 border border-gray-200 text-gray-400 rounded-xl py-2.5 text-xs font-semibold">
-                      Cancel
-                    </button>
-                    <button onClick={handlePay2ndInstallment}
-                      disabled={actionLoading}
-                      className="flex-1 bg-amber-500 text-white rounded-xl py-2.5 text-xs font-bold disabled:opacity-40">
-                      {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Confirm Payment ✓'}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
+          {/* ── PAYMENTS ─────────────────────────────────────
+              Replaces the old "2nd Installment Pending" + "Installment
+              Complete" pair. Those only appeared on orders flagged as an
+              installment at creation, and could hold exactly one further
+              payment; money collected on any other order had nowhere to go.
+              This panel is on every order and takes any number of payments. */}
+          {activeOrder && (isCrmWorker || role === 'back_office' || role === 'admin' || role === 'manager') && (
+            <OrderPaymentsPanel
+              orderId={activeOrder.id}
+              packagePrice={Number((activeOrder as any)?.package?.price || 0)}
+              packageName={(activeOrder as any)?.package?.name || ''}
+              agreedTotal={(activeOrder as any)?.agreed_total ?? null}
+              customerName={customer?.name || ''}
+              customerPhone={customer?.phone || ''}
+              canEdit={isCrmWorker || role === 'back_office' || role === 'admin'}
+              readOnly={activeOrder.status === 'refunded' || activeOrder.status === 'cancelled'}
+              userId={user!.id}
+              onLog={logAction}
+              onChanged={fetchAll}
+            />
           )}
-
-          {/* ── 2ND INSTALLMENT INVOICE (after 2nd payment confirmed) ─── */}
-          {!isInstallmentPending && activeOrder && (activeOrder as any)?.installment_1_amount && (activeOrder as any)?.installment_2_amount && (isCrmWorker || role === 'back_office' || role === 'admin') && (
-            <div className="bg-green-50 border-2 border-green-200 rounded-2xl p-4 space-y-3">
-              <div className="flex items-center gap-2">
-                <CheckCircle size={16} className="text-green-600" />
-                <p className="text-sm font-extrabold text-green-700 uppercase tracking-wide">Installment Complete</p>
-              </div>
-              <div className="grid grid-cols-2 gap-2 text-[10px]">
-                <div className="bg-white rounded-lg px-2.5 py-2">
-                  <p className="text-gray-400 font-semibold">1st Installment</p>
-                  <p className="text-gray-800 font-bold">LKR {Number((activeOrder as any).installment_1_amount).toLocaleString()}</p>
-                </div>
-                <div className="bg-white rounded-lg px-2.5 py-2">
-                  <p className="text-gray-400 font-semibold">2nd Installment</p>
-                  <p className="text-gray-800 font-bold">LKR {Number((activeOrder as any).installment_2_amount).toLocaleString()}</p>
-                </div>
-              </div>
-              {(activeOrder as any).installment_2_slip_url && (
-                <a href={(activeOrder as any).installment_2_slip_url} target="_blank" rel="noreferrer"
-                  className="w-full flex items-center justify-center gap-2 bg-white border border-green-200 text-green-700 rounded-xl py-2.5 text-xs font-bold">
-                  <ExternalLink size={13} /> View 2nd installment slip
-                </a>
-              )}
-            </div>
-          )}
-
           {/* ── PAUSED (ABANDONED) PANEL ──────────────────────
               Replaces the step panel while the customer is parked. The whole
               process is frozen: no deadline running, no penalties, no overdue
@@ -3156,7 +2989,7 @@ export default function CustomerDetailPage() {
                 const invoiceLinkMatch = interaction.description.match(/Invoice: (https?:\/\/\S+)/)
                 const invoiceLink = invoiceLinkMatch ? invoiceLinkMatch[1] : null
                 // Extract slip URL the same way as invoice. Set by
-                // handleCreateOrder / handlePay2ndInstallment for new orders.
+                // handleCreateOrder / OrderPaymentsPanel for new orders.
                 const slipLinkMatch = interaction.description.match(/Slip: (https?:\/\/\S+)/)
                 let slipLink: string | null = slipLinkMatch ? slipLinkMatch[1] : null
 
@@ -3914,10 +3747,9 @@ function PostBuilderModal({ postCode, onClose, role, initialDesc = '', initialDe
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderId, text: buildPart1(), scheduledTime: plannedDate || undefined }),
       })
-      const j = await res.json()
-      if (!res.ok) throw new Error(j.error || 'Publish failed')
+      const j = await readJson<{ scheduled?: boolean; scheduledTime?: string | null }>(res, 'Facebook publish')
       setFbDone(true)
-      setFbMsg(j.scheduled
+      setFbMsg(j.scheduled && j.scheduledTime
         ? `✓ Scheduled on Facebook for ${new Date(j.scheduledTime).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
         : '✓ Published to Facebook now')
     } catch (e: any) {

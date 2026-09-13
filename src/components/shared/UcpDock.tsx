@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Phone, X, Minus } from 'lucide-react'
-import { CALL_EVENT, dialDigits, loadUcpConfig, type PlaceCallDetail, type UcpConfig } from '@/lib/ucp-client'
+import { CALL_EVENT, dialDigits, loadUcpConfig, setCallLive, type PlaceCallDetail, type UcpConfig } from '@/lib/ucp-client'
 import { formatPhoneDisplay } from '@/lib/country-codes'
 
 const IFRAME_ID = 'ucp-iframe'
@@ -64,6 +64,12 @@ export default function UcpDock() {
             .catch(() => { if (!cancelled) setConfig({ configured: false }) })
         return () => { cancelled = true }
     }, [])
+
+    // Publish call state so the callback runner can hold off while a
+    // conversation is in progress.
+    useEffect(() => {
+        setCallLive(Boolean(live))
+    }, [live])
 
     // Re-render once a second only while a call is actually up.
     useEffect(() => {

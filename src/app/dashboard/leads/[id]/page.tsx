@@ -17,6 +17,7 @@ import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import { formatPhoneDisplay } from '@/lib/country-codes'
+import CallButton from '@/components/shared/CallButton'
 import { leadCountdown, type Lead } from '@/lib/leads'
 import CrmTagButtons from '@/components/shared/CrmTagButtons'
 import { type CrmTagKey } from '@/lib/crm-tags'
@@ -176,6 +177,7 @@ export default function LeadResponsePage() {
                         </div>
                         <p className="text-xl font-bold text-gray-800 mt-1 flex items-center gap-2">
                             <Phone size={16} className="text-pink-500" /> {display}
+                            <CallButton phone={lead.phone} label={display} />
                         </p>
                         <a
                             href={`https://wa.me/${lead.phone}`}

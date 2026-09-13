@@ -9,6 +9,11 @@ import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import CrmTagButtons from '@/components/shared/CrmTagButtons'
 import { buildEntryDescription, categoryOf, type CrmTagKey } from '@/lib/crm-tags'
+import {
+  DELAY_PRESETS, MAX_DELAY_HOURS, callbackReason, describeDelay,
+  isDialablePhone, tagSchedulesCallback,
+} from '@/lib/callbacks'
+import CallButton from '@/components/shared/CallButton'
 import { recordPing } from '@/lib/location'
 
 function ProcessContent() {
@@ -24,11 +29,16 @@ function ProcessContent() {
   const [existingId, setExistingId] = useState<string | null>(null)
   const [isPriority, setIsPriority] = useState(false)
   const [tags, setTags] = useState<CrmTagKey[]>([])
+  // Auto call-back: how long until we ring this number again. null = don't.
+  const [callbackHours, setCallbackHours] = useState<number | null>(null)
+  const [customHours, setCustomHours] = useState('')
   const [reason, setReason] = useState('')
   const [buyDate, setBuyDate] = useState('')
   const [showBuyDate, setShowBuyDate] = useState(false)
   const [willingToday, setWillingToday] = useState(false)
   const todayStr = new Date().toISOString().split('T')[0]
+  // Only Sri Lankan numbers can be auto-dialled.
+  const dialable = isDialablePhone(phone)
 
   useEffect(() => {
     if (!phone) { router.replace('/entry'); return }
@@ -126,15 +136,39 @@ function ProcessContent() {
 
       // Log the note as an interaction. If this hiccups, we still navigate —
       // the customer is saved, which is what matters.
+      let loggedInteractionId: string | null = null
       if (notes.trim() || tags.length > 0) {
-        const { error: noteError } = await supabase.from('interactions').insert({
+        const { data: noteRow, error: noteError } = await supabase.from('interactions').insert({
           customer_id: customerId,
           type: interactionType,
           description: buildEntryDescription(tags, notes, reason),
           created_by: user.id,
           tags,
-        })
+        }).select('id').single()
         if (noteError) console.error('Failed to log interaction note:', noteError)
+        loggedInteractionId = noteRow?.id ?? null
+      }
+
+      // Turn "call back later" into something the system will actually chase.
+      // Non-critical: a failure here must never cost the agent their entry.
+      if (callbackHours !== null && tagSchedulesCallback(tags) && dialable) {
+        try {
+          await fetch('/api/callbacks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              customerId,
+              interactionId: loggedInteractionId,
+              phone,
+              customerName: customerName || null,
+              reason: callbackReason(tags),
+              note: notes.trim() || null,
+              hours: callbackHours,
+            }),
+          })
+        } catch (e) {
+          console.error('Could not schedule the call back:', e)
+        }
       }
 
       if (canOpen) {
@@ -162,7 +196,10 @@ function ProcessContent() {
 
           <div className="bg-pink-50 border border-pink-100 rounded-2xl p-4 mb-6">
             <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1">Phone number</p>
-            <p className="text-base font-bold text-gray-800">+{phone}</p>
+            <div className="flex items-center gap-2">
+              <p className="text-base font-bold text-gray-800">+{phone}</p>
+              <CallButton phone={phone} customerId={existingId ?? undefined} label={customerName || `+${phone}`} />
+            </div>
             {existingId && <p className="text-[9px] text-pink-600 font-semibold mt-1 uppercase tracking-wide">Existing customer</p>}
           </div>
 
@@ -211,8 +248,97 @@ function ProcessContent() {
             {/* What did you discuss? — quick status tags (multi-select) */}
             <div>
               <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">What did you discuss? (tap all that apply)</label>
-              <CrmTagButtons selected={tags} onChange={setTags} reason={reason} onReasonChange={setReason} />
+              <CrmTagButtons
+                selected={tags}
+                onChange={(next) => {
+                  setTags(next)
+                  // Picking a "later" tag pre-arms a 1-hour call-back; dropping
+                  // it disarms. The agent can still change or clear it below.
+                  if (tagSchedulesCallback(next)) {
+                    setCallbackHours(h => (h === null ? 1 : h))
+                  } else {
+                    setCallbackHours(null)
+                  }
+                }}
+                reason={reason}
+                onReasonChange={setReason}
+              />
             </div>
+
+            {/* ── Auto call-back ──────────────────────────────────────────
+                Shown only once a tag promises a later call. The dialer can
+                only reach +94 numbers, so for anything else we say why
+                instead of offering a control that would never fire. */}
+            {tagSchedulesCallback(tags) && (
+              <div className={`rounded-2xl border p-3 ${dialable ? 'bg-purple-50 border-purple-200' : 'bg-gray-50 border-gray-200'}`}>
+                {dialable ? (
+                  <>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-[10px] font-bold text-purple-700 uppercase tracking-wide">
+                        Ring this number again
+                      </label>
+                      {callbackHours !== null && (
+                        <span className="text-[10px] font-bold text-purple-600">
+                          {describeDelay(callbackHours)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {DELAY_PRESETS.map(p => (
+                        <button
+                          key={p.label}
+                          type="button"
+                          onClick={() => { setCallbackHours(p.hours); setCustomHours('') }}
+                          className={`px-3 py-2 rounded-xl text-[10px] font-bold transition-all ${
+                            callbackHours === p.hours && !customHours
+                              ? 'bg-purple-600 text-white'
+                              : 'bg-white text-purple-600 border border-purple-200'
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                      <div className="flex items-center bg-white border border-purple-200 rounded-xl overflow-hidden">
+                        <input
+                          type="number"
+                          min={0.25}
+                          max={MAX_DELAY_HOURS}
+                          step={0.25}
+                          value={customHours}
+                          onChange={e => {
+                            const v = e.target.value
+                            setCustomHours(v)
+                            const n = parseFloat(v)
+                            setCallbackHours(Number.isFinite(n) && n > 0 ? n : null)
+                          }}
+                          placeholder="hrs"
+                          className="w-14 bg-transparent px-2 py-2 text-[10px] font-bold text-purple-700 outline-none"
+                        />
+                        <span className="text-[10px] font-bold text-purple-300 pr-2">h</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => { setCallbackHours(null); setCustomHours('') }}
+                        className={`px-3 py-2 rounded-xl text-[10px] font-bold ${
+                          callbackHours === null ? 'bg-gray-600 text-white' : 'bg-white text-gray-400 border border-gray-200'
+                        }`}
+                      >
+                        Don't ring
+                      </button>
+                    </div>
+                    <p className="text-[9px] text-purple-400 font-medium mt-2 leading-relaxed">
+                      Your softphone dials you in first, then rings the customer. If you're
+                      not in the CRM when it's due, it rings as soon as you're back.
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-[10px] text-gray-500 font-medium leading-relaxed">
+                    Auto call-back works for Sri Lankan (+94) numbers only — this one
+                    will need a manual call back.
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Notes with quick buttons */}
             <div>

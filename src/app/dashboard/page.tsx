@@ -12,6 +12,7 @@ import CrmLeaderboard from '@/components/shared/CrmLeaderboard'
 import MissingSlipsCard from '@/components/shared/MissingSlipsCard'
 import LowInterestAlert from '@/components/shared/LowInterestAlert'
 import CountUp from '@/components/shared/CountUp'
+import CallButton from '@/components/shared/CallButton'
 import Link from 'next/link'
 import { type Lead, leadCountdown, leadPenaltySoFar } from '@/lib/leads'
 
@@ -570,6 +571,7 @@ export default function DashboardPage() {
                         <span className={`text-[8px] font-bold px-2 py-1 rounded-full flex items-center gap-1 ${cd.overdue ? 'bg-red-100 text-red-600' : 'bg-pink-100 text-pink-600'}`}>
                           <Clock size={8} /> {cd.overdue ? 'overdue' : 'call now'}
                         </span>
+                        <CallButton phone={lead.phone} label={lead.phone_display || lead.phone} />
                         <ChevronRight size={14} className="text-pink-300" />
                       </div>
                     </div>
@@ -611,6 +613,7 @@ export default function DashboardPage() {
                       <span className="text-[8px] font-bold px-2 py-1 rounded-full flex items-center gap-1 bg-purple-100 text-purple-600">
                         <PhoneCall size={8} /> call again
                       </span>
+                      <CallButton phone={lead.phone} label={lead.phone_display || lead.phone} />
                       <ChevronRight size={14} className="text-purple-300" />
                     </div>
                   </div>

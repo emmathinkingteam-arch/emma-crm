@@ -55,3 +55,25 @@ export function loadUcpConfig(): Promise<UcpConfig> {
     }
     return configPromise
 }
+
+// ── Dialer state, shared between the dock and anything that wants to dial ───
+// Module-level rather than context: the dock lives in the layout and the
+// callers are scattered across pages, and this avoids threading a provider
+// through every one of them.
+
+/** Is the softphone actually loaded and able to take a MAKE_CALL? */
+export function dialerReady(): boolean {
+    return typeof document !== 'undefined' && Boolean(document.getElementById('ucp-iframe'))
+}
+
+let liveCall = false
+
+/** Called by the dock as calls start and end. */
+export function setCallLive(v: boolean): void {
+    liveCall = v
+}
+
+/** True while a call is up — never dial a callback over a conversation. */
+export function isCallLive(): boolean {
+    return liveCall
+}

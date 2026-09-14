@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { Customer, Order, OrderStep, Interaction, Package as Pkg, MONTH_CODES, getSlotLabel, slotInstantISO } from '@/types'
 import { fmtDate, fmtTime, buildWaLink, openWaLink, WA, KOKO_SERVICE_CHARGE_RATE, getCounselorAvailability, normalisePhone } from '@/lib/utils'
+import { canTakeDuty } from '@/lib/roles'
 import { formatPhoneDisplay, detectCountryFromPaste } from '@/lib/country-codes'
 import InterestStatsCard from '@/components/shared/InterestStatsCard'
 import QuotationCard from '@/components/shared/QuotationCard'
@@ -1677,7 +1678,7 @@ export default function CustomerDetailPage() {
                         <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
                           className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
                           <option value="">Select counselor...</option>
-                          {workers.filter(w => w.role === 'counselor').map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
+                          {workers.filter(w => canTakeDuty(w.role, 'counselor')).map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
                         </select>
                       </div>
                       <button onClick={() => {
@@ -1762,7 +1763,7 @@ export default function CustomerDetailPage() {
                         <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
                           className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
                           <option value="">Select counselor...</option>
-                          {workers.filter(w => w.role === 'counselor').map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
+                          {workers.filter(w => canTakeDuty(w.role, 'counselor')).map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
                         </select>
                       </div>
                       <button onClick={() => {
@@ -1845,7 +1846,7 @@ export default function CustomerDetailPage() {
                             <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
                               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
                               <option value="">Select manager...</option>
-                              {workers.filter(w => w.role === 'manager').map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
+                              {workers.filter(w => canTakeDuty(w.role, 'manager')).map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
                             </select>
                           </div>
                           <button onClick={() => {
@@ -1964,7 +1965,7 @@ export default function CustomerDetailPage() {
                             <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
                               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
                               <option value="">Select manager...</option>
-                              {workers.filter(w => w.role === 'manager').map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
+                              {workers.filter(w => canTakeDuty(w.role, 'manager')).map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
                             </select>
                           </div>
                           <button onClick={() => {
@@ -1983,7 +1984,7 @@ export default function CustomerDetailPage() {
                             <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
                               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
                               <option value="">Select back office...</option>
-                              {workers.filter(w => w.role === 'back_office').map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
+                              {workers.filter(w => canTakeDuty(w.role, 'back_office')).map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
                             </select>
                           </div>
                           <button onClick={() => {
@@ -2004,7 +2005,7 @@ export default function CustomerDetailPage() {
                             <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
                               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
                               <option value="">Select designer...</option>
-                              {workers.filter(w => w.role === 'designer').map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
+                              {workers.filter(w => canTakeDuty(w.role, 'designer')).map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
                             </select>
                           </div>
                           <button onClick={() => {
@@ -2189,7 +2190,7 @@ export default function CustomerDetailPage() {
                         <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
                           className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
                           <option value="">Select designer...</option>
-                          {workers.filter(w => w.role === 'designer').map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
+                          {workers.filter(w => canTakeDuty(w.role, 'designer')).map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
                         </select>
                       </div>
                       <button onClick={() => {
@@ -2220,7 +2221,7 @@ export default function CustomerDetailPage() {
                               <select value={rejectAssignee} onChange={e => setRejectAssignee(e.target.value)}
                                 className="w-full bg-white border border-red-100 rounded-lg px-3 py-2 text-xs font-medium outline-none">
                                 <option value="">Select counselor...</option>
-                                {workers.filter(w => w.role === 'counselor').map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
+                                {workers.filter(w => canTakeDuty(w.role, 'counselor')).map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
                               </select>
                             </div>
                             <button onClick={() => {
@@ -2807,7 +2808,7 @@ export default function CustomerDetailPage() {
                       <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
                         className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
                         <option value="">Select back office person...</option>
-                        {workers.filter(w => w.role === 'back_office').map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
+                        {workers.filter(w => canTakeDuty(w.role, 'back_office')).map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
                       </select>
                     </div>
 

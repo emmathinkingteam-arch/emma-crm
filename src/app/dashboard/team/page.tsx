@@ -15,6 +15,7 @@ import { supabase } from '@/lib/supabase'
 import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import { fmtDuration, ROLE_LABELS } from '@/lib/utils'
+import { hasDuty } from '@/lib/roles'
 import { Loader2, Clock, LogIn, LogOut, Utensils, CalendarOff, ShoppingBag, Users } from 'lucide-react'
 
 interface TeamRow {
@@ -43,7 +44,7 @@ export default function TeamPage() {
   const [loading, setLoading] = useState(true)
   const [denied, setDenied] = useState(false)
 
-  const allowed = role === 'admin' || role === 'manager' || !!user?.is_supervisor
+  const allowed = role === 'admin' || hasDuty(role, 'manager') || !!user?.is_supervisor
 
   useEffect(() => {
     if (!user) { router.replace('/auth/login'); return }

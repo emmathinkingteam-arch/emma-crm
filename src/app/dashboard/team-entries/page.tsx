@@ -19,6 +19,7 @@ import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import { formatPhoneDisplay } from '@/lib/country-codes'
 import { CRM_TAG_MAP, effectiveTags, toCsv, type CrmTagKey } from '@/lib/crm-tags'
+import { hasDuty } from '@/lib/roles'
 import { Loader2, CalendarDays, Users, Copy, Check, Activity, Clock, BarChart3 } from 'lucide-react'
 
 interface EntryRow {
@@ -42,7 +43,7 @@ const TODAY = localDay(new Date())
 export default function TeamEntriesPage() {
   const router = useRouter()
   const { user, role } = useAuthStore()
-  const allowed = role === 'admin' || role === 'manager' || !!user?.is_supervisor
+  const allowed = role === 'admin' || hasDuty(role, 'manager') || !!user?.is_supervisor
 
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<EntryRow[]>([])

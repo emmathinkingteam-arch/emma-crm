@@ -15,6 +15,7 @@ import CountUp from '@/components/shared/CountUp'
 import CallButton from '@/components/shared/CallButton'
 import Link from 'next/link'
 import { type Lead, leadCountdown, leadPenaltySoFar } from '@/lib/leads'
+import { canTakeDuty } from '@/lib/roles'
 
 // A step joined with its order + customer + package (what fetchMyWork returns).
 type StepWithOrder = OrderStep & {
@@ -225,13 +226,20 @@ export default function DashboardPage() {
 
   const fetchSecondPosts = async () => {
     if (!user) return
-    // Each role only sees the 2nd posts currently sitting at their stage.
-    let q = supabase.from('second_post_requests').select('*').order('requested_at', { ascending: true })
-    if (role === 'counselor') q = q.eq('counselor_id', user.id).eq('status', 'counselor_review')
-    else if (role === 'manager') q = q.eq('manager_id', user.id).eq('status', 'manager_review')
-    else if (role === 'designer') q = q.eq('designer_id', user.id).eq('status', 'designer_planning')
-    else { setSecondPosts([]); return }
-    const { data } = await q
+    // Each desk only sees the 2nd posts currently sitting at its stage. Back
+    // office runs three desks now, so one user can legitimately match more than
+    // one clause — hence the OR rather than the old if/else chain, which would
+    // have shown her only the first stage she qualified for.
+    const clauses: string[] = []
+    if (canTakeDuty(role, 'counselor')) clauses.push(`and(counselor_id.eq.${user.id},status.eq.counselor_review)`)
+    if (canTakeDuty(role, 'manager')) clauses.push(`and(manager_id.eq.${user.id},status.eq.manager_review)`)
+    if (canTakeDuty(role, 'designer')) clauses.push(`and(designer_id.eq.${user.id},status.eq.designer_planning)`)
+    if (clauses.length === 0) { setSecondPosts([]); return }
+    const { data } = await supabase
+      .from('second_post_requests')
+      .select('*')
+      .or(clauses.join(','))
+      .order('requested_at', { ascending: true })
     setSecondPosts(data || [])
   }
 

@@ -8,6 +8,7 @@ import TopNav from '@/components/shared/TopNav'
 import BottomNav from '@/components/shared/BottomNav'
 import { MONTH_CODES, getSlotLabel } from '@/types'
 import { buildWaLink, openWaLink } from '@/lib/utils'
+import { canTakeDuty, hasDuty } from '@/lib/roles'
 import {
     Loader2, ArrowLeft, Sparkles, Clock, RefreshCw, Send,
     CheckCircle, FileText, Lock, CalendarDays, Hash,
@@ -81,7 +82,7 @@ export default function SecondPostPage() {
         setLoading(true)
         const [{ data: r }, { data: ws }] = await Promise.all([
             supabase.from('second_post_requests').select('*').eq('id', id).maybeSingle(),
-            supabase.from('users').select('id, full_name, role').in('role', ['counselor', 'manager', 'designer']).eq('is_active', true),
+            supabase.from('users').select('id, full_name, role').in('role', ['counselor', 'manager', 'designer', 'back_office']).eq('is_active', true),
         ])
         if (r) {
             setReq(r)
@@ -104,9 +105,9 @@ export default function SecondPostPage() {
             }
         }
         if (ws) {
-            setCounselors(ws.filter((w: any) => w.role === 'counselor'))
-            setManagers(ws.filter((w: any) => w.role === 'manager'))
-            setDesigners(ws.filter((w: any) => w.role === 'designer'))
+            setCounselors(ws.filter((w: any) => canTakeDuty(w.role, 'counselor')))
+            setManagers(ws.filter((w: any) => canTakeDuty(w.role, 'manager')))
+            setDesigners(ws.filter((w: any) => canTakeDuty(w.role, 'designer')))
         }
         setLoading(false)
     }
@@ -232,9 +233,9 @@ export default function SecondPostPage() {
     }
 
     // Who can act right now?
-    const isCounselorStage = req.status === 'counselor_review' && role === 'counselor' && req.counselor_id === user?.id
-    const isManagerStage = req.status === 'manager_review' && role === 'manager' && req.manager_id === user?.id
-    const isDesignerStage = req.status === 'designer_planning' && role === 'designer' && req.designer_id === user?.id
+    const isCounselorStage = req.status === 'counselor_review' && hasDuty(role, 'counselor') && req.counselor_id === user?.id
+    const isManagerStage = req.status === 'manager_review' && hasDuty(role, 'manager') && req.manager_id === user?.id
+    const isDesignerStage = req.status === 'designer_planning' && hasDuty(role, 'designer') && req.designer_id === user?.id
     const notOriginalCounselor = req.original_counselor_id && req.original_counselor_id !== user?.id
 
     return (

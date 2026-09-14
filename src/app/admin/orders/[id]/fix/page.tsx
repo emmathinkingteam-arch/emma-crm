@@ -17,7 +17,7 @@ const STEP_ROLES: Record<number, string[]> = {
     3: ['back_office', 'admin'],
     4: ['counselor', 'admin'],
     5: ['manager', 'back_office', 'admin'], // sub_step can be back_office for Bronze/Silver
-    6: ['designer', 'admin'],
+    6: ['designer', 'back_office', 'admin'], // back office absorbed the designer desk
 }
 
 const PAYMENT_TYPES = ['cash', 'bank_transfer', 'card', 'koko', 'other']

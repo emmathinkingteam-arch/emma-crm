@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import {
   User, FileText, Camera, Star, TrendingUp,
   Loader2, CheckCircle2, AlertCircle, Edit3, Save, X
@@ -162,10 +163,13 @@ export default function WorkerProfilePage() {
               <p className="text-xs text-pink-300 mt-1">Code: {user.agent_code}</p>
             )}
             <div className="flex items-center gap-3 mt-3 flex-wrap">
-              <div className="bg-white/20 rounded-xl px-3 py-1.5">
+              {/* Linked, not just displayed: not every role has a Wallet tab in
+                  the bottom nav, and back office now earns designer commission
+                  too — the statement has to be reachable from somewhere. */}
+              <Link href="/dashboard/wallet" className="bg-white/20 hover:bg-white/30 transition-colors rounded-xl px-3 py-1.5 block">
                 <p className="text-[10px] text-pink-200">Wallet Balance</p>
                 <p className="text-sm font-bold">LKR {(user.wallet_balance ?? 0).toLocaleString()}</p>
-              </div>
+              </Link>
               <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold ${
                 profileComplete ? 'bg-green-400/30 text-green-100' : 'bg-amber-400/30 text-amber-100'
               }`}>

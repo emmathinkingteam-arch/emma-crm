@@ -53,6 +53,13 @@ export default function CallbackRunner() {
     const poll = useCallback(async () => {
         // Never interrupt a live call, and never stack two prompts.
         if (firingRef.current || isCallLive()) return
+        // Agents leave the dashboard open all day, often behind another window.
+        // An unguarded 60s poll is ~1.4k invocations per agent per day, most of
+        // them while nobody is looking — and the CPU budget is what actually
+        // limits this project. The visibilitychange listener below polls the
+        // instant they come back, so a call-back owed while the tab was hidden
+        // still fires on return, sooner than it used to.
+        if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
         try {
             const res = await fetch('/api/callbacks?due=1')
             if (!res.ok) return
@@ -70,7 +77,12 @@ export default function CallbackRunner() {
         // fire the moment an agent comes back, rather than up to a minute later.
         poll()
         const t = setInterval(poll, POLL_MS)
-        return () => clearInterval(t)
+        const onVisible = () => { if (document.visibilityState === 'visible') void poll() }
+        document.addEventListener('visibilitychange', onVisible)
+        return () => {
+            clearInterval(t)
+            document.removeEventListener('visibilitychange', onVisible)
+        }
     }, [poll, hasDialer])
 
     // ── Countdown, then dial ────────────────────────────────────────────────

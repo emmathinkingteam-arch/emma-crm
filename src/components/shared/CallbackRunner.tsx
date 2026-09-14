@@ -20,7 +20,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PhoneOutgoing, X, Clock } from 'lucide-react'
-import { dialerReady, isCallLive, placeCall } from '@/lib/ucp-client'
+import { dialerReady, isCallLive, loadUcpConfig, placeCall } from '@/lib/ucp-client'
 import { CRM_TAG_MAP, type CrmTagKey } from '@/lib/crm-tags'
 import { formatPhoneDisplay } from '@/lib/country-codes'
 import type { DueCallback } from '@/lib/callbacks'
@@ -35,6 +35,19 @@ export default function CallbackRunner() {
     const [due, setDue] = useState<DueCallback | null>(null)
     const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS)
     const firingRef = useRef(false)
+
+    // Only chase call-backs for workers who actually have a softphone. Back
+    // office, counsellors and admin have no UCP account, never promise a
+    // call-back and could not dial one anyway — polling for them was a
+    // serverless invocation every minute spent to always learn "nothing".
+    // loadUcpConfig is cached at module level, so this shares the dock's
+    // answer instead of asking again.
+    const [hasDialer, setHasDialer] = useState(false)
+    useEffect(() => {
+        let alive = true
+        loadUcpConfig().then(c => { if (alive) setHasDialer(Boolean(c.configured)) })
+        return () => { alive = false }
+    }, [])
 
     // ── Ask what is owed ────────────────────────────────────────────────────
     const poll = useCallback(async () => {
@@ -52,12 +65,13 @@ export default function CallbackRunner() {
     }, [])
 
     useEffect(() => {
-        // Immediately on mount: this is what makes a callback fire the moment
-        // an agent comes back, rather than up to a minute later.
+        if (!hasDialer) return
+        // Immediately once the dialer is known: this is what makes a callback
+        // fire the moment an agent comes back, rather than up to a minute later.
         poll()
         const t = setInterval(poll, POLL_MS)
         return () => clearInterval(t)
-    }, [poll])
+    }, [poll, hasDialer])
 
     // ── Countdown, then dial ────────────────────────────────────────────────
     useEffect(() => {

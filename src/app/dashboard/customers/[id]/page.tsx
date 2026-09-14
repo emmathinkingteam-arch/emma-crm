@@ -24,6 +24,7 @@ import { packageTone, PACKAGE_TONE } from '@/lib/package-colors'
 import CrmTagButtons from '@/components/shared/CrmTagButtons'
 import OrderPaymentsPanel from '@/components/shared/OrderPaymentsPanel'
 import CallButton from '@/components/shared/CallButton'
+import { loadUcpConfig } from '@/lib/ucp-client'
 import { buildEntryDescription, categoryOf, effectiveTags, CRM_TAG_MAP, type CrmTagKey } from '@/lib/crm-tags'
 
 // One logged call, as the History bar needs it. The row itself lives in the
@@ -1215,15 +1216,19 @@ export default function CustomerDetailPage() {
 
     // Calls ride alongside the History bar. Deliberately not awaited with the
     // rest: the dialer is optional, and a UCP outage must not stop a customer
-    // page from loading.
-    fetch(`/api/ucp/calls?customerId=${id}`)
-      .then(r => (r.ok ? r.json() : { calls: [] }))
-      .then((d: { calls?: CallRecord[] }) => {
-        const map: Record<string, CallRecord> = {}
-        for (const c of d.calls ?? []) if (c.interaction_id) map[c.interaction_id] = c
-        setCallsByInteraction(map)
-      })
-      .catch(() => { /* dialer not configured — History bar renders as before */ })
+    // page from loading. Skipped entirely for workers with no softphone — back
+    // office opens a customer all day and would otherwise pay for a call log it
+    // has no dialer to play back.
+    loadUcpConfig().then(cfg => {
+      if (!cfg.configured) return
+      return fetch(`/api/ucp/calls?customerId=${id}`)
+        .then(r => (r.ok ? r.json() : { calls: [] }))
+        .then((d: { calls?: CallRecord[] }) => {
+          const map: Record<string, CallRecord> = {}
+          for (const c of d.calls ?? []) if (c.interaction_id) map[c.interaction_id] = c
+          setCallsByInteraction(map)
+        })
+    }).catch(() => { /* dialer not configured — History bar renders as before */ })
 
     setLoading(false)
   }

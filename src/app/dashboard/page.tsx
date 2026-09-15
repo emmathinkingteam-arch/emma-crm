@@ -120,6 +120,11 @@ export default function DashboardPage() {
     if (!multiDesk) { setActiveDesk(null); return }
     setActiveDesk(prev => (prev && myDesks.includes(prev) ? prev : myDesks[0]))
   }, [multiDesk, myDesks])
+  // Every OPEN step sitting at a desk this worker holds, whoever it belongs to.
+  // Kept separate from newWorks/inProgress on purpose: those stay strictly her
+  // own, so "My assignments" and the Overdue alarm keep meaning what they say.
+  const [deskPool, setDeskPool] = useState<StepWithOrder[]>([])
+  const [claiming, setClaiming] = useState<string | null>(null)
   const [secondPosts, setSecondPosts] = useState<any[]>([])
   const [leads, setLeads] = useState<Lead[]>([])
   // Phone leads the agent marked call-back / no-answer on an earlier day —
@@ -184,6 +189,12 @@ export default function DashboardPage() {
       document.removeEventListener('visibilitychange', onVisible)
     }
   }, [user])
+
+  // Keep the desk pool in step with which desks this worker holds.
+  useEffect(() => {
+    if (user) fetchDeskWork(myDesks)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, myDesks])
 
   // Re-read the Completed list whenever the chosen month changes.
   useEffect(() => {
@@ -310,6 +321,48 @@ export default function DashboardPage() {
     setSecondPosts(data || [])
   }
 
+  // ── The desk pool ─────────────────────────────────────────────────────────
+  // Only for a worker who holds more than one desk. Everything still open at
+  // those desks, no matter whose name is on it, so she can see the whole queue
+  // she is responsible for and take what she needs. Reading this is already
+  // allowed: back office has a read-all policy on order_steps.
+  const fetchDeskWork = async (desks: Desk[]) => {
+    if (!user || desks.length < 2) { setDeskPool([]); return }
+    const steps = desks.flatMap(stepNumbersForDesk)
+    if (steps.length === 0) { setDeskPool([]); return }
+
+    const { data } = await supabase
+      .from('order_steps')
+      .select(`*, order:orders(*, customer:customers(*), package:packages(*)), assignee:users!assigned_to(id, full_name)`)
+      .in('step_number', steps)
+      .in('status', ['pending', 'in_progress', 'overdue', 'abandoned'])
+      .order('deadline', { ascending: true })
+
+    setDeskPool(((data as any[]) || []).filter(s => !!s.order))
+  }
+
+  // Take an open step off another desk-mate. Server-side because every write
+  // policy on order_steps is keyed on the current assignee.
+  const claimStep = async (stepId: string) => {
+    setClaiming(stepId)
+    try {
+      const res = await fetch('/api/steps/claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stepId }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        alert(body?.error || 'Could not take that step.')
+      } else {
+        await Promise.all([fetchMyWork(), fetchDeskWork(myDesks)])
+      }
+    } catch {
+      alert('Network error — could not take that step.')
+    }
+    setClaiming(null)
+  }
+
   const fetchMyWork = async () => {
     if (!user) return
     setLoading(true)
@@ -369,11 +422,17 @@ export default function DashboardPage() {
 
     let q = supabase
       .from('order_steps')
-      .select(`*, order:orders(*, customer:customers(*), package:packages(*))`, { count: 'exact' })
-      .eq('assigned_to', user.id)
+      .select(
+        `*, order:orders(*, customer:customers(*), package:packages(*)), assignee:users!assigned_to(id, full_name)`,
+        { count: 'exact' }
+      )
       .eq('status', 'done')
       .gte('completed_at', start.toISOString())
       .lt('completed_at', end.toISOString())
+    // A multi-desk worker sees the desk's whole history — Hiruni's approvals and
+    // Kosindu's posts included, still under their own names. Everyone else sees
+    // only what they did themselves, exactly as before.
+    if (!desk) q = q.eq('assigned_to', user.id)
     // Narrow to the open desk when this worker holds more than one.
     const deskSteps = desk ? stepNumbersForDesk(desk) : null
     if (deskSteps) q = q.in('step_number', deskSteps)
@@ -426,9 +485,26 @@ export default function DashboardPage() {
     [activeDesk, deskOf]
   )
 
-  const deskNew = useMemo(() => onDesk(newWorks), [onDesk, newWorks])
-  const deskInProgress = useMemo(() => onDesk(inProgress), [onDesk, inProgress])
-  const deskAbandoned = useMemo(() => onDesk(abandoned), [onDesk, abandoned])
+  // A multi-desk worker works from the whole desk queue; everyone else works
+  // from their own assignments, which is what these lists have always been.
+  const poolNew = useMemo(
+    () => (multiDesk ? deskPool.filter(s => s.status === 'pending') : newWorks),
+    [multiDesk, deskPool, newWorks]
+  )
+  const poolInProgress = useMemo(
+    () => (multiDesk
+      ? deskPool.filter(s => s.status === 'in_progress' || s.status === 'overdue')
+      : inProgress),
+    [multiDesk, deskPool, inProgress]
+  )
+  const poolAbandoned = useMemo(
+    () => (multiDesk ? deskPool.filter(s => s.status === 'abandoned') : abandoned),
+    [multiDesk, deskPool, abandoned]
+  )
+
+  const deskNew = useMemo(() => onDesk(poolNew), [onDesk, poolNew])
+  const deskInProgress = useMemo(() => onDesk(poolInProgress), [onDesk, poolInProgress])
+  const deskAbandoned = useMemo(() => onDesk(poolAbandoned), [onDesk, poolAbandoned])
   const deskOverdueCount = useMemo(
     () => deskInProgress.filter(s => s.is_overdue || s.status === 'overdue').length,
     [deskInProgress]
@@ -439,9 +515,9 @@ export default function DashboardPage() {
   const deskCounts = useMemo(() => {
     const m = {} as Record<Desk, number>
     for (const d of myDesks) m[d] = 0
-    for (const step of [...newWorks, ...inProgress]) m[deskOf(step)] = (m[deskOf(step)] ?? 0) + 1
+    for (const step of [...poolNew, ...poolInProgress]) m[deskOf(step)] = (m[deskOf(step)] ?? 0) + 1
     return m
-  }, [myDesks, newWorks, inProgress, deskOf])
+  }, [myDesks, poolNew, poolInProgress, deskOf])
 
   // 2nd-post requests belong to the desk that owns their current stage.
   const deskSecondPosts = useMemo(() => {
@@ -917,7 +993,9 @@ export default function DashboardPage() {
                 {activeTab === 'completed' && `Nothing completed in ${monthLabel}`}
               </p>
               <p className="text-[9px] text-gray-300 font-medium mt-1 uppercase tracking-wide">
-                {activeTab === 'new' && 'New customers will appear here when assigned to you'}
+                {activeTab === 'new' && (multiDesk
+                  ? 'Anything new at this desk appears here, whoever it lands on'
+                  : 'New customers will appear here when assigned to you')}
                 {activeTab === 'in_progress' && 'Accept a new work to start'}
                 {activeTab === 'abandoned' && 'Open an overdue customer to park them here'}
                 {activeTab === 'completed' && 'Use the arrows to check other months'}
@@ -980,12 +1058,35 @@ export default function DashboardPage() {
                             {(step as any).abandoned_reason}
                           </p>
                         )}
+                        {/* Whose item this is. Only worth saying on a shared desk
+                            queue, and only when it is not already hers. */}
+                        {multiDesk && step.assigned_to !== user?.id && (
+                          <p className="text-[10px] font-semibold text-gray-400 truncate mt-0.5">
+                            {(step as any).assignee?.full_name
+                              ? `Handled by ${(step as any).assignee.full_name}`
+                              : 'Unassigned'}
+                          </p>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0 ml-2">
                         {(order as any).installment_status === 'partial' && (
                           <span className="text-[8px] font-bold px-2 py-1 rounded-full bg-amber-50 text-amber-600 border border-amber-100">
                             Awaiting payment
                           </span>
+                        )}
+                        {/* Taking it is what makes it workable: until she owns
+                            the step, every write on it is refused. */}
+                        {multiDesk && activeTab !== 'completed' && step.assigned_to !== user?.id && (
+                          <button
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); claimStep(step.id) }}
+                            disabled={claiming === step.id}
+                            className="text-[9px] font-bold px-2.5 py-1.5 rounded-lg bg-gray-900 text-white disabled:opacity-50 flex items-center gap-1"
+                          >
+                            {claiming === step.id
+                              ? <Loader2 size={9} className="animate-spin" />
+                              : <UserPlus size={9} />}
+                            Take
+                          </button>
                         )}
                         {activeTab === 'abandoned' ? (
                           <span className="text-[8px] font-bold px-2 py-1 rounded-full border bg-slate-100 text-slate-600 border-slate-200 flex items-center gap-1">

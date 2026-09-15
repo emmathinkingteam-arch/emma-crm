@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
@@ -26,6 +26,50 @@ type StepWithOrder = OrderStep & {
 }
 
 type WorkTab = 'new' | 'in_progress' | 'abandoned' | 'completed'
+
+// ── Desks ───────────────────────────────────────────────────────────────────
+// One person can now hold more than one desk on the pipeline (back office runs
+// the manager and designer desks too). Without this split her New / In Progress
+// lists are one undifferentiated pile and she cannot tell an onboarding from an
+// approval from a post. The desk strip only appears for someone who actually
+// holds more than one; every single-desk role sees the dashboard unchanged.
+type Desk = 'back_office' | 'manager' | 'designer' | 'counselor' | 'crm'
+
+const DESK_OF_STEP: Record<number, Desk> = {
+  1: 'crm',
+  2: 'crm',
+  3: 'back_office',
+  4: 'counselor',
+  5: 'manager',
+  6: 'designer',
+}
+
+const DESK_LABEL: Record<Desk, string> = {
+  back_office: 'Back Office',
+  manager: 'Approvals',
+  designer: 'Designer',
+  counselor: 'Counselling',
+  crm: 'CRM',
+}
+
+// What each desk is called in the sub-heading under the status tabs.
+const DESK_BLURB: Record<Desk, string> = {
+  back_office: 'Onboarding — step 3',
+  manager: 'Brief review & approval — step 5',
+  designer: 'Production & publish — step 6',
+  counselor: 'Sessions & briefs — step 4',
+  crm: 'Intake & orders',
+}
+
+// The order the desk strip is drawn in — pipeline order, so the strip reads the
+// same way the work flows.
+const DESK_ORDER: Desk[] = ['crm', 'back_office', 'counselor', 'manager', 'designer']
+
+function stepNumbersForDesk(desk: Desk): number[] {
+  return Object.keys(DESK_OF_STEP)
+    .map(Number)
+    .filter(n => DESK_OF_STEP[n] === desk)
+}
 
 // True when the given month (1st-of-month date) is the running calendar month.
 function isCurrentMonth(d: Date) {
@@ -61,6 +105,21 @@ export default function DashboardPage() {
   })
   const [selectedMonthCount, setSelectedMonthCount] = useState(0)
   const [activeTab, setActiveTab] = useState<WorkTab>('new')
+  // Desks this person holds, in pipeline order. One entry for every role except
+  // back office, which holds three.
+  const myDesks = useMemo(
+    () => DESK_ORDER.filter(d => canTakeDuty(role, d as any)),
+    [role]
+  )
+  // The strip is only drawn when there is a genuine choice to make.
+  const multiDesk = myDesks.length > 1
+  const [activeDesk, setActiveDesk] = useState<Desk | null>(null)
+  // Settle on a desk once the role is known, and never leave a stale one
+  // selected if the role changes under us.
+  useEffect(() => {
+    if (!multiDesk) { setActiveDesk(null); return }
+    setActiveDesk(prev => (prev && myDesks.includes(prev) ? prev : myDesks[0]))
+  }, [multiDesk, myDesks])
   const [secondPosts, setSecondPosts] = useState<any[]>([])
   const [leads, setLeads] = useState<Lead[]>([])
   // Phone leads the agent marked call-back / no-answer on an earlier day —
@@ -128,8 +187,16 @@ export default function DashboardPage() {
 
   // Re-read the Completed list whenever the chosen month changes.
   useEffect(() => {
-    if (user) fetchCompleted(selectedMonth)
-  }, [user, selectedMonth])
+    if (!user) return
+    // A multi-desk worker picks up her desk one render after mount. Fetching
+    // before that lands means an unfiltered count racing the real one, and the
+    // loser is whichever the network happens to return last.
+    if (multiDesk && !activeDesk) return
+    fetchCompleted(selectedMonth, activeDesk)
+    // activeDesk is a dependency because the Completed count is filtered in the
+    // query, not in the browser: the fetch is capped at 100 rows a month, so
+    // slicing it client-side would quietly under-report a busy desk.
+  }, [user, selectedMonth, activeDesk, multiDesk])
 
   // Trigger a server-side release tick for this worker, then load active leads.
   const refreshLeads = async () => {
@@ -285,20 +352,36 @@ export default function DashboardPage() {
   // ── Completed steps for a single calendar month ──────────────────────
   // List shows up to 100 for the month; the count is exact. When the month
   // being read is the current month, also refresh the tab number.
-  const fetchCompleted = async (month: Date) => {
+  // Switching desk or month starts a new Completed fetch while the previous one
+  // may still be in flight, and they do not necessarily come back in the order
+  // they were sent. Without this guard the slower, older response lands last
+  // and the tab shows the count for the desk you just left.
+  const completedSeq = useRef(0)
+
+  // `desk` is passed in rather than read from the closure: this runs from an
+  // effect that fires on every desk change, and a stale capture here shows the
+  // previous desk's total against the new desk's name.
+  const fetchCompleted = async (month: Date, desk: Desk | null) => {
     if (!user) return
+    const seq = ++completedSeq.current
     const start = new Date(month.getFullYear(), month.getMonth(), 1)
     const end = new Date(month.getFullYear(), month.getMonth() + 1, 1)
 
-    const { data: doneSteps, count: doneCount } = await supabase
+    let q = supabase
       .from('order_steps')
       .select(`*, order:orders(*, customer:customers(*), package:packages(*))`, { count: 'exact' })
       .eq('assigned_to', user.id)
       .eq('status', 'done')
       .gte('completed_at', start.toISOString())
       .lt('completed_at', end.toISOString())
+    // Narrow to the open desk when this worker holds more than one.
+    const deskSteps = desk ? stepNumbersForDesk(desk) : null
+    if (deskSteps) q = q.in('step_number', deskSteps)
+    const { data: doneSteps, count: doneCount } = await q
       .order('completed_at', { ascending: false })
       .limit(100)
+
+    if (seq !== completedSeq.current) return // superseded by a newer fetch
 
     const dones: StepWithOrder[] = (doneSteps as any[] || []).filter(s => !!s.order)
     const n = doneCount ?? dones.length
@@ -315,10 +398,61 @@ export default function DashboardPage() {
     6: 'bg-pink-50 text-pink-700 border-pink-100',
   }
 
+  // Deliberately NOT filtered by desk: this is the hero alarm, and overdue work
+  // hidden behind an unopened tab is exactly how a penalty gets missed.
   const overdueCount = useMemo(
     () => inProgress.filter(s => s.is_overdue || s.status === 'overdue').length,
     [inProgress]
   )
+
+  // ── Desk filter ───────────────────────────────────────────────────────────
+  // A no-op for every single-desk role, so their dashboard is byte-for-byte the
+  // one they had. A step whose number maps to a desk this person does not hold
+  // falls to her first desk rather than disappearing — better an odd row in the
+  // wrong tab than work nobody can see.
+  const deskOf = useMemo(
+    () => (step: StepWithOrder): Desk => {
+      const d = DESK_OF_STEP[step.step_number]
+      if (d && myDesks.includes(d)) return d
+      // An admin holds no desk of their own, so there is nothing to fall back
+      // to — return the step's own desk rather than undefined.
+      return myDesks[0] ?? d ?? 'back_office'
+    },
+    [myDesks]
+  )
+  const onDesk = useMemo(
+    () => (list: StepWithOrder[]) =>
+      activeDesk ? list.filter(s => deskOf(s) === activeDesk) : list,
+    [activeDesk, deskOf]
+  )
+
+  const deskNew = useMemo(() => onDesk(newWorks), [onDesk, newWorks])
+  const deskInProgress = useMemo(() => onDesk(inProgress), [onDesk, inProgress])
+  const deskAbandoned = useMemo(() => onDesk(abandoned), [onDesk, abandoned])
+  const deskOverdueCount = useMemo(
+    () => deskInProgress.filter(s => s.is_overdue || s.status === 'overdue').length,
+    [deskInProgress]
+  )
+
+  // Open items per desk — the number on each desk pill, so she can see at a
+  // glance which desk is waiting on her without opening it.
+  const deskCounts = useMemo(() => {
+    const m = {} as Record<Desk, number>
+    for (const d of myDesks) m[d] = 0
+    for (const step of [...newWorks, ...inProgress]) m[deskOf(step)] = (m[deskOf(step)] ?? 0) + 1
+    return m
+  }, [myDesks, newWorks, inProgress, deskOf])
+
+  // 2nd-post requests belong to the desk that owns their current stage.
+  const deskSecondPosts = useMemo(() => {
+    if (!activeDesk) return secondPosts
+    const stageDesk: Record<string, Desk> = {
+      counselor_review: 'counselor',
+      manager_review: 'manager',
+      designer_planning: 'designer',
+    }
+    return secondPosts.filter(sp => stageDesk[sp.status as string] === activeDesk)
+  }, [secondPosts, activeDesk])
 
   const changeMonth = (delta: number) =>
     setSelectedMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + delta, 1))
@@ -327,20 +461,20 @@ export default function DashboardPage() {
   const atCurrentMonth = isCurrentMonth(selectedMonth)
 
   const tabList: { key: WorkTab; label: string; count: number }[] = [
-    { key: 'new', label: 'New', count: newWorks.length },
-    { key: 'in_progress', label: 'In Progress', count: inProgress.length },
+    { key: 'new', label: 'New', count: deskNew.length },
+    { key: 'in_progress', label: 'In Progress', count: deskInProgress.length },
     // Only worth a tab for the roles that actually park customers (the
     // counsellor mostly). Everyone else keeps the original three.
-    ...(abandoned.length > 0 || role === 'counselor'
-      ? [{ key: 'abandoned' as WorkTab, label: 'Abandoned', count: abandoned.length }]
+    ...(deskAbandoned.length > 0 || role === 'counselor'
+      ? [{ key: 'abandoned' as WorkTab, label: 'Abandoned', count: deskAbandoned.length }]
       : []),
     { key: 'completed', label: 'Completed', count: thisMonthCount },
   ]
 
   const visible: StepWithOrder[] =
-    activeTab === 'new' ? newWorks
-      : activeTab === 'in_progress' ? inProgress
-        : activeTab === 'abandoned' ? abandoned
+    activeTab === 'new' ? deskNew
+      : activeTab === 'in_progress' ? deskInProgress
+        : activeTab === 'abandoned' ? deskAbandoned
           : completed
 
   if (loading) {
@@ -633,15 +767,15 @@ export default function DashboardPage() {
 
 
         {/* 2nd Post requests — distinct indigo, sits above normal work */}
-        {secondPosts.length > 0 && (
+        {deskSecondPosts.length > 0 && (
           <div className="border-2 border-indigo-200 rounded-2xl overflow-hidden">
             <div className="px-4 py-2.5 bg-indigo-500 flex items-center gap-2">
               <Sparkles size={14} className="text-white" />
               <p className="text-xs font-bold text-white uppercase tracking-wide">2nd Post — needs you</p>
-              <span className="ml-auto text-[9px] font-bold bg-white/25 text-white px-2 py-0.5 rounded-full">{secondPosts.length}</span>
+              <span className="ml-auto text-[9px] font-bold bg-white/25 text-white px-2 py-0.5 rounded-full">{deskSecondPosts.length}</span>
             </div>
             <div className="p-2 space-y-2">
-              {secondPosts.map(sp => {
+              {deskSecondPosts.map(sp => {
                 const overdue = sp.counselor_deadline && new Date(sp.counselor_deadline).getTime() < Date.now()
                 return (
                   <Link key={sp.id} href={`/dashboard/second-post/${sp.id}`}
@@ -672,6 +806,40 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {/* Desk strip — only for someone who holds more than one desk. Back
+            office runs onboarding, brief approval and production, and without
+            this her New/In Progress lists are one undifferentiated pile. */}
+        {multiDesk && activeDesk && (
+          <div>
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">My desks</p>
+            <div className="flex gap-2">
+              {myDesks.map(d => {
+                const on = d === activeDesk
+                const n = deskCounts[d] ?? 0
+                return (
+                  <button
+                    key={d}
+                    onClick={() => { setActiveDesk(d); setActiveTab('new') }}
+                    aria-pressed={on}
+                    className={`flex-1 min-w-0 flex flex-col items-center gap-0.5 py-2.5 px-2 rounded-2xl border transition-all ${
+                      on
+                        ? 'bg-gray-900 border-gray-900 text-white shadow-md shadow-gray-200'
+                        : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'
+                    }`}
+                  >
+                    <span className="text-[10px] font-bold uppercase tracking-wide truncate max-w-full">
+                      {DESK_LABEL[d]}
+                    </span>
+                    <span className={`text-[9px] font-bold tabular-nums ${on ? 'text-white/70' : n > 0 ? 'text-pink-600' : 'text-gray-300'}`}>
+                      {n} open
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Tabs */}
         <div className={`grid gap-2 ${tabList.length === 4 ? 'grid-cols-4' : 'grid-cols-3'}`}>
           {tabList.map(t => (
@@ -688,7 +856,7 @@ export default function DashboardPage() {
             >
               <CountUp
                 value={t.count}
-                className={`text-lg font-extrabold mb-0.5 ${activeTab === t.key ? 'text-white' : t.key === 'in_progress' && overdueCount > 0 ? 'text-red-500' : 'text-gray-700'}`}
+                className={`text-lg font-extrabold mb-0.5 ${activeTab === t.key ? 'text-white' : t.key === 'in_progress' && deskOverdueCount > 0 ? 'text-red-500' : 'text-gray-700'}`}
               />
               {t.label}
             </button>
@@ -698,6 +866,9 @@ export default function DashboardPage() {
         {/* List */}
         <div>
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">
+            {multiDesk && activeDesk && (
+              <span className="text-gray-600">{DESK_BLURB[activeDesk]} · </span>
+            )}
             {activeTab === 'new' && 'New works — accept to begin'}
             {activeTab === 'in_progress' && 'Currently working'}
             {activeTab === 'abandoned' && 'Abandoned — paused, no deadline running'}

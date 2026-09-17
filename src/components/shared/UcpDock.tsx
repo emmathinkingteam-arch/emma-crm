@@ -62,6 +62,49 @@ export default function UcpDock() {
     // silently when it is not registered, which just looks like a dead button.
     const [dialHint, setDialHint] = useState(false)
 
+    // ── Microphone ─────────────────────────────────────────────────────────
+    // A softphone cannot register without audio, and this is where it dies on
+    // phones: Safari will not hand the microphone to a cross-origin iframe
+    // unless the TOP page has been granted it first, and it never prompts on
+    // the iframe's behalf. So UCP connects fine, shows Available, sees the
+    // other extensions as registered — and its own device silently never comes
+    // up. Asking for the microphone here, from a real tap, is what unblocks it.
+    const [mic, setMic] = useState<'unknown' | 'granted' | 'denied' | 'unsupported'>('unknown')
+    // Bumped to remount the iframe so UCP retries registration after a grant.
+    const [frameKey, setFrameKey] = useState(0)
+
+    // Read the existing permission without prompting, where the browser
+    // supports it. Safari often does not, which is why 'unknown' still offers
+    // the button rather than assuming the worst.
+    useEffect(() => {
+        if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+            setMic('unsupported')
+            return
+        }
+        navigator.permissions
+            ?.query({ name: 'microphone' as PermissionName })
+            .then(p => {
+                if (p.state === 'granted') setMic('granted')
+                else if (p.state === 'denied') setMic('denied')
+            })
+            .catch(() => { /* Safari: no Permissions API for mic — leave unknown */ })
+    }, [])
+
+    const askForMic = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+            // We only needed the grant; releasing it immediately leaves the
+            // microphone free for UCP itself to open.
+            stream.getTracks().forEach(t => t.stop())
+            setMic('granted')
+            // UCP only tries to register at start-up, so reload it now that
+            // audio is available.
+            setFrameKey(k => k + 1)
+        } catch {
+            setMic('denied')
+        }
+    }
+
     // ── Load the magic link once ────────────────────────────────────────────
     useEffect(() => {
         let cancelled = false
@@ -245,13 +288,20 @@ export default function UcpDock() {
             {!open && (
                 <button
                     onClick={() => setOpen(true)}
-                    className={`fixed bottom-[84px] right-4 z-[55] flex items-center gap-2 px-4 py-3 rounded-full shadow-lg border transition-all ${
+                    className={`fixed bottom-[84px] right-4 z-[55] flex items-center gap-2 px-4 py-3 rounded-full shadow-lg border transition-all relative ${
                         live
                             ? 'bg-green-600 border-green-500 text-white animate-pulse'
-                            : 'bg-white border-pink-200 text-pink-600'
+                            : mic !== 'granted'
+                                ? 'bg-white border-blue-300 text-blue-600'
+                                : 'bg-white border-pink-200 text-pink-600'
                     }`}
                 >
                     <Phone size={16} />
+                    {/* The phone cannot register without a microphone, and that
+                        is invisible until someone tries to call. Flag it here. */}
+                    {!live && mic !== 'granted' && (
+                        <span className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-blue-500 border-2 border-white" />
+                    )}
                     {live && (
                         <span className="text-[11px] font-bold tabular-nums">
                             {live.state === 'ringing' ? 'Ringing…' : mmss}
@@ -297,6 +347,35 @@ export default function UcpDock() {
                     </button>
                 </div>
 
+                {mic !== 'granted' && (
+                    <div className="px-3 py-2.5 bg-blue-50 border-b border-blue-200">
+                        <p className="text-[10px] font-bold text-blue-800 leading-relaxed">
+                            {mic === 'denied'
+                                ? 'Microphone is blocked for this site, so the phone cannot register. Allow it in your browser settings for emma-crm.vercel.app, then reload.'
+                                : mic === 'unsupported'
+                                    ? 'This browser cannot give the phone a microphone. Use Chrome or Safari on a computer to make calls.'
+                                    : 'Tap once to let this site use your microphone — the phone cannot register without it.'}
+                        </p>
+                        {mic !== 'unsupported' && (
+                            <button
+                                onClick={askForMic}
+                                className="mt-2 w-full py-2 rounded-lg bg-blue-600 text-white text-[11px] font-bold active:scale-95 transition-transform"
+                            >
+                                {mic === 'denied' ? 'Try again' : 'Turn on microphone'}
+                            </button>
+                        )}
+                    </div>
+                )}
+
+                {mic === 'granted' && (
+                    <button
+                        onClick={() => setFrameKey(k => k + 1)}
+                        className="w-full px-3 py-1.5 bg-gray-50 border-b border-gray-100 text-[9px] font-bold text-gray-400 hover:text-gray-600"
+                    >
+                        Reconnect phone
+                    </button>
+                )}
+
                 {dialHint && (
                     <div className="px-3 py-2 bg-amber-50 border-b border-amber-200">
                         <p className="text-[10px] font-bold text-amber-700 leading-relaxed">
@@ -308,6 +387,7 @@ export default function UcpDock() {
 
                 {/* 300x300 is the documented minimum for the UCP UI to lay out. */}
                 <iframe
+                    key={frameKey}
                     id={IFRAME_ID}
                     title="ucp"
                     src={config.link}

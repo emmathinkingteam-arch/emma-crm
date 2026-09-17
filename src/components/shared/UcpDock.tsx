@@ -55,6 +55,12 @@ export default function UcpDock() {
     // not which CRM record the agent was looking at, so we stash it at dial
     // time and attach it when the event comes back.
     const pendingRef = useRef<PlaceCallDetail | null>(null)
+    // Mirrors `live` for use inside timers, which would otherwise capture a
+    // stale value from the render that scheduled them.
+    const liveRef = useRef<LiveCall | null>(null)
+    // Shown when a dial produced no call — the softphone swallows MAKE_CALL
+    // silently when it is not registered, which just looks like a dead button.
+    const [dialHint, setDialHint] = useState(false)
 
     // ── Load the magic link once ────────────────────────────────────────────
     useEffect(() => {
@@ -68,7 +74,9 @@ export default function UcpDock() {
     // Publish call state so the callback runner can hold off while a
     // conversation is in progress.
     useEffect(() => {
+        liveRef.current = live
         setCallLive(Boolean(live))
+        if (live) setDialHint(false)
     }, [live])
 
     // Re-render once a second only while a call is actually up.
@@ -208,10 +216,18 @@ export default function UcpDock() {
 
             pendingRef.current = detail
             setOpen(true)
+            setDialHint(false)
             frame.contentWindow.postMessage(
                 { type: 'MAKE_CALL', payload: { destination: dialDigits(detail.phone) } },
                 config.origin!,
             )
+
+            // An unregistered softphone accepts MAKE_CALL and does nothing.
+            // If no call has started shortly after, say so rather than leaving
+            // the agent staring at a button that appears to be broken.
+            window.setTimeout(() => {
+                if (!liveRef.current) setDialHint(true)
+            }, 12_000)
         }
 
         window.addEventListener(CALL_EVENT, onPlaceCall)
@@ -244,11 +260,17 @@ export default function UcpDock() {
                 </button>
             )}
 
-            {/* Expanded dock. The iframe is ALWAYS mounted (just hidden when
-                collapsed) so a call survives minimising the panel. */}
+            {/* Expanded dock. The iframe is ALWAYS mounted, and — this matters —
+                ALWAYS AT FULL SIZE. Collapsing it to h-0 w-0 was why the
+                softphone kept reporting "not registered": the dock starts
+                collapsed, so UCP was loading into a zero-size frame on every
+                page load, below the 300x300 its own docs require, and the SIP
+                registration never came up. Hiding is now purely visual
+                (opacity + pointer-events), so the frame keeps its real
+                dimensions and stays registered while out of sight. */}
             <div
-                className={`fixed bottom-[84px] right-4 z-[55] w-[340px] max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden ${
-                    open ? '' : 'pointer-events-none opacity-0 h-0 w-0 border-0'
+                className={`fixed bottom-[84px] right-4 z-[55] w-[340px] max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden transition-opacity ${
+                    open ? 'opacity-100' : 'pointer-events-none opacity-0'
                 }`}
                 aria-hidden={!open}
             >
@@ -275,12 +297,21 @@ export default function UcpDock() {
                     </button>
                 </div>
 
+                {dialHint && (
+                    <div className="px-3 py-2 bg-amber-50 border-b border-amber-200">
+                        <p className="text-[10px] font-bold text-amber-700 leading-relaxed">
+                            That call did not go through. Check the softphone below shows
+                            your extension as registered — if it does not, reload the page.
+                        </p>
+                    </div>
+                )}
+
                 {/* 300x300 is the documented minimum for the UCP UI to lay out. */}
                 <iframe
                     id={IFRAME_ID}
                     title="ucp"
                     src={config.link}
-                    allow="notifications; microphone"
+                    allow="notifications; microphone; autoplay"
                     className="w-full h-[480px] border-0 block"
                 />
             </div>

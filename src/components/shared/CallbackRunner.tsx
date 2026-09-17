@@ -35,6 +35,9 @@ export default function CallbackRunner() {
     const [due, setDue] = useState<DueCallback | null>(null)
     const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS)
     const firingRef = useRef(false)
+    // Set when a call-back could not actually be dialled, so the agent is told
+    // rather than left believing the customer was rung.
+    const [failed, setFailed] = useState<string | null>(null)
 
     // Only chase call-backs for workers who actually have a softphone. Back
     // office, counsellors and admin have no UCP account, never promise a
@@ -103,6 +106,24 @@ export default function CallbackRunner() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [due?.id])
 
+    /**
+     * Resolve true once the dock reports a call is up. The softphone takes a
+     * moment to place it, so poll briefly rather than checking once.
+     */
+    const waitForCall = (timeoutMs = 12_000): Promise<boolean> =>
+        new Promise(resolve => {
+            const started = Date.now()
+            const t = setInterval(() => {
+                if (isCallLive()) {
+                    clearInterval(t)
+                    resolve(true)
+                } else if (Date.now() - started > timeoutMs) {
+                    clearInterval(t)
+                    resolve(false)
+                }
+            }, 400)
+        })
+
     const patch = async (id: string, body: Record<string, unknown>) => {
         try {
             await fetch(`/api/callbacks/${id}`, {
@@ -136,10 +157,21 @@ export default function CallbackRunner() {
             label: cb.customer_name || formatPhoneDisplay(cb.phone),
         })
 
-        // Discharged once the call is placed. If nobody picks up, the agent
-        // stamps "not answer" again and that schedules the next one — the same
-        // loop the business already runs on, just without the forgetting.
-        await patch(cb.id, { action: 'done' })
+        // Handing MAKE_CALL to the iframe is not proof that a call happened —
+        // if the softphone is not registered it swallows the message silently.
+        // That is how two call-backs got marked done having never rung anyone.
+        // Wait for the dock to report a live call before discharging the
+        // promise; if none appears, put it back so it is tried again.
+        const started = await waitForCall()
+        if (started) {
+            // Discharged. If nobody picks up, the agent stamps "not answer"
+            // again and that schedules the next one — the same loop the
+            // business already runs on, just without the forgetting.
+            await patch(cb.id, { action: 'done' })
+        } else {
+            await patch(cb.id, { action: 'failed' })
+            setFailed(cb.customer_name || formatPhoneDisplay(cb.phone))
+        }
         setDue(null)
         firingRef.current = false
     }
@@ -154,6 +186,36 @@ export default function CallbackRunner() {
         if (!due) return
         await patch(due.id, { action: 'cancelled' })
         setDue(null)
+    }
+
+    // The dial did not take. Say so — silence here reads as "it called them".
+    if (!due && failed) {
+        return (
+            <div className="fixed bottom-[84px] left-1/2 -translate-x-1/2 z-[60] w-full max-w-[420px] px-4">
+                <div className="bg-white rounded-2xl shadow-2xl border-2 border-amber-300 overflow-hidden">
+                    <div className="bg-amber-500 px-4 py-2 flex items-center gap-2">
+                        <PhoneOutgoing size={14} className="text-white" />
+                        <span className="text-[11px] font-bold text-white uppercase tracking-wide">
+                            Call back not dialled
+                        </span>
+                    </div>
+                    <div className="px-4 py-3">
+                        <p className="text-sm font-bold text-gray-800">{failed}</p>
+                        <p className="text-[11px] text-gray-500 font-medium mt-1 leading-relaxed">
+                            Your softphone did not pick up the call. Check it shows
+                            <span className="font-bold"> registered</span>, then this will be
+                            tried again — it is still in your queue.
+                        </p>
+                        <button
+                            onClick={() => setFailed(null)}
+                            className="mt-3 w-full py-2.5 rounded-xl bg-gray-100 text-gray-600 text-[11px] font-bold"
+                        >
+                            OK
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )
     }
 
     if (!due) return null

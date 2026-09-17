@@ -390,6 +390,10 @@ export default function CustomerDetailPage() {
   // Free Post campaign order — drives the purple theme + the shortened
   // Back Office → Counselor → Designer pipeline (no Manager step).
   const isFree = activeOrder?.step_variant === 'free'
+  // Mini Subscription: the order is finished the moment Back Office is done
+  // with it. No counsellor, no manager, no post — so step 3 gets a Finish
+  // button where the other variants get "Assign to counselor".
+  const isMini = activeOrder?.step_variant === 'mini'
 
   // Upload payment slip
   const handleSlipUpload = async (file: File): Promise<string> => {
@@ -1541,12 +1545,19 @@ export default function CustomerDetailPage() {
               {isFree && (
                 <span className="text-[8px] font-bold px-2.5 py-1 rounded-full bg-purple-600 text-white uppercase tracking-wide">🆓 Free Post</span>
               )}
-              {/* Free orders run a shortened 3 → 4 → 6 pipeline (no Manager step 5). */}
-              {(isFree ? [3, 4, 6] : [2, 3, 4, 5, 6]).map(n => (
-                <span key={n} className={`text-[8px] font-bold px-2.5 py-1 rounded-full ${activeOrder.current_step >= n ? (isFree ? 'bg-purple-600 text-white' : 'bg-pink-600 text-white') : 'bg-white text-gray-300'}`}>
+              {isMini && (
+                <span className="text-[8px] font-bold px-2.5 py-1 rounded-full bg-teal-600 text-white uppercase tracking-wide">Mini Subscription</span>
+              )}
+              {/* Free orders run a shortened 3 → 4 → 6 pipeline (no Manager step 5);
+                  a mini subscription stops at Back Office and has no steps after 3. */}
+              {(isMini ? [2, 3] : isFree ? [3, 4, 6] : [2, 3, 4, 5, 6]).map(n => (
+                <span key={n} className={`text-[8px] font-bold px-2.5 py-1 rounded-full ${activeOrder.current_step >= n ? (isMini ? 'bg-teal-600 text-white' : isFree ? 'bg-purple-600 text-white' : 'bg-pink-600 text-white') : 'bg-white text-gray-300'}`}>
                   Step {n}
                 </span>
               ))}
+              {isMini && activeOrder.current_step > 3 && (
+                <span className="text-[8px] font-bold px-2.5 py-1 rounded-full bg-green-600 text-white uppercase tracking-wide">Complete</span>
+              )}
               {isExpired && <span className="text-[8px] font-bold px-2.5 py-1 rounded-full bg-red-500 text-white">EXPIRED</span>}
               {isInstallmentPending && (
                 <span className="text-[8px] font-bold px-2.5 py-1 rounded-full bg-amber-400 text-white flex items-center gap-1">
@@ -1852,25 +1863,50 @@ export default function CustomerDetailPage() {
                           />
                         )}
                       </div>
-                      <div>
-                        <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign counselor</label>
-                        <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
-                          className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
-                          <option value="">Select counselor...</option>
-                          {workers.filter(w => canTakeDuty(w.role, 'counselor')).map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
-                        </select>
-                      </div>
-                      <button onClick={() => {
-                        const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'counselor'
-                        doComplete(4, {}, selectedAssignee, `Assigned to counselor: ${name} — 48hr deadline set | Profile link: ${publicProfileLink}`)
-                      }} disabled={!selectedAssignee || !publicProfileLink || actionLoading}
-                        className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
-                        {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Assign to counselor'}
-                      </button>
-                      {!publicProfileLink && selectedAssignee && (
-                        <p className="text-[9px] text-red-500 font-semibold text-center">
-                          Paste the customer public link above to enable this button
-                        </p>
+                      {isMini ? (
+                        <>
+                          <div className="bg-teal-50 border border-teal-200 rounded-xl px-3 py-2.5">
+                            <p className="text-[10px] font-bold text-teal-700">
+                              Mini Subscription — ends here
+                            </p>
+                            <p className="text-[9px] text-teal-600 font-medium mt-0.5 leading-relaxed">
+                              No counsellor, no post. Register them on the website and file the
+                              slip under Website Registration, then finish the order.
+                            </p>
+                          </div>
+                          {/* nextStep 7 is past the last step, so doComplete marks this one
+                              done and creates nothing after it. */}
+                          <button
+                            onClick={() => doComplete(7, {}, undefined, 'Mini Subscription completed by Back Office')}
+                            disabled={actionLoading}
+                            className="w-full bg-teal-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40"
+                          >
+                            {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Finish subscription'}
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <div>
+                            <label className="block text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Assign counselor</label>
+                            <select value={selectedAssignee} onChange={e => setSelectedAssignee(e.target.value)}
+                              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-medium outline-none">
+                              <option value="">Select counselor...</option>
+                              {workers.filter(w => canTakeDuty(w.role, 'counselor')).map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
+                            </select>
+                          </div>
+                          <button onClick={() => {
+                            const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'counselor'
+                            doComplete(4, {}, selectedAssignee, `Assigned to counselor: ${name} — 48hr deadline set | Profile link: ${publicProfileLink}`)
+                          }} disabled={!selectedAssignee || !publicProfileLink || actionLoading}
+                            className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
+                            {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Assign to counselor'}
+                          </button>
+                          {!publicProfileLink && selectedAssignee && (
+                            <p className="text-[9px] text-red-500 font-semibold text-center">
+                              Paste the customer public link above to enable this button
+                            </p>
+                          )}
+                        </>
                       )}
                     </>
                   )}

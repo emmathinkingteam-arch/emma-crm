@@ -99,7 +99,7 @@ export default function AdminOrdersPage() {
               <tr key={o.id} className="hover:bg-pink-50/30">
                 <td className="px-4 py-3 font-medium"><Link href={`/dashboard/customers/${o.customer_id}`} className="text-pink-600 hover:underline">{o.customer?.name || o.customer?.phone}</Link></td>
                 <td className="px-4 py-3 text-gray-600">{o.package?.name}</td>
-                <td className="px-4 py-3"><span className="font-bold text-gray-700">Step {o.current_step}</span></td>
+                <td className="px-4 py-3"><span className="font-bold text-gray-700">{o.current_step > 6 ? 'Done' : `Step ${o.current_step}`}</span></td>
                 <td className="px-4 py-3 font-medium">LKR {o.amount_paid?.toLocaleString()}</td>
                 <td className="px-4 py-3"><span className={`text-[8px] font-bold px-2 py-1 rounded-full ${statusColor(o.status)}`}>{o.status}</span></td>
                 <td className="px-4 py-3 text-gray-400">{fmtDate(o.created_at)}</td>

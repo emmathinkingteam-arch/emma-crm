@@ -21,7 +21,10 @@ export type LeaveType = 'annual' | 'casual' | 'sick' | 'other'
 export type RequestStatus = 'pending' | 'approved' | 'rejected'
 export type MilestoneType = 'wallet_balance' | 'order_count' | 'package_specific' | 'daily_entry' | 'custom'
 export type TimeSlot = 'W' | 'X' | 'Y' | 'Z' | 'WX' | 'YZ' // four daily sittings; clock time varies by weekday/weekend — see getSlotLabel. WX (10am) and YZ (5pm) are two extra fixed-time slots.
-export type FlowVariant = 'standard' | 'silver_bronze' | 'free'
+// 'mini' ends at Back Office: no counsellor, no manager, no designed post. It
+// exists for cheap website-only subscriptions, where running the full pipeline
+// would put four people and four penalty clocks behind a LKR 1,590 sale.
+export type FlowVariant = 'standard' | 'silver_bronze' | 'free' | 'mini'
 
 // ── Database row types ───────────────────────────────────────
 
@@ -79,7 +82,7 @@ export interface Order {
   id: string
   customer_id: string
   package_id: string
-  current_step: number // 2–6
+  current_step: number // 2–6, or 7 once a 'mini' order is finished at step 3
   step_variant: FlowVariant
   pass_number: number // 1 or 2
   status: OrderStatus

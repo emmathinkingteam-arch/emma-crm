@@ -276,7 +276,7 @@ export default function FixOrderPage() {
                     </div>
                     <div>
                         <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Step / Status</p>
-                        <p className="text-sm font-bold text-gray-800">Step {order.current_step} / 6</p>
+                        <p className="text-sm font-bold text-gray-800">{order.current_step > 6 ? 'Done' : `Step ${order.current_step} / 6`}</p>
                         <p className="text-[11px] text-gray-500 uppercase">{order.status}</p>
                     </div>
                     <div>

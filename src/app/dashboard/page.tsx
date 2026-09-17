@@ -349,7 +349,9 @@ export default function DashboardPage() {
       const res = await fetch('/api/steps/claim', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stepId }),
+        // In inspector mode `user` is the worker being previewed, not the admin
+        // driving the screen — Take has to hand the step to her, not to them.
+        body: JSON.stringify({ stepId, onBehalfOf: inspecting ? user?.id : undefined }),
       })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) {

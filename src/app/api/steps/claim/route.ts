@@ -40,12 +40,37 @@ export async function POST(req: NextRequest) {
     const me = await currentProfile()
     if (!me) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { stepId } = await req.json().catch(() => ({ stepId: null }))
+    const { stepId, onBehalfOf } = await req.json().catch(() => ({ stepId: null, onBehalfOf: null }))
     if (!stepId || typeof stepId !== 'string') {
         return NextResponse.json({ error: 'stepId is required' }, { status: 400 })
     }
 
     const sa = supabaseAdmin()
+
+    // ── Who ends up holding the step ────────────────────────────────────────
+    // Normally the caller. An admin in inspector mode is looking at someone
+    // else's dashboard, so Take there has to mean "give it to the worker I am
+    // previewing" — the admin holds no desk of their own and live work must
+    // never land on an admin account. Only an admin may name a different
+    // target, and the target still has to actually work the desk.
+    let holder = { id: me.id, role: me.role }
+    if (onBehalfOf && onBehalfOf !== me.id) {
+        if (me.role !== 'admin') {
+            return NextResponse.json(
+                { error: 'You cannot take a step on behalf of someone else.' },
+                { status: 403 }
+            )
+        }
+        const { data: target } = await sa
+            .from('users')
+            .select('id, role, is_active')
+            .eq('id', onBehalfOf)
+            .single()
+        if (!target || target.is_active === false) {
+            return NextResponse.json({ error: 'That worker is not active.' }, { status: 400 })
+        }
+        holder = { id: target.id, role: target.role }
+    }
     const { data: step, error } = await sa
         .from('order_steps')
         .select('id, step_number, status, assigned_to, order_id')
@@ -56,7 +81,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Step not found' }, { status: 404 })
     }
 
-    if (step.assigned_to === me.id) {
+    if (step.assigned_to === holder.id) {
         return NextResponse.json({ ok: true, alreadyMine: true })
     }
 
@@ -68,18 +93,24 @@ export async function POST(req: NextRequest) {
     }
 
     const duty = DUTY_OF_STEP[step.step_number as number]
-    // Admins can act anywhere but hold no desk of their own, so parking live
-    // work on an admin account is not something this route will do.
-    if (!duty || !canTakeDuty(me.role, duty)) {
+    if (!duty || !canTakeDuty(holder.role, duty)) {
+        // Say which desk and which role, because the commonest way to see this
+        // is an admin pressing Take on their own account — admins can act at
+        // any desk but hold none, so there is nowhere for the step to go.
+        const who = holder.id === me.id ? `Your role (${me.role})` : `That worker's role (${holder.role})`
         return NextResponse.json(
-            { error: 'That step belongs to a desk you do not work.' },
+            {
+                error: holder.role === 'admin'
+                    ? 'Admins hold no desk, so a step cannot be assigned to an admin account. Open the worker in Inspector and take it there, or sign in as the worker.'
+                    : `${who} does not work the ${duty.replace('_', ' ')} desk.`,
+            },
             { status: 403 }
         )
     }
 
     const { error: updErr } = await sa
         .from('order_steps')
-        .update({ assigned_to: me.id })
+        .update({ assigned_to: holder.id })
         .eq('id', stepId)
         // Re-check the status in the write itself: two people can open the same
         // desk list and tap Take a second apart.

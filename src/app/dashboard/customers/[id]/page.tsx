@@ -11,7 +11,7 @@ import BottomNav from '@/components/shared/BottomNav'
 import {
   Loader2, ArrowLeft, Star, Phone, MessageCircle, PhoneCall,
   ThumbsUp, ShoppingCart, Lock, Upload, CheckCircle, ExternalLink, Filter,
-  CreditCard, AlertCircle, Pencil, Receipt, Building2, PauseCircle, PlayCircle
+  CreditCard, AlertCircle, Pencil, Receipt, Building2, PauseCircle, PlayCircle, UserPlus
 } from 'lucide-react'
 import { Customer, Order, OrderStep, Interaction, Package as Pkg, MONTH_CODES, getSlotLabel, slotInstantISO } from '@/types'
 import { fmtDate, fmtTime, buildWaLink, openWaLink, WA, KOKO_SERVICE_CHARGE_RATE, getCounselorAvailability, normalisePhone } from '@/lib/utils'
@@ -106,7 +106,7 @@ function makeDeadline(stepNumber: number): string | null {
 
 export default function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const { user, role, setUser } = useAuthStore()
+  const { user, role, setUser, inspecting } = useAuthStore()
   const router = useRouter()
   const [isUpgrade, setIsUpgrade] = useState(false)
 
@@ -339,6 +339,42 @@ export default function CustomerDetailPage() {
     return activeStep.assigned_to === user.id
   }
 
+  const isExpiredOrder = (o: typeof activeOrder) =>
+    !!o && (o.status === 'expired' ||
+      !!(o.validity_expires_at && new Date(o.validity_expires_at) < new Date()))
+
+  // Desks this person works, used to decide whether an unowned step in front of
+  // her is one she is allowed to pick up.
+  const STEP_DUTY: Record<number, 'crm' | 'back_office' | 'counselor' | 'manager' | 'designer'> = {
+    1: 'crm', 2: 'crm', 3: 'back_office', 4: 'counselor', 5: 'manager', 6: 'designer',
+  }
+  const [takingStep, setTakingStep] = useState(false)
+  const canTakeThisStep = !!activeStep && !!user && !isExpiredOrder(activeOrder) &&
+    activeStep.assigned_to !== user.id &&
+    ['pending', 'in_progress', 'overdue'].includes(activeStep.status as string) &&
+    canTakeDuty(role, STEP_DUTY[activeStep.step_number])
+
+  const takeThisStep = async () => {
+    if (!activeStep) return
+    setTakingStep(true)
+    try {
+      const res = await fetch('/api/steps/claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          stepId: activeStep.id,
+          onBehalfOf: inspecting ? user?.id : undefined,
+        }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) alert(body?.error || 'Could not take this step.')
+      else await fetchAll()
+    } catch {
+      alert('Network error — could not take this step.')
+    }
+    setTakingStep(false)
+  }
+
   const myStep = activeStep?.step_number
   const isExpired = !!(activeOrder?.validity_expires_at && new Date(activeOrder.validity_expires_at) < new Date())
   const stepAccepted = activeStep?.status === 'in_progress'
@@ -446,17 +482,43 @@ export default function CustomerDetailPage() {
     if (!activeStep || !activeOrder) return
     setActionLoading(true)
 
-    await supabase.from('order_steps').update({
+    // These three writes used to run with no error checking at all. When a row
+    // policy refused the first one the insert below still went through, so the
+    // hand-off looked like it worked while the step stayed open — the failure
+    // only surfaced as someone saying "it doesn't work". Stop at the first
+    // refusal and say so.
+    const { error: doneErr } = await supabase.from('order_steps').update({
       status: 'done',
       completed_at: new Date().toISOString(),
       ...(data || {})
     }).eq('id', activeStep.id)
 
-    await supabase.from('orders').update({ current_step: nextStep }).eq('id', activeOrder.id)
+    if (doneErr) {
+      setActionLoading(false)
+      alert(
+        'Could not complete this step: ' + doneErr.message +
+        '\n\nThe step is still open and nothing was handed on.'
+      )
+      return
+    }
+
+    const { error: orderErr } = await supabase
+      .from('orders')
+      .update({ current_step: nextStep })
+      .eq('id', activeOrder.id)
+
+    if (orderErr) {
+      setActionLoading(false)
+      alert(
+        'The step was completed but the order did not move to step ' + nextStep +
+        ': ' + orderErr.message + '\n\nPlease tell admin before carrying on.'
+      )
+      return
+    }
 
     if (nextStep <= 6) {
       const deadline = makeDeadline(nextStep)
-      await supabase.from('order_steps').insert({
+      const { error: nextErr } = await supabase.from('order_steps').insert({
         order_id: activeOrder.id,
         step_number: nextStep,
         step_name: `Step ${nextStep}`,
@@ -473,6 +535,15 @@ export default function CustomerDetailPage() {
         // instead of the original Step 3 (invoice/greeting/assign counselor) UI.
         sub_step: (data && (data as any).sub_step) || null,
       })
+
+      if (nextErr) {
+        setActionLoading(false)
+        alert(
+          'This step is done, but step ' + nextStep + ' could not be created: ' +
+          nextErr.message + '\n\nThe order is stuck between steps — tell admin.'
+        )
+        return
+      }
 
       // 🔔 Fire SMS to the newly-assigned worker.
       // Fire-and-forget — never block the handoff if SMS fails.
@@ -1612,6 +1683,24 @@ export default function CustomerDetailPage() {
                     </div>
                     : <Lock size={14} className="text-gray-300" />}
                 </div>
+
+                {/* Someone who works this desk but does not hold this particular
+                    step can take it and carry on. Without this the panel below
+                    simply does not render and there is nothing to click — which
+                    is how "approve and send to the designer" looked broken for
+                    back office on a step still sitting under Hiruni's name. */}
+                {!isActiveStep && canTakeThisStep && (
+                  <button
+                    onClick={takeThisStep}
+                    disabled={takingStep}
+                    className="mt-2 w-full bg-gray-900 text-white rounded-xl px-4 py-2.5 text-[11px] font-bold disabled:opacity-50 flex items-center justify-center gap-1.5"
+                  >
+                    {takingStep
+                      ? <Loader2 size={12} className="animate-spin" />
+                      : <UserPlus size={12} />}
+                    Take this step
+                  </button>
+                )}
               </div>
 
               {/* STEP 3 (FREE POST) — Back Office onboarding for the Free Post campaign.

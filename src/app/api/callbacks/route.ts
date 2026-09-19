@@ -120,6 +120,18 @@ export async function GET(req: NextRequest) {
     const onlyDue = req.nextUrl.searchParams.get('due') === '1'
     const sb = supabaseAdmin()
 
+    // Reclaim anything abandoned mid-dial. 'dialing' is only meant to last the
+    // few seconds between handing the call to the softphone and confirming it
+    // started — but if the agent closes the tab in that window the row is
+    // stranded there for ever, since nothing but 'pending' is ever picked up
+    // again. One did exactly that and sat stuck for two days.
+    await sb
+        .from('callbacks')
+        .update({ status: 'pending', updated_at: new Date().toISOString() })
+        .eq('agent_id', me.id)
+        .eq('status', 'dialing')
+        .lt('last_attempt_at', new Date(Date.now() - 5 * 60_000).toISOString())
+
     let q = sb
         .from('callbacks')
         .select('id, customer_id, phone, customer_name, reason, note, due_at, attempts, status')

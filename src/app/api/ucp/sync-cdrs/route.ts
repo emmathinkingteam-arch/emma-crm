@@ -22,6 +22,7 @@
 // ============================================================================
 
 import { NextResponse } from 'next/server'
+import { currentProfile } from '@/lib/api-auth'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { uploadFile } from '@/lib/backblaze'
 import {
@@ -49,6 +50,13 @@ const MAX_LOOKBACK_MINUTES = 30 * 24 * 60
 // each against the live tenant. Vercel kills the function at 60s, so cap the
 // batch well inside that; a backlog just drains over the following runs.
 const MAX_RECORDINGS_PER_RUN = 6
+// A signed-in agent can trigger a sync, but only if nobody has for a while.
+// This exists because the external cron has never been scheduled, and without
+// something running this job nothing ever settles: no durations, no
+// recordings, no History entries. Ticking off the agents who are already in
+// the CRM makes the feature self-sustaining. The floor keeps it inside the
+// Vercel CPU budget however many agents are online.
+const MIN_TICK_INTERVAL_MINUTES = 15
 
 function isAuthorized(req: Request): boolean {
     const expected = process.env.CRON_SECRET
@@ -104,7 +112,10 @@ function readParties(cdr: UcpCdr) {
 async function handle(req: Request) {
     const startedAt = Date.now()
 
-    if (!isAuthorized(req)) {
+    // The cron secret runs unconditionally. Otherwise a signed-in member of
+    // staff may trigger it, subject to the interval below.
+    const byCron = isAuthorized(req)
+    if (!byCron && !(await currentProfile())) {
         return NextResponse.json({ ok: false, reason: 'unauthorized' }, { status: 401 })
     }
     if (!ucpConfigured()) {
@@ -112,8 +123,32 @@ async function handle(req: Request) {
     }
 
     const sb = supabaseAdmin()
+
+    if (!byCron) {
+        // When the last sync ran, taken from the data itself rather than a
+        // separate bookkeeping table.
+        const { data: recent } = await sb
+            .from('calls')
+            .select('cdr_synced_at')
+            .not('cdr_synced_at', 'is', null)
+            .order('cdr_synced_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+
+        const last = recent?.cdr_synced_at ? new Date(recent.cdr_synced_at).getTime() : 0
+        const sinceMin = (Date.now() - last) / 60_000
+        if (sinceMin < MIN_TICK_INTERVAL_MINUTES) {
+            return NextResponse.json({
+                ok: true,
+                skipped: 'too_soon',
+                minutesSinceLastSync: Math.round(sinceMin),
+            })
+        }
+    }
     const requested = Number(new URL(req.url).searchParams.get('minutes'))
-    const lookback = Number.isFinite(requested) && requested > 0
+    // Only the cron may widen the window; a browser tick always uses the
+    // default, so no one can turn a page load into a 30-day backfill.
+    const lookback = byCron && Number.isFinite(requested) && requested > 0
         ? Math.min(requested, MAX_LOOKBACK_MINUTES)
         : LOOKBACK_MINUTES
     const endUnix = Math.floor(Date.now() / 1000)

@@ -129,6 +129,31 @@ export default function UcpDock() {
         return () => clearInterval(t)
     }, [live])
 
+    // ── Keep the call log settling ──────────────────────────────────────────
+    // Durations, recordings and History entries all come from the CDR sync,
+    // and nothing else runs it — the external cron was never scheduled, so 250
+    // calls sat unsettled. Agents with a dialer nudge it while they work; the
+    // server ignores a nudge that comes too soon after the last real sync, so
+    // ten agents cost no more than one. Same visibility rule as the call-back
+    // poll: a tab nobody is looking at does no work.
+    useEffect(() => {
+        if (!config?.configured) return
+
+        const tick = () => {
+            if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+            fetch('/api/ucp/sync-cdrs', { method: 'POST' }).catch(() => { /* next tick */ })
+        }
+
+        tick()
+        const t = setInterval(tick, 5 * 60_000)
+        const onVisible = () => { if (document.visibilityState === 'visible') tick() }
+        document.addEventListener('visibilitychange', onVisible)
+        return () => {
+            clearInterval(t)
+            document.removeEventListener('visibilitychange', onVisible)
+        }
+    }, [config?.configured])
+
     // ── Report an event to the server ───────────────────────────────────────
     const report = useCallback(async (
         event: 'ringing' | 'answered' | 'hangup' | 'disposition',

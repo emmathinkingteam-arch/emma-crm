@@ -8,6 +8,7 @@ import {
   ClipboardList, UserPlus, AlertOctagon, Users2,
   DollarSign, CalendarCheck, Users, Tv2,
 } from 'lucide-react'
+import SalesPaceChart from '@/components/admin/SalesPaceChart'
 
 const BANKS = [
   { key: 'boc', name: 'BOC', url: 'https://online.boc.lk/T001/channel.jsp', color: 'bg-blue-50 border-blue-200 text-blue-700', btn: 'bg-blue-600 hover:bg-blue-700' },
@@ -178,6 +179,8 @@ export default function AdminDashboardPage() {
         <h1 className="text-2xl font-bold text-gray-800">{greeting} 👋</h1>
         <p className="text-sm text-gray-400 font-medium mt-0.5">{dateStr}</p>
       </div>
+
+      {(role === 'admin' || role === 'ceo' || role === 'manager') && <SalesPaceChart />}
 
       <BankReminder />
 

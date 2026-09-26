@@ -45,8 +45,8 @@ interface B2Auth {
 // upload/download (the media proxy can be hit often).
 let authCache: { auth: B2Auth; expires: number } | null = null
 
-async function b2Authorize(): Promise<B2Auth> {
-  if (authCache && Date.now() < authCache.expires) return authCache.auth
+async function b2Authorize(fresh = false): Promise<B2Auth> {
+  if (!fresh && authCache && Date.now() < authCache.expires) return authCache.auth
   const basic = Buffer.from(`${B2_KEY_ID}:${B2_APP_KEY}`).toString('base64')
   const res = await fetch('https://api.backblazeb2.com/b2api/v2/b2_authorize_account', {
     headers: { Authorization: `Basic ${basic}` },
@@ -59,12 +59,27 @@ async function b2Authorize(): Promise<B2Auth> {
   return auth
 }
 
-async function b2GetUploadUrl(auth: B2Auth): Promise<{ uploadUrl: string; uploadAuthToken: string }> {
-  const res = await fetch(`${auth.apiUrl}/b2api/v2/b2_get_upload_url`, {
+// B2 can expire a token well before 24h (key changes, B2-side rotation), and a
+// warm server would otherwise keep reusing the dead cached token until restart.
+// On a 401, drop the cache, re-authorize once, and retry.
+async function withB2Auth(call: (auth: B2Auth) => Promise<Response>): Promise<Response> {
+  const res = await call(await b2Authorize())
+  if (res.status !== 401) return res
+  authCache = null
+  return call(await b2Authorize(true))
+}
+
+// POST to a B2 API endpoint with the cached account token (re-auth on 401).
+function b2Api(endpoint: string, body: unknown): Promise<Response> {
+  return withB2Auth(auth => fetch(`${auth.apiUrl}/b2api/v2/${endpoint}`, {
     method: 'POST',
     headers: { Authorization: auth.authorizationToken, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ bucketId: B2_BUCKET_ID }),
-  })
+    body: JSON.stringify(body),
+  }))
+}
+
+async function b2GetUploadUrl(): Promise<{ uploadUrl: string; uploadAuthToken: string }> {
+  const res = await b2Api('b2_get_upload_url', { bucketId: B2_BUCKET_ID })
   if (!res.ok) throw new Error(`B2 get_upload_url failed: ${res.status} ${await res.text()}`)
   const j = await res.json()
   return { uploadUrl: j.uploadUrl, uploadAuthToken: j.authorizationToken }
@@ -114,20 +129,24 @@ export async function uploadFile(
     )
   }
 
-  const auth = await b2Authorize()
-  const { uploadUrl, uploadAuthToken } = await b2GetUploadUrl(auth)
   const sha1 = crypto.createHash('sha1').update(buf).digest('hex')
-  const res = await fetch(uploadUrl, {
-    method: 'POST',
-    headers: {
-      Authorization: uploadAuthToken,
-      'X-Bz-File-Name': encodeKey(key),
-      'Content-Type': contentType,
-      'Content-Length': String(buf.length),
-      'X-Bz-Content-Sha1': sha1,
-    },
-    body: buf,
-  })
+  const put = async () => {
+    const { uploadUrl, uploadAuthToken } = await b2GetUploadUrl()
+    return fetch(uploadUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: uploadAuthToken,
+        'X-Bz-File-Name': encodeKey(key),
+        'Content-Type': contentType,
+        'Content-Length': String(buf.length),
+        'X-Bz-Content-Sha1': sha1,
+      },
+      body: buf,
+    })
+  }
+  // An upload URL's token can expire too — fetch a fresh URL and retry once.
+  let res = await put()
+  if (res.status === 401 || res.status === 503) res = await put()
   if (!res.ok) throw new Error(`B2 upload failed: ${res.status} ${await res.text()}`)
 
   const base = opts.public ? '/api/public-media/' : '/api/media/'
@@ -140,9 +159,10 @@ export async function uploadFile(
  */
 export async function b2Download(key: string): Promise<Response> {
   if (!b2Configured()) throw new Error('B2 not configured')
-  const auth = await b2Authorize()
-  const url = `${auth.downloadUrl}/file/${encodeURIComponent(B2_BUCKET_NAME!)}/${encodeKey(key)}`
-  return fetch(url, { headers: { Authorization: auth.authorizationToken } })
+  return withB2Auth(auth => fetch(
+    `${auth.downloadUrl}/file/${encodeURIComponent(B2_BUCKET_NAME!)}/${encodeKey(key)}`,
+    { headers: { Authorization: auth.authorizationToken } },
+  ))
 }
 
 export interface B2File {
@@ -156,15 +176,10 @@ export interface B2File {
  */
 export async function b2List(prefix: string): Promise<B2File[]> {
   if (!b2Configured()) throw new Error('B2 not configured')
-  const auth = await b2Authorize()
   const out: B2File[] = []
   let startFileName: string | undefined
   do {
-    const res = await fetch(`${auth.apiUrl}/b2api/v2/b2_list_file_names`, {
-      method: 'POST',
-      headers: { Authorization: auth.authorizationToken, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bucketId: B2_BUCKET_ID, prefix, maxFileCount: 1000, startFileName }),
-    })
+    const res = await b2Api('b2_list_file_names', { bucketId: B2_BUCKET_ID, prefix, maxFileCount: 1000, startFileName })
     if (!res.ok) throw new Error(`B2 list failed: ${res.status} ${await res.text()}`)
     const j = await res.json()
     for (const f of j.files || []) {
@@ -181,20 +196,11 @@ export async function b2List(prefix: string): Promise<B2File[]> {
  */
 export async function b2Delete(key: string): Promise<void> {
   if (!b2Configured()) throw new Error('B2 not configured')
-  const auth = await b2Authorize()
   // Find all versions of this exact file name, then delete each.
-  const res = await fetch(`${auth.apiUrl}/b2api/v2/b2_list_file_versions`, {
-    method: 'POST',
-    headers: { Authorization: auth.authorizationToken, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ bucketId: B2_BUCKET_ID, prefix: key, maxFileCount: 1000 }),
-  })
+  const res = await b2Api('b2_list_file_versions', { bucketId: B2_BUCKET_ID, prefix: key, maxFileCount: 1000 })
   if (!res.ok) throw new Error(`B2 list_versions failed: ${res.status} ${await res.text()}`)
   const j = await res.json()
   for (const f of (j.files || []).filter((x: any) => x.fileName === key)) {
-    await fetch(`${auth.apiUrl}/b2api/v2/b2_delete_file_version`, {
-      method: 'POST',
-      headers: { Authorization: auth.authorizationToken, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fileName: f.fileName, fileId: f.fileId }),
-    })
+    await b2Api('b2_delete_file_version', { fileName: f.fileName, fileId: f.fileId })
   }
 }

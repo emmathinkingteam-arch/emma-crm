@@ -6,6 +6,9 @@
 // ONE card per number. The number's LATEST update is its status — that's what
 // the status chips count and filter on, and what the date range checks (the
 // day of the latest update). Older updates live on the customer page timeline.
+// If the latest update has no status button (e.g. a plain "msg seen no reply"
+// message) then THAT is the status — Message / Call / … — and the number
+// leaves whatever status an older update gave it.
 //
 // Reject rule: if Reject / Not interest / Fake appears ANYWHERE in the
 // number's history it is Rejected, whatever came after. It shows under the
@@ -38,14 +41,32 @@ interface EntryRow {
   customer: EnrichedCustomer
   day: string          // YYYY-MM-DD of the latest update
   latestAt: string     // ISO of the latest update
-  tags: CrmTagKey[]    // the latest update's quick-status tags
+  tags: CrmTagKey[]    // the latest update's quick-status tags (may be empty)
+  kind: UpdateKind     // status when the latest update has no tags
   rejected: boolean    // a delete outcome appears anywhere in the history
   note: string         // latest note
   count: number        // total updates
 }
 
-// Chip filter: a quick-status tag, or the Rejected bucket.
-type StatusFilter = CrmTagKey | 'rejected'
+// What a number's status is when its latest update carries no quick-status
+// button: the kind of update it was, or 'new' for an entry with no update yet.
+type UpdateKind = 'message' | 'call' | 'feedback' | 'order' | 'new'
+const KIND_LABEL: Record<UpdateKind, string> = {
+  message: 'Message', call: 'Call', feedback: 'Feedback', order: 'Order update', new: 'New entry',
+}
+const KINDS = Object.keys(KIND_LABEL) as UpdateKind[]
+const kindOf = (type: string | null): UpdateKind =>
+  (KINDS as string[]).includes(type || '') ? (type as UpdateKind) : 'message'
+
+// Chip filter: a quick-status tag, an untagged update kind, or Rejected.
+type StatusFilter = CrmTagKey | `kind:${UpdateKind}` | 'rejected'
+
+// The label shown/exported for a row's status.
+function statusLabel(r: EntryRow): string {
+  if (r.rejected) return 'Rejected'
+  if (r.tags.length) return r.tags.map(t => CRM_TAG_MAP[t].label).join(' | ')
+  return KIND_LABEL[r.kind]
+}
 
 function parseWillBuyDate(description: string): string | null {
   const m = description.match(/will buy on (\d{4}-\d{2}-\d{2})/i)
@@ -148,7 +169,7 @@ export default function CustomersPage() {
     // for agents we additionally filter interactions to their own entries.
     let iq = supabase
       .from('interactions')
-      .select('customer_id, description, tags, created_at')
+      .select('customer_id, type, description, tags, created_at')
       .order('created_at', { ascending: false })
       .limit(5000)
     if (role === 'crm_agent' || role === 'team_leader') iq = iq.eq('created_by', user.id)
@@ -198,10 +219,8 @@ export default function CustomersPage() {
       if (existing) {
         existing.count += 1
         if (isDelete) existing.rejected = true
-        // Interactions arrive newest-first, so the first one seen is the latest.
-        // If the very latest update carried no tags, fall back to the most
-        // recent one that did, so the card never goes blank.
-        if (existing.tags.length === 0 && tags.length) existing.tags = [...tags]
+        // Interactions arrive newest-first, so the first one seen is the
+        // latest and already holds the status. Older updates never override it.
       } else {
         byId.set(i.customer_id, {
           key: i.customer_id,
@@ -209,6 +228,7 @@ export default function CustomersPage() {
           day: localDay(i.created_at),
           latestAt: i.created_at,
           tags: [...tags],
+          kind: kindOf(i.type),
           rejected: isDelete,
           note: (i.description || '').replace(/ \| (Invoice|Slip): https?:\/\/\S+/g, ''),
           count: 1,
@@ -225,6 +245,7 @@ export default function CustomersPage() {
         day: localDay(c.created_at),
         latestAt: c.created_at,
         tags: [],
+        kind: 'new',
         rejected: false,
         note: '',
         count: 0,
@@ -248,14 +269,16 @@ export default function CustomersPage() {
 
   // Chip counts: each number counted once, by its latest status. Rejected
   // numbers only count under Rejected.
-  const { tagCounts, rejectedCount } = useMemo(() => {
+  const { tagCounts, kindCounts, rejectedCount } = useMemo(() => {
     const counts = new Map<CrmTagKey, number>()
+    const kinds = new Map<UpdateKind, number>()
     let rej = 0
     rangeRows.forEach(r => {
       if (r.rejected) { rej++; return }
+      if (r.tags.length === 0) { kinds.set(r.kind, (kinds.get(r.kind) || 0) + 1); return }
       r.tags.forEach(t => counts.set(t, (counts.get(t) || 0) + 1))
     })
-    return { tagCounts: counts, rejectedCount: rej }
+    return { tagCounts: counts, kindCounts: kinds, rejectedCount: rej }
   }, [rangeRows])
 
   const filtered = useMemo(() => {
@@ -263,15 +286,19 @@ export default function CustomersPage() {
     // "0771234567" should find the stored "94771234567".
     const qDigits = q.replace(/\D/g, '').replace(/^0+/, '')
     return rangeRows.filter(r => {
-      if (statusFilter === 'rejected' && !r.rejected) return false
-      if (statusFilter && statusFilter !== 'rejected' && (r.rejected || !r.tags.includes(statusFilter))) return false
+      if (statusFilter === 'rejected') {
+        if (!r.rejected) return false
+      } else if (statusFilter?.startsWith('kind:')) {
+        if (r.rejected || r.tags.length || `kind:${r.kind}` !== statusFilter) return false
+      } else if (statusFilter) {
+        if (r.rejected || !r.tags.includes(statusFilter as CrmTagKey)) return false
+      }
       if (!q) return true
       return (
         (qDigits.length >= 3 && r.customer.phone.includes(qDigits)) ||
         (r.customer.name?.toLowerCase() || '').includes(q) ||
         r.note.toLowerCase().includes(q) ||
-        (r.rejected && 'rejected'.includes(q)) ||
-        r.tags.some(t => CRM_TAG_MAP[t].label.toLowerCase().includes(q))
+        statusLabel(r).toLowerCase().includes(q)
       )
     })
   }, [rangeRows, statusFilter, deferredSearch])
@@ -303,7 +330,7 @@ export default function CustomersPage() {
       new Date(r.latestAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       '+' + r.customer.phone,
       r.customer.name || '',
-      r.rejected ? 'Rejected' : r.tags.map(t => CRM_TAG_MAP[t].label).join(' | '),
+      statusLabel(r),
       String(r.count),
       r.note,
     ])
@@ -397,6 +424,21 @@ export default function CustomersPage() {
                 className={`px-3 py-1.5 rounded-full text-[9px] font-bold border transition-all ${on ? t.btnOn : t.btn}`}
               >
                 {t.label} <span className="opacity-70">{n}</span>
+              </button>
+            )
+          })}
+          {KINDS.map(k => {
+            const n = kindCounts.get(k) || 0
+            const key = `kind:${k}` as const
+            if (n === 0 && statusFilter !== key) return null
+            const on = statusFilter === key
+            return (
+              <button
+                key={key}
+                onClick={() => setStatusFilter(on ? null : key)}
+                className={`px-3 py-1.5 rounded-full text-[9px] font-bold border transition-all ${on ? 'bg-gray-700 text-white border-gray-700' : 'bg-white text-gray-500 border-gray-200'}`}
+              >
+                {KIND_LABEL[k]} <span className="opacity-70">{n}</span>
               </button>
             )
           })}
@@ -533,14 +575,18 @@ export default function CustomersPage() {
                       {' '}{new Date(r.latestAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       {r.count > 1 ? ` · ${r.count} updates` : ''}
                     </p>
-                    {/* Latest quick-status only */}
-                    {!r.rejected && r.tags.length > 0 && (
+                    {/* Status = the latest update only */}
+                    {!r.rejected && (
                       <div className="flex gap-1 mt-1 flex-wrap">
-                        {r.tags.map(t => (
+                        {r.tags.length > 0 ? r.tags.map(t => (
                           <span key={t} className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full ${CRM_TAG_MAP[t].chip}`}>
                             {CRM_TAG_MAP[t].label}
                           </span>
-                        ))}
+                        )) : (
+                          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">
+                            {KIND_LABEL[r.kind]}
+                          </span>
+                        )}
                       </div>
                     )}
                     {r.note && (

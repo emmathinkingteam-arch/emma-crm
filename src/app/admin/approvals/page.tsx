@@ -585,7 +585,8 @@ function BonusReview() {
   const [month, setMonth] = useState(currentMonth)
   const [rows, setRows] = useState<any[]>([])
   const [expanded, setExpanded] = useState<Record<string, boolean>>({}) // user_id → drill-down open
-  const [qualityOff, setQualityOff] = useState<Record<string, boolean>>({}) // user_id → had complaint/refund
+  const [qualityOn, setQualityOn] = useState<Record<string, boolean>>({}) // user_id → admin ticked the quality bonus
+  const [settings, setSettings] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savedMsg, setSavedMsg] = useState('')
@@ -594,7 +595,8 @@ function BonusReview() {
     setLoading(true); setSavedMsg('')
     const res = await fetch(`/api/bonuses?month_year=${my}`).then(r => r.json())
     setRows(res.rows || [])
-    setQualityOff({})
+    setSettings(res.settings || null)
+    setQualityOn({})
     setLoading(false)
   }
   useEffect(() => { load(month) }, [month])
@@ -609,10 +611,11 @@ function BonusReview() {
   const isCurrentMonth = month === currentMonth
 
   const totalOf = (r: any) =>
-    r.volume_bonus + r.revenue_target_bonus + r.top_agent_bonus + r.platinum_bonus + (qualityOff[r.user_id] ? 0 : r.quality_bonus)
+    r.volume_bonus + r.revenue_target_bonus + r.top_agent_bonus + r.platinum_bonus + (r.mini_bonus || 0) + (qualityOn[r.user_id] ? r.quality_bonus : 0)
 
   const grandTotal = rows.reduce((s, r) => s + totalOf(r), 0)
   const eligibleCount = rows.filter(r => totalOf(r) > 0).length
+  const totalMini = rows.reduce((s, r) => s + (r.mini || 0), 0)
   const fmt = (n: number) => Number(n || 0).toLocaleString()
 
   const apply = async () => {
@@ -649,7 +652,10 @@ function BonusReview() {
 
       {/* Totals banner */}
       <div className="bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3 flex items-center justify-between">
-        <span className="text-xs font-bold text-amber-700">{eligibleCount} agent{eligibleCount === 1 ? '' : 's'} earning a bonus</span>
+        <span className="text-xs font-bold text-amber-700">
+          {eligibleCount} agent{eligibleCount === 1 ? '' : 's'} earning a bonus
+          <span className="ml-2 text-[10px] font-bold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full">{totalMini} Mini Subscription{totalMini === 1 ? '' : 's'} this month</span>
+        </span>
         <span className="text-sm font-extrabold text-amber-700">Total payout: LKR {fmt(grandTotal)}</span>
       </div>
 
@@ -661,7 +667,7 @@ function BonusReview() {
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-x-auto">
               <table className="w-full text-xs">
                 <thead className="bg-gray-50 border-b border-gray-100">
-                  <tr>{['Agent', 'Sales', 'Revenue / Target', 'Plat.', 'Volume', 'Target', 'Top', 'Platinum', 'Quality', 'Total'].map(h =>
+                  <tr>{['Agent', 'Sales', 'Revenue / Target', 'Plat.', 'Mini', 'Volume', 'Target', 'Top', 'Platinum', 'Mini bonus', 'Quality', 'Total'].map(h =>
                     <th key={h} className="px-3 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>)}</tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -685,16 +691,18 @@ function BonusReview() {
                           <span className="text-gray-300"> / {r.target != null ? fmt(r.target) : '—'}</span>
                         </td>
                         <td className="px-3 py-2.5 text-gray-600 font-semibold">{r.platinum}</td>
+                        <td className="px-3 py-2.5">{r.mini ? <span className="text-purple-600 font-semibold">{r.mini}</span> : <span className="text-gray-300">0</span>}</td>
                         <td className="px-3 py-2.5">{r.volume_bonus ? <span className="text-gray-700 font-semibold">{fmt(r.volume_bonus)}</span> : <span className="text-gray-300">—</span>}</td>
                         <td className="px-3 py-2.5">{r.revenue_target_bonus ? <span className="text-gray-700 font-semibold">{fmt(r.revenue_target_bonus)}</span> : <span className="text-gray-300">—</span>}</td>
                         <td className="px-3 py-2.5">{r.top_agent_bonus ? <span className="text-gray-700 font-semibold">{fmt(r.top_agent_bonus)}</span> : <span className="text-gray-300">—</span>}</td>
                         <td className="px-3 py-2.5">{r.platinum_bonus ? <span className="text-gray-700 font-semibold">{fmt(r.platinum_bonus)}</span> : <span className="text-gray-300">—</span>}</td>
+                        <td className="px-3 py-2.5">{r.mini_bonus ? <span className="text-gray-700 font-semibold">{fmt(r.mini_bonus)}</span> : <span className="text-gray-300">—</span>}</td>
                         <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
-                          <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Untick if this agent had a complaint or refund">
-                            <input type="checkbox" checked={!qualityOff[r.user_id]}
-                              onChange={e => setQualityOff(p => ({ ...p, [r.user_id]: !e.target.checked }))}
+                          <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Tick to give this agent the quality bonus">
+                            <input type="checkbox" checked={!!qualityOn[r.user_id]}
+                              onChange={e => setQualityOn(p => ({ ...p, [r.user_id]: e.target.checked }))}
                               className="accent-amber-500" />
-                            <span className={qualityOff[r.user_id] ? 'text-gray-300' : 'text-gray-700 font-semibold'}>{fmt(r.quality_bonus)}</span>
+                            <span className={qualityOn[r.user_id] ? 'text-gray-700 font-semibold' : 'text-gray-300'}>{fmt(r.quality_bonus)}</span>
                           </label>
                         </td>
                         <td className="px-3 py-2.5">
@@ -705,7 +713,7 @@ function BonusReview() {
                       {/* Drill-down: the orders behind the numbers */}
                       {isOpen && (
                         <tr className="bg-gray-50/60">
-                          <td colSpan={10} className="px-4 py-3">
+                          <td colSpan={12} className="px-4 py-3">
                             {(r.orders || []).length === 0
                               ? <p className="text-[11px] text-gray-400">No orders this month.</p>
                               : (
@@ -717,7 +725,7 @@ function BonusReview() {
                                     </thead>
                                     <tbody className="divide-y divide-gray-50">
                                       {r.orders.map((o: any, i: number) => (
-                                        <tr key={i} className={o.counted ? '' : 'bg-red-50/30'}>
+                                        <tr key={i} className={o.counted ? '' : o.reason === 'mini' ? 'bg-purple-50/30' : 'bg-red-50/30'}>
                                           <td className="px-3 py-1.5 text-gray-400">{o.counted ? (r.orders.slice(0, i + 1).filter((x: any) => x.counted).length) : '—'}</td>
                                           <td className="px-3 py-1.5 text-gray-500 whitespace-nowrap">{new Date(o.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</td>
                                           <td className="px-3 py-1.5 font-semibold text-gray-700">
@@ -729,6 +737,8 @@ function BonusReview() {
                                           <td className="px-3 py-1.5">
                                             {o.counted
                                               ? <span className="text-[9px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">Counted</span>
+                                              : o.reason === 'mini'
+                                              ? <span className="text-[9px] font-bold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full">Mini · counted separately</span>
                                               : <span className="text-[9px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">Skipped · {o.reason}</span>}
                                           </td>
                                         </tr>
@@ -737,7 +747,8 @@ function BonusReview() {
                                   </table>
                                   <div className="px-3 py-2 bg-gray-50 border-t border-gray-100 text-[10px] font-bold text-gray-500 flex gap-4">
                                     <span>{r.sales} counted sale{r.sales === 1 ? '' : 's'}</span>
-                                    {excluded.length > 0 && <span className="text-red-400">{excluded.length} skipped</span>}
+                                    {r.mini > 0 && <span className="text-purple-500">{r.mini} Mini Subscription{r.mini === 1 ? '' : 's'}</span>}
+                                    {excluded.length - (r.mini || 0) > 0 && <span className="text-red-400">{excluded.length - (r.mini || 0)} skipped</span>}
                                     <span className="text-gray-400">Revenue LKR {fmt(r.revenue)}</span>
                                     <span className="text-purple-500">{r.platinum} Platinum</span>
                                   </div>
@@ -755,11 +766,97 @@ function BonusReview() {
           )}
 
       <p className="text-[10px] text-gray-400 leading-relaxed px-1">
-        Volume tiers (20+/30+/40+ = 5k/12k/22k, highest only), revenue target (7.5k), top agent (5k, one winner),
-        5 Platinum incl. Princess Platinum (6.5k) are auto-calculated from invoiced non-fake orders (Free Posts excluded).
-        Quality bonus (3k) defaults on — untick agents who had a complaint or refund. <b>Apply</b> writes the total into each
-        agent&apos;s salary sheet for the month, where you approve it as usual.
+        Bonuses are auto-calculated from invoiced non-fake orders (Free Posts excluded). Mini Subscriptions are <b>not</b> counted in
+        sales or revenue — they&apos;re tallied separately and pay their own Mini bonus. Quality bonus is <b>off</b> until you tick it for an agent.
+        <b> Apply</b> writes the total into each agent&apos;s salary sheet for the month, where you approve it as usual.
+        Change any amount in <b>Bonus amounts</b> below.
       </p>
+
+      {settings && <BonusSettingsEditor initial={settings} onSaved={() => load(month)} />}
+    </div>
+  )
+}
+
+// ── Editable bonus amounts (bonus_settings row, 0027) ───────────────────────
+type Tier = { min: number | string; amount: number | string }
+function BonusSettingsEditor({ initial, onSaved }: { initial: any; onSaved: () => void }) {
+  const [cfg, setCfg] = useState<any>(initial)
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState('')
+  useEffect(() => { setCfg(initial) }, [initial])
+
+  const setField = (k: string, v: any) => { setCfg((c: any) => ({ ...c, [k]: v })); setMsg('') }
+  const setTier = (k: string, i: number, f: 'min' | 'amount', v: string) =>
+    setField(k, cfg[k].map((t: Tier, j: number) => j === i ? { ...t, [f]: v } : t))
+  const addTier = (k: string) => setField(k, [...cfg[k], { min: '', amount: '' }])
+  const removeTier = (k: string, i: number) => setField(k, cfg[k].filter((_: Tier, j: number) => j !== i))
+
+  const save = async () => {
+    setSaving(true); setMsg('')
+    const res = await fetch('/api/bonuses', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings: cfg }),
+    }).then(r => r.json())
+    setSaving(false)
+    if (res.ok) { setMsg('Saved ✓'); onSaved() } else setMsg(res.error || 'Failed to save')
+  }
+
+  const input = 'w-24 border border-gray-200 rounded-lg px-2 py-1 text-xs font-semibold text-gray-700 focus:outline-none focus:border-amber-400'
+
+  const TierList = ({ k, title, unit }: { k: string; title: string; unit: string }) => (
+    <div className="space-y-2">
+      <p className="text-[11px] font-bold text-gray-700">{title}</p>
+      {cfg[k].length === 0 && <p className="text-[10px] text-gray-400">No tiers — nothing is paid.</p>}
+      {cfg[k].map((t: Tier, i: number) => (
+        <div key={i} className="flex items-center gap-2 text-[11px] text-gray-500">
+          <span>If</span>
+          <input type="number" min={1} value={t.min} onChange={e => setTier(k, i, 'min', e.target.value)} className={`${input} w-16`} />
+          <span>+ {unit}, pay LKR</span>
+          <input type="number" min={0} value={t.amount} onChange={e => setTier(k, i, 'amount', e.target.value)} className={input} />
+          <button onClick={() => removeTier(k, i)} className="text-gray-300 hover:text-red-500"><XCircle size={14} /></button>
+        </div>
+      ))}
+      <button onClick={() => addTier(k)} className="text-[10px] font-bold text-amber-600 hover:text-amber-700">+ Add tier</button>
+    </div>
+  )
+
+  const Amount = ({ k, label }: { k: string; label: string }) => (
+    <label className="flex items-center justify-between gap-3 text-[11px] text-gray-600">
+      <span>{label}</span>
+      <span className="flex items-center gap-1 text-gray-400">LKR
+        <input type="number" min={0} value={cfg[k]} onChange={e => setField(k, e.target.value)} className={input} />
+      </span>
+    </label>
+  )
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-4">
+      <div className="flex items-center gap-3">
+        <p className="text-xs font-extrabold text-gray-800">Bonus amounts</p>
+        <span className="text-[10px] text-gray-400">Applies to every month you view here — only the highest tier reached is paid.</span>
+        <div className="flex-1" />
+        {msg && <span className={`text-[11px] font-bold ${msg.startsWith('Saved') ? 'text-green-600' : 'text-red-500'}`}>{msg}</span>}
+        <button onClick={save} disabled={saving}
+          className="flex items-center gap-1.5 bg-gray-800 text-white rounded-xl px-4 py-2 text-xs font-bold hover:bg-gray-900 disabled:opacity-40">
+          {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+          Save amounts
+        </button>
+      </div>
+      <div className="grid gap-6 md:grid-cols-3">
+        {TierList({ k: 'volume_tiers', title: 'Volume — sales (Mini not counted)', unit: 'sales' })}
+        {TierList({ k: 'mini_tiers', title: 'Mini Subscription', unit: 'Minis' })}
+        <div className="space-y-2">
+          <p className="text-[11px] font-bold text-gray-700">Other bonuses</p>
+          {Amount({ k: 'revenue_target_bonus', label: 'Hit revenue target' })}
+          {Amount({ k: 'top_agent_bonus', label: 'Top agent (one winner)' })}
+          {Amount({ k: 'quality_bonus', label: 'Quality (when ticked)' })}
+          {Amount({ k: 'platinum_bonus', label: 'Platinum bonus' })}
+          <label className="flex items-center justify-between gap-3 text-[11px] text-gray-600">
+            <span>Platinum sales needed</span>
+            <input type="number" min={1} value={cfg.platinum_min} onChange={e => setField('platinum_min', e.target.value)} className={`${input} w-16`} />
+          </label>
+        </div>
+      </div>
     </div>
   )
 }

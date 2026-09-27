@@ -99,9 +99,8 @@ export default function PayrollTab() {
 
   // ── The maths, mirroring the salary sheet exactly ─────────────────────────
   const basicOf = (r: Row) => basicEdit[r.user_id] !== undefined ? Number(basicEdit[r.user_id] || 0) : r.basic_salary
-  // The engine hands the quality bonus to everyone by default, sales role or
-  // not — so the bonus stays editable per row, same as the Bonuses tab's
-  // quality tick-box.
+  // Quality bonus is opt-in and never in the auto figure — add it by editing
+  // the row, or tick it on the Bonuses tab and Apply there.
   const bonusOf = (r: Row) =>
     bonusEdit[r.user_id] !== undefined ? Number(bonusEdit[r.user_id] || 0)
       : useBonus ? r.monthly_bonus
@@ -318,7 +317,7 @@ export default function PayrollTab() {
                                       <div className="space-y-1">
                                         {[
                                           ['Volume', bd.volume], ['Revenue target', bd.revenue_target],
-                                          ['Top agent', bd.top_agent], ['Platinum', bd.platinum], ['Quality', bd.quality],
+                                          ['Top agent', bd.top_agent], ['Platinum', bd.platinum], ['Mini', bd.mini],
                                         ].filter(([, v]) => Number(v) > 0).map(([k, v]) => (
                                           <div key={String(k)} className="flex justify-between text-[11px]">
                                             <span className="text-gray-500">{k}</span>
@@ -328,6 +327,7 @@ export default function PayrollTab() {
                                         <p className="text-[10px] text-gray-400 pt-1 border-t border-gray-50">
                                           {bd.sales} sale{bd.sales === 1 ? '' : 's'} · revenue {fmt(bd.revenue)}
                                           {bd.target ? ` / target ${fmt(bd.target)}` : ''}
+                                          {bd.mini_count ? ` · ${bd.mini_count} mini` : ''}
                                         </p>
                                       </div>
                                     )}
@@ -392,8 +392,8 @@ export default function PayrollTab() {
       <p className="text-[10px] text-gray-400 leading-relaxed px-1">
         Basic comes from the worker&apos;s profile (Basic Salary Expect) until a sheet exists, then from the sheet — edit it here either way.
         Bonuses and top-ups are the same numbers the Bonuses and Discount top-ups tabs show (top-ups use the default {'≤'}25% discount cap;
-        open that tab to re-tick individual orders). The bonus engine hands its LKR 3,000 quality bonus to everyone by default —
-        zero the Bonus box for anyone who shouldn&apos;t get one. Wallet is each worker&apos;s live balance — step earnings less overdue penalties —
+        open that tab to re-tick individual orders). The quality bonus is <b>not</b> included — tick it per agent on the Bonuses tab
+        (or type it into the Bonus box). Bonus amounts are edited at the bottom of the Bonuses tab. Wallet is each worker&apos;s live balance — step earnings less overdue penalties —
         and is <b>off</b> until you tick it, because a negative balance means recovering penalties out of that month&apos;s pay.
         Stamp duty, meeting absence, late and no-pay deductions stay whatever you typed on the sheet; payroll never overwrites them.
         <b> Save all</b> writes every row at once, then approve them on the Salary Sheets tab.

@@ -14,7 +14,9 @@ import type { SbLike } from '@/lib/accounting'
 const FREE_POST = 'Free Post'
 const PLATINUM_NAMES = ['Platinum', 'Princess Platinum']
 
-// Bonus amounts (plan §5.3)
+// Bonus amounts (plan §5.3). These are only the defaults — the live figures
+// sit in the bonus_settings row (0027) and are edited at the bottom of
+// Approvals → Bonuses. A key missing from that row falls back to these.
 export const VOLUME_TIERS = [
   { min: 40, amount: 22000 },
   { min: 30, amount: 12000 },
@@ -25,6 +27,54 @@ export const TOP_AGENT_BONUS = 5000
 export const QUALITY_BONUS = 3000 // zero complaints + refunds — eligibility set manually
 export const PLATINUM_BONUS = 6500
 export const PLATINUM_MIN = 5
+
+export type BonusTier = { min: number; amount: number }
+export type BonusSettings = {
+  volume_tiers: BonusTier[]       // counted sales (Mini Subscriptions excluded) → LKR, highest tier only
+  revenue_target_bonus: number
+  top_agent_bonus: number
+  quality_bonus: number
+  platinum_bonus: number
+  platinum_min: number
+  mini_tiers: BonusTier[]         // Mini Subscriptions sold → LKR, highest tier only
+}
+export const DEFAULT_BONUS_SETTINGS: BonusSettings = {
+  volume_tiers: VOLUME_TIERS,
+  revenue_target_bonus: REVENUE_TARGET_BONUS,
+  top_agent_bonus: TOP_AGENT_BONUS,
+  quality_bonus: QUALITY_BONUS,
+  platinum_bonus: PLATINUM_BONUS,
+  platinum_min: PLATINUM_MIN,
+  mini_tiers: [],
+}
+
+const cleanTiers = (v: any, fallback: BonusTier[]): BonusTier[] =>
+  Array.isArray(v)
+    ? v.map((t: any) => ({ min: Math.max(0, Math.floor(Number(t?.min) || 0)), amount: Math.max(0, Number(t?.amount) || 0) }))
+      .filter(t => t.min > 0)
+      .sort((a, b) => b.min - a.min)
+    : fallback
+const cleanNum = (v: any, fallback: number) => (v === undefined || v === null || v === '' || isNaN(Number(v)) ? fallback : Math.max(0, Number(v)))
+
+/** Coerce anything (the stored jsonb, or an admin's PUT body) into valid settings. */
+export function normalizeBonusSettings(raw: any): BonusSettings {
+  const r = raw || {}
+  const d = DEFAULT_BONUS_SETTINGS
+  return {
+    volume_tiers: cleanTiers(r.volume_tiers, d.volume_tiers),
+    revenue_target_bonus: cleanNum(r.revenue_target_bonus, d.revenue_target_bonus),
+    top_agent_bonus: cleanNum(r.top_agent_bonus, d.top_agent_bonus),
+    quality_bonus: cleanNum(r.quality_bonus, d.quality_bonus),
+    platinum_bonus: cleanNum(r.platinum_bonus, d.platinum_bonus),
+    platinum_min: Math.max(1, Math.floor(cleanNum(r.platinum_min, d.platinum_min))),
+    mini_tiers: cleanTiers(r.mini_tiers, d.mini_tiers),
+  }
+}
+
+export async function loadBonusSettings(sb: SbLike): Promise<BonusSettings> {
+  const { data } = await sb.from('bonus_settings').select('settings').eq('id', 1).maybeSingle()
+  return normalizeBonusSettings(data?.settings)
+}
 
 // Statutory rates
 export const EPF_EMPLOYEE_PCT = 8
@@ -55,43 +105,50 @@ export async function payrollWorkers(sb: SbLike, extraCols = '') {
 export async function computeBonusRows(sb: SbLike, monthYear: string) {
   const { start, end } = monthRange(monthYear)
 
-  const [workers, pkgRes, ordersRes, targetsRes] = await Promise.all([
+  const [workers, pkgRes, ordersRes, targetsRes, cfg] = await Promise.all([
     payrollWorkers(sb),
-    sb.from('packages').select('id, name'),
+    sb.from('packages').select('id, name, flow_variant'),
     sb.from('orders')
       .select('created_by, package_id, amount_paid, is_fake, invoice_number, created_at')
       .not('created_by', 'is', null)
       .gte('created_at', start)
       .lt('created_at', end),
     sb.from('monthly_targets').select('user_id, target_amount').eq('month_year', monthYear),
+    loadBonusSettings(sb),
   ])
 
   const pkgName: Record<string, string> = {}
   for (const p of pkgRes.data || []) pkgName[p.id] = p.name
   const freePostIds = new Set((pkgRes.data || []).filter((p: any) => p.name === FREE_POST).map((p: any) => p.id))
   const platinumIds = new Set((pkgRes.data || []).filter((p: any) => PLATINUM_NAMES.includes(p.name)).map((p: any) => p.id))
+  // Mini Subscriptions are tallied on their own — never in sales or revenue.
+  const miniIds = new Set((pkgRes.data || []).filter((p: any) => p.flow_variant === 'mini').map((p: any) => p.id))
 
   const targetOf: Record<string, number> = {}
   for (const t of targetsRes.data || []) targetOf[t.user_id] = Number(t.target_amount || 0)
 
   // Tally qualifying orders per agent + keep a per-agent breakdown for drill-down
-  const tally: Record<string, { sales: number; revenue: number; platinum: number }> = {}
+  const tally: Record<string, { sales: number; revenue: number; platinum: number; mini: number }> = {}
   const detail: Record<string, any[]> = {}
   for (const o of ordersRes.data || []) {
     const isFree = freePostIds.has(o.package_id)
-    const counted = !o.is_fake && !!o.invoice_number && !isFree
-    const reason = o.is_fake ? 'fake' : !o.invoice_number ? 'no invoice' : isFree ? 'free post' : ''
+    const isMini = miniIds.has(o.package_id)
+    const valid = !o.is_fake && !!o.invoice_number && !isFree
+    const counted = valid && !isMini
+    const reason = o.is_fake ? 'fake' : !o.invoice_number ? 'no invoice' : isFree ? 'free post' : isMini ? 'mini' : ''
     ;(detail[o.created_by] ||= []).push({
       package: pkgName[o.package_id] || '—',
       amount: Number(o.amount_paid || 0),
       invoice_number: o.invoice_number,
       is_platinum: platinumIds.has(o.package_id),
       created_at: o.created_at,
+      is_mini: isMini,
       counted,
       reason,
     })
-    if (!counted) continue
-    const t = (tally[o.created_by] ||= { sales: 0, revenue: 0, platinum: 0 })
+    if (!valid) continue
+    const t = (tally[o.created_by] ||= { sales: 0, revenue: 0, platinum: 0, mini: 0 })
+    if (isMini) { t.mini += 1; continue }
     t.sales += 1
     t.revenue += Number(o.amount_paid || 0)
     if (platinumIds.has(o.package_id)) t.platinum += 1
@@ -106,14 +163,16 @@ export async function computeBonusRows(sb: SbLike, monthYear: string) {
   }
 
   const rows = workers.map((w: any) => {
-    const t = tally[w.id] || { sales: 0, revenue: 0, platinum: 0 }
+    const t = tally[w.id] || { sales: 0, revenue: 0, platinum: 0, mini: 0 }
     const target = targetOf[w.id] ?? null
 
-    const volumeTier = VOLUME_TIERS.find(v => t.sales >= v.min)
+    const volumeTier = cfg.volume_tiers.find(v => t.sales >= v.min)
     const volume_bonus = volumeTier ? volumeTier.amount : 0
-    const revenue_target_bonus = target != null && target > 0 && t.revenue >= target ? REVENUE_TARGET_BONUS : 0
-    const top_agent_bonus = w.id === topAgentId && topRevenue > 0 ? TOP_AGENT_BONUS : 0
-    const platinum_bonus = t.platinum >= PLATINUM_MIN ? PLATINUM_BONUS : 0
+    const miniTier = cfg.mini_tiers.find(v => t.mini >= v.min)
+    const mini_bonus = miniTier ? miniTier.amount : 0
+    const revenue_target_bonus = target != null && target > 0 && t.revenue >= target ? cfg.revenue_target_bonus : 0
+    const top_agent_bonus = w.id === topAgentId && topRevenue > 0 ? cfg.top_agent_bonus : 0
+    const platinum_bonus = t.platinum >= cfg.platinum_min ? cfg.platinum_bonus : 0
 
     return {
       user_id: w.id,
@@ -123,12 +182,14 @@ export async function computeBonusRows(sb: SbLike, monthYear: string) {
       revenue: t.revenue,
       target,
       platinum: t.platinum,
+      mini: t.mini,
       is_top_agent: w.id === topAgentId && topRevenue > 0,
       volume_bonus,
       revenue_target_bonus,
       top_agent_bonus,
       platinum_bonus,
-      quality_bonus: QUALITY_BONUS, // eligible by default; admin toggles off
+      mini_bonus,
+      quality_bonus: cfg.quality_bonus, // off by default; admin ticks it per agent
       orders: detail[w.id] || [],
     }
   })

@@ -114,7 +114,9 @@ export async function GET(req: NextRequest) {
     const basic_source = sheetBasic > 0 ? 'sheet' : profileBasic > 0 ? 'profile' : 'missing'
 
     const bonusTotal = b
-      ? b.volume_bonus + b.revenue_target_bonus + b.top_agent_bonus + b.platinum_bonus + b.quality_bonus
+      // Quality is opt-in (ticked per agent on the Bonuses tab), so it is
+      // never part of the auto total here.
+      ? b.volume_bonus + b.revenue_target_bonus + b.top_agent_bonus + b.platinum_bonus + b.mini_bonus
       : 0
     const topup = d ? cappedTopup(d, DEFAULT_DISCOUNT_CAP_PCT) : 0
     const wm = wallet[w.id] || { earning: 0, penalty: 0, other: 0 }
@@ -139,8 +141,9 @@ export async function GET(req: NextRequest) {
         revenue_target: b.revenue_target_bonus,
         top_agent: b.top_agent_bonus,
         platinum: b.platinum_bonus,
-        quality: b.quality_bonus,
+        mini: b.mini_bonus,
         sales: b.sales,
+        mini_count: b.mini,
         revenue: b.revenue,
         target: b.target,
         is_top_agent: b.is_top_agent,

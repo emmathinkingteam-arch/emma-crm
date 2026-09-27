@@ -18,7 +18,9 @@
 //   crm_rejections .............. CASCADE   (auto)
 //   location_pings .............. SET NULL  (auto)
 //   second_post_requests ........ SET NULL  (auto)
+//   quotations / callbacks ...... CASCADE   (auto)
 //   interactions / leads ........ NO ACTION  → must be deleted first
+//   calls ....................... NO ACTION  → unlinked (call log is kept)
 //   orders / acc_* .............. NO ACTION  → guarded above, never here
 //
 // Returns:
@@ -72,6 +74,9 @@ export async function purgeRejectedCustomer(
     await sb.from('leads').delete().eq('customer_id', customerId)
     // The row currently being processed may not be linked to the customer yet.
     if (leadId) await sb.from('leads').delete().eq('id', leadId)
+    // Softphone call log keeps its rows (phone + recording) but lets go of the
+    // customer — without this every called number refused to delete.
+    await sb.from('calls').update({ customer_id: null }).eq('customer_id', customerId)
 
     const { error } = await sb.from('customers').delete().eq('id', customerId)
     if (error) return { purged: false, reason: 'error' }

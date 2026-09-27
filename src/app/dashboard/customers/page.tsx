@@ -3,16 +3,20 @@
 // ============================================================================
 // /dashboard/customers — the "Clients" tab
 // ============================================================================
-// Entry-driven list: one card per customer per day worked. If the agent
-// updates an old number today, it appears again under today (same number can
-// show many times across a date range — that's intended, it's the work log).
+// ONE card per number. The number's LATEST update is its status — that's what
+// the status chips count and filter on, and what the date range checks (the
+// day of the latest update). Older updates live on the customer page timeline.
 //
-// Filters: date range · quick-status tag chips (click to filter) · search by
-// name / number / tag keyword. Export copies the visible rows as CSV so it
-// pastes straight into Excel / Google Sheets.
+// Reject rule: if Reject / Not interest / Fake appears ANYWHERE in the
+// number's history it is Rejected, whatever came after. It shows under the
+// Rejected chip (never under the other statuses) until it's purged.
+//
+// Filters: date presets + custom range · status chips · search by name /
+// number / note / status. Filters survive a round-trip to a customer page.
+// Export copies the visible rows as CSV so it pastes straight into Excel.
 // ============================================================================
 
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useDeferredValue } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import TopNav from '@/components/shared/TopNav'
@@ -21,23 +25,27 @@ import { Customer } from '@/types'
 import { Search, Phone, ChevronRight, Star, CalendarDays, CreditCard, Copy, Check } from 'lucide-react'
 import Link from 'next/link'
 import { formatPhoneDisplay } from '@/lib/country-codes'
-import { CRM_TAGS, CRM_TAG_MAP, effectiveTags, toCsv, type CrmTagKey } from '@/lib/crm-tags'
+import { CRM_TAGS, CRM_TAG_MAP, DELETE_TAGS, effectiveTags, toCsv, type CrmTagKey } from '@/lib/crm-tags'
 
 interface EnrichedCustomer extends Customer {
   willBuyOnDate: string | null   // YYYY-MM-DD or null
   installmentPending: boolean
 }
 
-// One card = one customer × one day of activity.
+// One card = one number.
 interface EntryRow {
   key: string
   customer: EnrichedCustomer
-  day: string          // YYYY-MM-DD
-  latestAt: string     // ISO of the latest interaction that day
-  tags: CrmTagKey[]    // union of that day's quick-status tags
-  note: string         // latest note that day
-  count: number        // interactions that day
+  day: string          // YYYY-MM-DD of the latest update
+  latestAt: string     // ISO of the latest update
+  tags: CrmTagKey[]    // the latest update's quick-status tags
+  rejected: boolean    // a delete outcome appears anywhere in the history
+  note: string         // latest note
+  count: number        // total updates
 }
+
+// Chip filter: a quick-status tag, or the Rejected bucket.
+type StatusFilter = CrmTagKey | 'rejected'
 
 function parseWillBuyDate(description: string): string | null {
   const m = description.match(/will buy on (\d{4}-\d{2}-\d{2})/i)
@@ -62,6 +70,30 @@ function localDay(iso: string): string {
 
 const TODAY = localDay(new Date().toISOString())
 
+function shiftDay(day: string, delta: number): string {
+  const [y, m, d] = day.split('-').map(Number)
+  return localDay(new Date(y, m - 1, d + delta).toISOString())
+}
+
+const PRESETS = [
+  { key: 'today', label: 'Today', from: TODAY, to: TODAY },
+  { key: 'yesterday', label: 'Yesterday', from: shiftDay(TODAY, -1), to: shiftDay(TODAY, -1) },
+  { key: '7d', label: '7 days', from: shiftDay(TODAY, -6), to: TODAY },
+  { key: '30d', label: '30 days', from: shiftDay(TODAY, -29), to: TODAY },
+  { key: 'all', label: 'All', from: '', to: '' },
+] as const
+
+// Filters are remembered for the tab session so opening a customer and
+// coming back lands on the same view.
+const FILTER_KEY = 'clients-filters'
+interface SavedFilters { fromDate: string; toDate: string; statusFilter: StatusFilter | null; search: string }
+function loadFilters(): SavedFilters | null {
+  try {
+    const raw = sessionStorage.getItem(FILTER_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch { return null }
+}
+
 export default function CustomersPage() {
   const { user, role } = useAuthStore()
   const [customers, setCustomers] = useState<EnrichedCustomer[]>([])
@@ -70,9 +102,26 @@ export default function CustomersPage() {
   const [loading, setLoading] = useState(true)
   const [fromDate, setFromDate] = useState<string>(TODAY)
   const [toDate, setToDate] = useState<string>(TODAY)
-  const [showAllDates, setShowAllDates] = useState(false)
-  const [tagFilter, setTagFilter] = useState<CrmTagKey | null>(null)
+  const [statusFilter, setStatusFilter] = useState<StatusFilter | null>(null)
   const [copied, setCopied] = useState(false)
+  const [filtersLoaded, setFiltersLoaded] = useState(false)
+  // Typing stays instant; the list re-filters just behind it.
+  const deferredSearch = useDeferredValue(search)
+
+  useEffect(() => {
+    const f = loadFilters()
+    if (f) {
+      setFromDate(f.fromDate ?? TODAY); setToDate(f.toDate ?? TODAY)
+      setStatusFilter(f.statusFilter ?? null); setSearch(f.search ?? '')
+    }
+    setFiltersLoaded(true)
+  }, [])
+  useEffect(() => {
+    if (!filtersLoaded) return
+    try {
+      sessionStorage.setItem(FILTER_KEY, JSON.stringify({ fromDate, toDate, statusFilter, search }))
+    } catch { /* storage blocked — filters just won't persist */ }
+  }, [filtersLoaded, fromDate, toDate, statusFilter, search])
 
   useEffect(() => { fetchData() }, [user])
 
@@ -137,93 +186,100 @@ export default function CustomersPage() {
       }))
     const custMap = new Map(enriched.map(c => [c.id, c]))
 
-    // ── Build entry rows: customer × day ─────────────────────────
-    const byKey = new Map<string, EntryRow>()
+    // ── Build entry rows: one per customer ───────────────────────
+    const byId = new Map<string, EntryRow>()
 
     interactionsData?.forEach((i: any) => {
       const cust = custMap.get(i.customer_id)
       if (!cust) return
-      const day = localDay(i.created_at)
-      const key = `${i.customer_id}|${day}`
       const tags = effectiveTags(i)
-      const existing = byKey.get(key)
+      const isDelete = tags.some(t => DELETE_TAGS.includes(t))
+      const existing = byId.get(i.customer_id)
       if (existing) {
         existing.count += 1
+        if (isDelete) existing.rejected = true
         // Interactions arrive newest-first, so the first one seen is the latest.
-        // Show ONLY the latest status the agent set — not the whole day's union.
-        // (If the very latest update carried no tags, fall back to the most
-        // recent one that did, so the card never goes blank.)
+        // If the very latest update carried no tags, fall back to the most
+        // recent one that did, so the card never goes blank.
         if (existing.tags.length === 0 && tags.length) existing.tags = [...tags]
       } else {
-        byKey.set(key, {
-          key,
+        byId.set(i.customer_id, {
+          key: i.customer_id,
           customer: cust,
-          day,
+          day: localDay(i.created_at),
           latestAt: i.created_at,
           tags: [...tags],
+          rejected: isDelete,
           note: (i.description || '').replace(/ \| (Invoice|Slip): https?:\/\/\S+/g, ''),
           count: 1,
         })
       }
     })
 
-    // Customers with no interaction on their creation day still get a row
-    // (a fresh entry with no note yet must appear under that day).
+    // A fresh entry with no note yet still gets a card, dated its creation.
     enriched.forEach(c => {
-      const day = localDay(c.created_at)
-      const key = `${c.id}|${day}`
-      if (!byKey.has(key)) {
-        byKey.set(key, {
-          key,
-          customer: c,
-          day,
-          latestAt: c.created_at,
-          tags: [],
-          note: '',
-          count: 0,
-        })
-      }
+      if (byId.has(c.id)) return
+      byId.set(c.id, {
+        key: c.id,
+        customer: c,
+        day: localDay(c.created_at),
+        latestAt: c.created_at,
+        tags: [],
+        rejected: false,
+        note: '',
+        count: 0,
+      })
     })
 
     setCustomers(enriched)
-    setRows(Array.from(byKey.values()))
+    setRows(Array.from(byId.values()))
     setLoading(false)
   }
 
-  // ── Date-range filtered rows (before tag/search) ──────────────
+  // ── Date-range filtered rows (before status/search) ──────────
+  // A number is in range when its LATEST update falls in range.
   const rangeRows = useMemo(() => {
     return rows.filter(r => {
-      if (r.customer.is_priority) return true       // priority always visible
-      if (search.trim()) return true                // search overrides the range
-      if (showAllDates) return true
+      if (r.customer.is_priority && !r.rejected) return true   // priority always visible
+      if (deferredSearch.trim()) return true                    // search overrides the range
       return r.day >= (fromDate || '0000') && r.day <= (toDate || '9999')
     })
-  }, [rows, fromDate, toDate, showAllDates, search])
+  }, [rows, fromDate, toDate, deferredSearch])
 
-  // Tag chip counts reflect what the current range shows.
-  const tagCounts = useMemo(() => {
+  // Chip counts: each number counted once, by its latest status. Rejected
+  // numbers only count under Rejected.
+  const { tagCounts, rejectedCount } = useMemo(() => {
     const counts = new Map<CrmTagKey, number>()
-    rangeRows.forEach(r => r.tags.forEach(t => counts.set(t, (counts.get(t) || 0) + 1)))
-    return counts
+    let rej = 0
+    rangeRows.forEach(r => {
+      if (r.rejected) { rej++; return }
+      r.tags.forEach(t => counts.set(t, (counts.get(t) || 0) + 1))
+    })
+    return { tagCounts: counts, rejectedCount: rej }
   }, [rangeRows])
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
+    const q = deferredSearch.trim().toLowerCase()
+    // "0771234567" should find the stored "94771234567".
+    const qDigits = q.replace(/\D/g, '').replace(/^0+/, '')
     return rangeRows.filter(r => {
-      if (tagFilter && !r.tags.includes(tagFilter)) return false
+      if (statusFilter === 'rejected' && !r.rejected) return false
+      if (statusFilter && statusFilter !== 'rejected' && (r.rejected || !r.tags.includes(statusFilter))) return false
       if (!q) return true
       return (
-        r.customer.phone.includes(q) ||
+        (qDigits.length >= 3 && r.customer.phone.includes(qDigits)) ||
         (r.customer.name?.toLowerCase() || '').includes(q) ||
         r.note.toLowerCase().includes(q) ||
+        (r.rejected && 'rejected'.includes(q)) ||
         r.tags.some(t => CRM_TAG_MAP[t].label.toLowerCase().includes(q))
       )
     })
-  }, [rangeRows, tagFilter, search])
+  }, [rangeRows, statusFilter, deferredSearch])
 
-  // Sort: will-buy-due → installment → priority → rest, newest first inside.
+  // Sort: will-buy-due → installment → priority → rest → rejected, newest first inside.
   const sorted = useMemo(() => {
     const rank = (r: EntryRow) => {
+      if (r.rejected) return 4
       if (isPastOrToday(r.customer.willBuyOnDate)) return 0
       if (r.customer.installmentPending) return 1
       if (r.customer.is_priority) return 2
@@ -237,17 +293,18 @@ export default function CustomersPage() {
   const priorityCount = customers.filter(c => c.is_priority).length
   const installmentCount = customers.filter(c => c.installmentPending).length
   const willBuyTodayCount = customers.filter(c => isPastOrToday(c.willBuyOnDate)).length
-  const quietFilters = !search && !tagFilter
+  const quietFilters = !search && !statusFilter
 
   // ── Export: copy visible rows as CSV (pastes into Excel) ──────
   const exportCsv = async () => {
-    const header = ['Date', 'Time', 'Phone', 'Name', 'Status buttons', 'Note']
+    const header = ['Last update', 'Time', 'Phone', 'Name', 'Latest status', 'Updates', 'Note']
     const body = sorted.map(r => [
       r.day,
       new Date(r.latestAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       '+' + r.customer.phone,
       r.customer.name || '',
-      r.tags.map(t => CRM_TAG_MAP[t].label).join(' | '),
+      r.rejected ? 'Rejected' : r.tags.map(t => CRM_TAG_MAP[t].label).join(' | '),
+      String(r.count),
       r.note,
     ])
     try {
@@ -259,8 +316,9 @@ export default function CustomersPage() {
     }
   }
 
-  const setToday = () => { setFromDate(TODAY); setToDate(TODAY); setShowAllDates(false) }
-  const isTodayRange = !showAllDates && fromDate === TODAY && toDate === TODAY
+  const activePreset = PRESETS.find(p => p.from === fromDate && p.to === toDate)?.key ?? null
+  const applyPreset = (p: typeof PRESETS[number]) => { setFromDate(p.from); setToDate(p.to) }
+  const rangeLabel = activePreset === 'all' ? 'any date' : activePreset === 'today' ? 'today' : 'these dates'
 
   return (
     <div className="h-screen flex flex-col bg-white overflow-hidden">
@@ -272,75 +330,84 @@ export default function CustomersPage() {
           <Search size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" />
           <input
             type="text"
-            placeholder="Search name, number or button keyword..."
+            placeholder="Search name, number, note or status..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-100 rounded-2xl text-xs font-medium text-gray-700 outline-none focus:border-pink-200 placeholder:text-gray-300"
           />
         </div>
 
-        {/* Quick-status tag chips — click to filter */}
-        <div className="flex flex-wrap gap-1.5 mb-3">
+        {/* Date presets + export */}
+        <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+          {PRESETS.map(p => (
+            <button
+              key={p.key}
+              onClick={() => applyPreset(p)}
+              className={`px-3 py-2 rounded-full text-[10px] font-bold whitespace-nowrap transition-all ${activePreset === p.key ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-500'}`}
+            >
+              {p.label}
+            </button>
+          ))}
           <button
-            onClick={() => setTagFilter(null)}
-            className={`px-3 py-1.5 rounded-full text-[9px] font-bold transition-all ${!tagFilter ? 'bg-pink-600 text-white shadow-sm' : 'bg-gray-100 text-gray-500'}`}
+            onClick={exportCsv}
+            title="Copy visible entries as CSV — paste into Excel"
+            className={`ml-auto flex items-center gap-1 px-3 py-2 rounded-full text-[10px] font-bold whitespace-nowrap transition-all ${copied ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-500'}`}
           >
-            All <span className={`ml-0.5 ${!tagFilter ? 'opacity-70' : 'text-gray-400'}`}>{rangeRows.length}</span>
+            {copied ? <Check size={11} /> : <Copy size={11} />}
+            {copied ? 'Copied!' : 'Export'}
           </button>
-          {CRM_TAGS.map(t => {
+        </div>
+
+        {/* Custom range — filters on the day of each number's latest update */}
+        <div className="flex items-center gap-1 mb-3">
+          <CalendarDays size={12} className="text-gray-300 flex-shrink-0" />
+          <input
+            type="date"
+            value={fromDate}
+            max={toDate || undefined}
+            onChange={e => setFromDate(e.target.value)}
+            className="flex-1 min-w-0 bg-gray-50 border border-gray-100 rounded-xl px-2 py-1.5 text-[10px] font-medium outline-none focus:border-pink-200"
+          />
+          <span className="text-[9px] text-gray-300 font-bold">→</span>
+          <input
+            type="date"
+            value={toDate}
+            min={fromDate || undefined}
+            onChange={e => setToDate(e.target.value)}
+            className="flex-1 min-w-0 bg-gray-50 border border-gray-100 rounded-xl px-2 py-1.5 text-[10px] font-medium outline-none focus:border-pink-200"
+          />
+        </div>
+
+        {/* Status chips — each number counted once, by its latest update */}
+        <div className="flex flex-wrap gap-1.5 mb-4">
+          <button
+            onClick={() => setStatusFilter(null)}
+            className={`px-3 py-1.5 rounded-full text-[9px] font-bold transition-all ${!statusFilter ? 'bg-pink-600 text-white shadow-sm' : 'bg-gray-100 text-gray-500'}`}
+          >
+            All <span className={`ml-0.5 ${!statusFilter ? 'opacity-70' : 'text-gray-400'}`}>{rangeRows.length}</span>
+          </button>
+          {CRM_TAGS.filter(t => t.category !== 'delete').map(t => {
             const n = tagCounts.get(t.key) || 0
-            if (n === 0 && tagFilter !== t.key) return null
-            const on = tagFilter === t.key
+            if (n === 0 && statusFilter !== t.key) return null
+            const on = statusFilter === t.key
             return (
               <button
                 key={t.key}
-                onClick={() => setTagFilter(on ? null : t.key)}
+                onClick={() => setStatusFilter(on ? null : t.key)}
                 className={`px-3 py-1.5 rounded-full text-[9px] font-bold border transition-all ${on ? t.btnOn : t.btn}`}
               >
                 {t.label} <span className="opacity-70">{n}</span>
               </button>
             )
           })}
-        </div>
-
-        {/* Date range + export */}
-        <div className="flex items-center gap-1.5 mb-4 flex-wrap">
-          <button
-            onClick={setToday}
-            className={`px-3 py-2 rounded-full text-[10px] font-bold transition-all ${isTodayRange ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-500'}`}
-          >
-            Today
-          </button>
-          <div className="flex items-center gap-1 flex-1 min-w-[180px]">
-            <CalendarDays size={12} className="text-gray-300 flex-shrink-0" />
-            <input
-              type="date"
-              value={fromDate}
-              onChange={e => { setFromDate(e.target.value); setShowAllDates(false) }}
-              className="flex-1 min-w-0 bg-gray-50 border border-gray-100 rounded-xl px-2 py-1.5 text-[10px] font-medium outline-none focus:border-pink-200"
-            />
-            <span className="text-[9px] text-gray-300 font-bold">→</span>
-            <input
-              type="date"
-              value={toDate}
-              onChange={e => { setToDate(e.target.value); setShowAllDates(false) }}
-              className="flex-1 min-w-0 bg-gray-50 border border-gray-100 rounded-xl px-2 py-1.5 text-[10px] font-medium outline-none focus:border-pink-200"
-            />
-          </div>
-          <button
-            onClick={() => setShowAllDates(!showAllDates)}
-            className={`px-3 py-2 rounded-full text-[10px] font-bold transition-all ${showAllDates ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-500'}`}
-          >
-            All
-          </button>
-          <button
-            onClick={exportCsv}
-            title="Copy visible entries as CSV — paste into Excel"
-            className={`flex items-center gap-1 px-3 py-2 rounded-full text-[10px] font-bold transition-all ${copied ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-500'}`}
-          >
-            {copied ? <Check size={11} /> : <Copy size={11} />}
-            {copied ? 'Copied!' : 'Export'}
-          </button>
+          {(rejectedCount > 0 || statusFilter === 'rejected') && (
+            <button
+              onClick={() => setStatusFilter(statusFilter === 'rejected' ? null : 'rejected')}
+              className={`px-3 py-1.5 rounded-full text-[9px] font-bold border transition-all ${statusFilter === 'rejected' ? CRM_TAG_MAP.rejected.btnOn : CRM_TAG_MAP.rejected.btn}`}
+            >
+              Rejected <span className="opacity-70">{rejectedCount}</span>
+            </button>
+          )}
         </div>
 
         {/* Alert strips */}
@@ -384,10 +451,10 @@ export default function CustomersPage() {
           <div className="text-center py-16">
             <Phone size={28} className="text-gray-200 mx-auto mb-2" />
             <p className="text-xs font-bold text-gray-400">
-              {search ? 'No entries found' : tagFilter ? 'No entries with this button' : 'No entries for these dates'}
+              {search ? 'No entries found' : statusFilter ? `No numbers with this status for ${rangeLabel}` : `No entries for ${rangeLabel}`}
             </p>
-            {!search && !showAllDates && (
-              <button onClick={() => setShowAllDates(true)} className="mt-2 text-pink-600 text-[10px] font-bold underline underline-offset-2">
+            {!search && activePreset !== 'all' && (
+              <button onClick={() => applyPreset(PRESETS[PRESETS.length - 1])} className="mt-2 text-pink-600 text-[10px] font-bold underline underline-offset-2">
                 Show all entries
               </button>
             )}
@@ -406,7 +473,15 @@ export default function CustomersPage() {
               let nameColor = 'text-gray-800'
               let badge: JSX.Element | null = null
 
-              if (isWillBuyToday) {
+              if (r.rejected) {
+                cardBg = 'bg-gray-50 border-gray-200 opacity-70'
+                iconBg = 'bg-gray-100'
+                iconEl = <Phone size={16} className="text-gray-400" />
+                nameColor = 'text-gray-500 line-through'
+                badge = (
+                  <span className="text-[8px] font-bold bg-red-600 text-white px-2 py-0.5 rounded-full uppercase">Rejected</span>
+                )
+              } else if (isWillBuyToday) {
                 cardBg = 'bg-red-50 border-red-200'
                 iconBg = 'bg-red-100'
                 iconEl = <Star size={16} className="text-red-500 fill-red-500" />
@@ -458,8 +533,8 @@ export default function CustomersPage() {
                       {' '}{new Date(r.latestAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       {r.count > 1 ? ` · ${r.count} updates` : ''}
                     </p>
-                    {/* Colored quick-status chips */}
-                    {r.tags.length > 0 && (
+                    {/* Latest quick-status only */}
+                    {!r.rejected && r.tags.length > 0 && (
                       <div className="flex gap-1 mt-1 flex-wrap">
                         {r.tags.map(t => (
                           <span key={t} className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full ${CRM_TAG_MAP[t].chip}`}>
@@ -472,7 +547,7 @@ export default function CustomersPage() {
                       <p className="text-[9px] text-gray-400 font-medium mt-1 truncate">{r.note.split('\n').pop()}</p>
                     )}
                   </div>
-                  <ChevronRight size={14} className={isWillBuyToday ? 'text-red-300' : isInstallment ? 'text-amber-300' : 'text-gray-300'} />
+                  <ChevronRight size={14} className={r.rejected ? 'text-gray-300' : isWillBuyToday ? 'text-red-300' : isInstallment ? 'text-amber-300' : 'text-gray-300'} />
                 </Link>
               )
             })}

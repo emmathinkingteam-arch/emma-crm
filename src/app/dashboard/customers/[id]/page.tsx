@@ -14,7 +14,7 @@ import {
   CreditCard, AlertCircle, Pencil, Receipt, Building2, PauseCircle, PlayCircle, UserPlus
 } from 'lucide-react'
 import { Customer, Order, OrderStep, Interaction, Package as Pkg, MONTH_CODES, getSlotLabel, slotInstantISO } from '@/types'
-import { fmtDate, fmtTime, buildWaLink, openWaLink, WA, KOKO_SERVICE_CHARGE_RATE, getCounselorAvailability, normalisePhone } from '@/lib/utils'
+import { fmtDate, fmtTime, buildWaLink, waDigits, openWaLink, WA, KOKO_SERVICE_CHARGE_RATE, getCounselorAvailability, normalisePhone } from '@/lib/utils'
 import { canTakeDuty } from '@/lib/roles'
 import { formatPhoneDisplay, detectCountryFromPaste } from '@/lib/country-codes'
 import InterestStatsCard from '@/components/shared/InterestStatsCard'
@@ -1519,6 +1519,15 @@ export default function CustomerDetailPage() {
                         customerId={customer.id}
                         label={customer.name || formatPhoneDisplay(customer.phone)}
                       />
+                      {/* Plain wa.me link — opens the chat with no pre-filled message */}
+                      <a
+                        href={`https://wa.me/${waDigits(customer.phone)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Open WhatsApp chat"
+                        className="flex items-center gap-1 text-[9px] font-bold text-white bg-green-500 px-2 py-1 rounded-full flex-shrink-0 active:scale-95 transition-all">
+                        <MessageCircle size={11} /> WhatsApp
+                      </a>
                       {customer.is_priority && (
                         <span className="text-[8px] font-bold bg-red-500 text-white px-2 py-0.5 rounded-full uppercase tracking-wide flex-shrink-0">Priority</span>
                       )}

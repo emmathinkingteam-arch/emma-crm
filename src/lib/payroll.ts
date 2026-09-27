@@ -113,7 +113,7 @@ export async function computeBonusRows(sb: SbLike, monthYear: string) {
       .not('created_by', 'is', null)
       .gte('created_at', start)
       .lt('created_at', end),
-    sb.from('monthly_targets').select('user_id, target_amount').eq('month_year', monthYear),
+    sb.from('monthly_targets').select('user_id, order_target_amount').eq('month_year', monthYear),
     loadBonusSettings(sb),
   ])
 
@@ -125,7 +125,7 @@ export async function computeBonusRows(sb: SbLike, monthYear: string) {
   const miniIds = new Set((pkgRes.data || []).filter((p: any) => p.flow_variant === 'mini').map((p: any) => p.id))
 
   const targetOf: Record<string, number> = {}
-  for (const t of targetsRes.data || []) targetOf[t.user_id] = Number(t.target_amount || 0)
+  for (const t of targetsRes.data || []) targetOf[t.user_id] = Number(t.order_target_amount || 0) // order amount target, not the commission one
 
   // Tally qualifying orders per agent + keep a per-agent breakdown for drill-down
   const tally: Record<string, { sales: number; revenue: number; platinum: number; mini: number }> = {}

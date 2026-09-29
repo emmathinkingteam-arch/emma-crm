@@ -19,6 +19,8 @@ import { canTakeDuty } from '@/lib/roles'
 import { formatPhoneDisplay, detectCountryFromPaste } from '@/lib/country-codes'
 import InterestStatsCard from '@/components/shared/InterestStatsCard'
 import QuotationCard from '@/components/shared/QuotationCard'
+import WebsiteLinksCard from '@/components/shared/WebsiteLinksCard'
+import { WEBSITE_LINK_RE, websiteLinkLog } from '@/lib/website-links'
 import WhatsappBoostPanel from '@/components/shared/WhatsappBoostPanel'
 import { packageTone, PACKAGE_TONE } from '@/lib/package-colors'
 import CrmTagButtons from '@/components/shared/CrmTagButtons'
@@ -1584,6 +1586,23 @@ export default function CustomerDetailPage() {
             <InterestStatsCard
               phone={customer.phone}
               postDate={activeOrder?.planned_post_date ?? null}
+            />
+          )}
+
+          {/* ── WEBSITE LINKS ───────────────────────────────── */}
+          {customer && (
+            <WebsiteLinksCard
+              customerName={customer.name}
+              customerPhone={customer.phone}
+              sentCounts={interactions.reduce<Record<string, number>>((acc, i) => {
+                const m = (i.description || '').match(WEBSITE_LINK_RE)
+                if (m) acc[m[1]] = (acc[m[1]] || 0) + 1
+                return acc
+              }, {})}
+              onSent={async link => {
+                await logAction(websiteLinkLog(link), 'message')
+                await fetchAll()
+              }}
             />
           )}
 

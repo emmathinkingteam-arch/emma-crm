@@ -9,7 +9,7 @@
 // point, it's the daily work log, not a duplicate.
 //
 // Filters: date range · agent · status-button chips · order status /
-// quotation sent · search
+// quotation sent · website link sent · search
 // (name / number / agent / button keyword / note). Export copies the visible
 // rows as CSV. Click a row for the full interaction history.
 // ============================================================================
@@ -18,6 +18,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { fmtDate, fmtTime, normalisePhone } from '@/lib/utils'
 import { detectCountryFromPaste } from '@/lib/country-codes'
+import { WEBSITE_LINKS, WEBSITE_LINK_RE } from '@/lib/website-links'
 import { CRM_TAGS, CRM_TAG_MAP, effectiveTags, toCsv, type CrmTagKey } from '@/lib/crm-tags'
 import {
   ChevronDown, ChevronUp, MessageCircle, PhoneCall,
@@ -58,6 +59,11 @@ interface EntryRow {
   agentIds: string[]   // who worked it that day
   agentNames: string[]
   quotation: boolean   // a quotation was generated that day
+  links: string[]      // website links sent that day (labels)
+}
+
+function linkOf(description: string | null): string | null {
+  return (description || '').match(WEBSITE_LINK_RE)?.[1] ?? null
 }
 
 // Logged by QuotationCard on the customer page when a quotation is generated.
@@ -107,6 +113,7 @@ export default function CRMEntriesPage() {
   const [toDate, setToDate] = useState(TODAY)
   const [filterAgent, setFilterAgent] = useState('')
   const [filterHasOrder, setFilterHasOrder] = useState('')
+  const [filterLink, setFilterLink] = useState('')   // '' | 'any' | link label
   const [tagFilter, setTagFilter] = useState<CrmTagKey | null>(null)
   const [search, setSearch] = useState('')
   const [copied, setCopied] = useState(false)
@@ -167,6 +174,8 @@ export default function CRMEntriesPage() {
         existing.count += 1
         for (const t of tags) if (!existing.tags.includes(t)) existing.tags.push(t)
         if (QUOTATION_RE.test(i.description || '')) existing.quotation = true
+        const link = linkOf(i.description)
+        if (link && !existing.links.includes(link)) existing.links.push(link)
         if (i.created_by && !existing.agentIds.includes(i.created_by)) {
           existing.agentIds.push(i.created_by)
           existing.agentNames.push(agentName)
@@ -184,6 +193,7 @@ export default function CRMEntriesPage() {
           agentIds: i.created_by ? [i.created_by] : [],
           agentNames: [agentName],
           quotation: QUOTATION_RE.test(i.description || ''),
+          links: linkOf(i.description) ? [linkOf(i.description)!] : [],
         })
       }
     })
@@ -203,6 +213,7 @@ export default function CRMEntriesPage() {
           agentIds: c.created_by ? [c.created_by] : [],
           agentNames: [c.created_by_user?.full_name || '—'],
           quotation: false,
+          links: [],
         })
       }
     })
@@ -226,6 +237,12 @@ export default function CRMEntriesPage() {
   }, [agentRows])
 
   const quotationCount = useMemo(() => agentRows.filter(r => r.quotation).length, [agentRows])
+  const linkCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    agentRows.forEach(r => r.links.forEach(l => counts.set(l, (counts.get(l) || 0) + 1)))
+    return counts
+  }, [agentRows])
+  const anyLinkCount = useMemo(() => agentRows.filter(r => r.links.length > 0).length, [agentRows])
 
   const displayed = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -238,6 +255,8 @@ export default function CRMEntriesPage() {
       if (filterHasOrder === 'priority' && !r.customer.is_priority) return false
       if (filterHasOrder === 'willing_today' && r.customer.willing_to_buy_date !== TODAY) return false
       if (filterHasOrder === 'quotation' && !r.quotation) return false
+      if (filterLink === 'any' && r.links.length === 0) return false
+      if (filterLink && filterLink !== 'any' && !r.links.includes(filterLink)) return false
 
       if (!q) return true
       return (
@@ -245,10 +264,11 @@ export default function CRMEntriesPage() {
         (r.customer.name?.toLowerCase() || '').includes(q) ||
         r.agentNames.some(n => n.toLowerCase().includes(q)) ||
         r.note.toLowerCase().includes(q) ||
-        r.tags.some(t => CRM_TAG_MAP[t].label.toLowerCase().includes(q))
+        r.tags.some(t => CRM_TAG_MAP[t].label.toLowerCase().includes(q)) ||
+        r.links.some(l => l.toLowerCase().includes(q))
       )
     })
-  }, [agentRows, tagFilter, filterHasOrder, search])
+  }, [agentRows, tagFilter, filterHasOrder, filterLink, search])
 
   // ── Export: copy visible rows as CSV ────────────────────────
   const exportCsv = async () => {
@@ -259,7 +279,7 @@ export default function CRMEntriesPage() {
       '+' + r.customer.phone,
       r.customer.name || '',
       r.agentNames.join(' | '),
-      [...r.tags.map(t => CRM_TAG_MAP[t].label), ...(r.quotation ? ['Quotation sent'] : [])].join(' | '),
+      [...r.tags.map(t => CRM_TAG_MAP[t].label), ...(r.quotation ? ['Quotation sent'] : []), ...r.links.map(l => `Link: ${l}`)].join(' | '),
       r.note,
       String(r.count),
     ])
@@ -421,6 +441,15 @@ export default function CRMEntriesPage() {
           <option value="quotation">Quotation sent ({quotationCount})</option>
         </select>
 
+        <select value={filterLink} onChange={e => setFilterLink(e.target.value)}
+          className={`text-xs border rounded-xl px-3 py-2 bg-white outline-none ${filterLink ? 'border-pink-300 text-pink-600' : 'border-gray-200'}`}>
+          <option value="">All website links</option>
+          <option value="any">🔗 Any link sent ({anyLinkCount})</option>
+          {WEBSITE_LINKS.map(l => (
+            <option key={l.key} value={l.label}>{l.emoji} {l.label} ({linkCounts.get(l.label) || 0})</option>
+          ))}
+        </select>
+
         <button onClick={exportCsv}
           className={`flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-semibold transition-colors ${copied ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
           {copied ? <Check size={12} /> : <Copy size={12} />}
@@ -561,6 +590,9 @@ export default function CRMEntriesPage() {
                           <span key={t} className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${CRM_TAG_MAP[t].chip}`}>
                             {CRM_TAG_MAP[t].label}
                           </span>
+                        ))}
+                        {row.links.map(l => (
+                          <span key={l} className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-sky-50 text-sky-600">🔗 {l}</span>
                         ))}
                         {row.quotation && (
                           <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-violet-50 text-violet-600">Quotation sent</span>

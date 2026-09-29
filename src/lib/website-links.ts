@@ -31,7 +31,7 @@ export const WEBSITE_LINKS: WebsiteLink[] = [
 export const WEBSITE_LINK_MAP = Object.fromEntries(WEBSITE_LINKS.map(l => [l.label, l])) as Record<string, WebsiteLink>
 
 export function websiteLinkMessage(name: string, link: WebsiteLink): string {
-  return `Hi ${name},\n\n${link.blurb} 👇\n\n${link.url}\n\nIf you have any questions, feel free to contact me at any time.\n\nEmma Thinking (Pvt) Ltd`
+  return `Hi ${name},\n\n${link.blurb}:\n\n${link.url}\n\nIf you have any questions, feel free to contact me at any time.\n\nEmma Thinking (Pvt) Ltd`
 }
 
 // History line written when a tile is tapped — keep in sync with WEBSITE_LINK_RE.

@@ -8,7 +8,8 @@
 // The same number can appear many times across a date range — that's the
 // point, it's the daily work log, not a duplicate.
 //
-// Filters: date range · agent · status-button chips · order status · search
+// Filters: date range · agent · status-button chips · order status /
+// quotation sent · search
 // (name / number / agent / button keyword / note). Export copies the visible
 // rows as CSV. Click a row for the full interaction history.
 // ============================================================================
@@ -56,7 +57,11 @@ interface EntryRow {
   count: number        // updates that day (0 = created only)
   agentIds: string[]   // who worked it that day
   agentNames: string[]
+  quotation: boolean   // a quotation was generated that day
 }
+
+// Logged by QuotationCard on the customer page when a quotation is generated.
+const QUOTATION_RE = /^Quotation #\S+ generated/
 
 const TYPE_CONFIG = {
   message: { icon: MessageCircle, bg: 'bg-blue-50', text: 'text-blue-600', badge: 'bg-blue-50 text-blue-500', label: 'Message' },
@@ -161,6 +166,7 @@ export default function CRMEntriesPage() {
       if (existing) {
         existing.count += 1
         for (const t of tags) if (!existing.tags.includes(t)) existing.tags.push(t)
+        if (QUOTATION_RE.test(i.description || '')) existing.quotation = true
         if (i.created_by && !existing.agentIds.includes(i.created_by)) {
           existing.agentIds.push(i.created_by)
           existing.agentNames.push(agentName)
@@ -177,6 +183,7 @@ export default function CRMEntriesPage() {
           count: 1,
           agentIds: i.created_by ? [i.created_by] : [],
           agentNames: [agentName],
+          quotation: QUOTATION_RE.test(i.description || ''),
         })
       }
     })
@@ -195,6 +202,7 @@ export default function CRMEntriesPage() {
           count: 0,
           agentIds: c.created_by ? [c.created_by] : [],
           agentNames: [c.created_by_user?.full_name || '—'],
+          quotation: false,
         })
       }
     })
@@ -217,6 +225,8 @@ export default function CRMEntriesPage() {
     return counts
   }, [agentRows])
 
+  const quotationCount = useMemo(() => agentRows.filter(r => r.quotation).length, [agentRows])
+
   const displayed = useMemo(() => {
     const q = search.trim().toLowerCase()
     return agentRows.filter(r => {
@@ -227,6 +237,7 @@ export default function CRMEntriesPage() {
       if (filterHasOrder === 'no' && hasOrder) return false
       if (filterHasOrder === 'priority' && !r.customer.is_priority) return false
       if (filterHasOrder === 'willing_today' && r.customer.willing_to_buy_date !== TODAY) return false
+      if (filterHasOrder === 'quotation' && !r.quotation) return false
 
       if (!q) return true
       return (
@@ -248,7 +259,7 @@ export default function CRMEntriesPage() {
       '+' + r.customer.phone,
       r.customer.name || '',
       r.agentNames.join(' | '),
-      r.tags.map(t => CRM_TAG_MAP[t].label).join(' | '),
+      [...r.tags.map(t => CRM_TAG_MAP[t].label), ...(r.quotation ? ['Quotation sent'] : [])].join(' | '),
       r.note,
       String(r.count),
     ])
@@ -407,6 +418,7 @@ export default function CRMEntriesPage() {
           <option value="no">No order</option>
           <option value="priority">Priority only</option>
           <option value="willing_today">🔥 Willing to buy today</option>
+          <option value="quotation">Quotation sent ({quotationCount})</option>
         </select>
 
         <button onClick={exportCsv}
@@ -550,6 +562,9 @@ export default function CRMEntriesPage() {
                             {CRM_TAG_MAP[t].label}
                           </span>
                         ))}
+                        {row.quotation && (
+                          <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-violet-50 text-violet-600">Quotation sent</span>
+                        )}
                         {hasOrder && (
                           <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-green-50 text-green-600">Has order</span>
                         )}

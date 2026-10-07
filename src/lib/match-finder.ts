@@ -95,6 +95,12 @@ export const PROFILE_COLUMNS =
   'occupation, education, zodiac, bio, bio_public, looking_for_text, smoking_status, drinking_status, ' +
   'exercise_status, dietary_preference, pets, interests, photo_step_complete, updated_at'
 
+/** Just what scoring needs — the ranking pass reads every candidate, so no bios. */
+export const SCORING_COLUMNS =
+  'user_id, gender, date_of_birth, city, country, latitude, longitude, religion, prefer_same_religion, ' +
+  'preferred_age_min, preferred_age_max, looking_for, relationship_status, height, education, ' +
+  'smoking_status, drinking_status, interests, updated_at'
+
 /** Verification facts gathered from user_media / nic_verification / user. */
 export interface Verification { photos: number; nic: string | null; face: boolean }
 export const isFullyVerified = (v: Verification) => v.photos > 0 && v.nic === 'approved'

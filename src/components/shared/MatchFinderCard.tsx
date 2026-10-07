@@ -11,7 +11,8 @@
 //            changed). Saved in the CRM, so it comes back on the next CHECK.
 // Matches: opposite gender, scored out of 100 (src/lib/match-finder.ts).
 //   Top layer = 100%, which needs photos + approved NIC.
-//   Cards appear two rows at a time; more load as you scroll.
+//   The server sends 10 matches per page; the next 10 are fetched only when
+//   the list is scrolled to the bottom.
 // ============================================================================
 
 import { useEffect, useRef, useState } from 'react'
@@ -80,7 +81,8 @@ interface Match {
 }
 interface Result {
   found: boolean; userId: string | null; part1: any | null; overrides: any
-  criteria?: any; candidates?: number; strongCount?: number; perfectCount?: number
+  criteria?: any; candidates?: number; strongCount?: number; perfectCount?: number; total?: number
+  page?: number; hasMore?: boolean
   matches: Match[]; error?: string
 }
 
@@ -131,6 +133,29 @@ export default function MatchFinderCard({ phone }: { phone: string }) {
       setError(e.message || 'Check failed')
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Next page of the ranking CHECK stored — only fetched on scroll.
+  const [loadingMore, setLoadingMore] = useState(false)
+  async function loadMore() {
+    if (!result?.hasMore || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const page = (result.page ?? 0) + 1
+      const res = await fetch('/api/match-finder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, page }),
+      })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error || 'Could not load more')
+      setResult(r => r && { ...r, page, hasMore: d.hasMore, matches: [...r.matches, ...d.matches] })
+    } catch (e: any) {
+      setError(e.message || 'Could not load more')
+      setResult(r => r && { ...r, hasMore: false })
+    } finally {
+      setLoadingMore(false)
     }
   }
 
@@ -265,7 +290,7 @@ export default function MatchFinderCard({ phone }: { phone: string }) {
 
           {error && <p className="text-[11px] font-semibold text-red-600 bg-red-50 rounded-xl px-3 py-2">{error}</p>}
 
-          {result?.criteria && <Results result={result} />}
+          {result?.criteria && <Results result={result} loadingMore={loadingMore} onMore={loadMore} />}
         </div>
       )}
     </div>
@@ -290,49 +315,34 @@ function VerifyBadges({ v }: { v: Verification }) {
   )
 }
 
-// ── Results with 2-rows-at-a-time loading ────────────────────────────────────
+// ── Results: 10 per page, next page fetched on scroll ──────────────────────────────────────────────────────────
 
-function useColumns() {
-  const [cols, setCols] = useState(1)
-  useEffect(() => {
-    const mq = window.matchMedia('(min-width: 640px)')
-    const on = () => setCols(mq.matches ? 2 : 1)
-    on()
-    mq.addEventListener('change', on)
-    return () => mq.removeEventListener('change', on)
-  }, [])
-  return cols
-}
-
-function Results({ result }: { result: Result }) {
+function Results({ result, loadingMore, onMore }: { result: Result; loadingMore: boolean; onMore: () => void }) {
   const c = result.criteria
   const strong = result.strongCount ?? 0
   const perfect = result.perfectCount ?? 0
+  const total = result.total ?? result.matches.length
   const lookingFor = c.gender === 'male' ? 'women' : 'men'
-  const cols = useColumns()
-  const step = cols * 2                      // two rows
-  const [visible, setVisible] = useState(step)
   const sentinel = useRef<HTMLDivElement>(null)
+  const more = useRef(onMore)
+  more.current = onMore
 
-  useEffect(() => { setVisible(step) }, [result, step])
-
+  // When the bottom of the list comes into view, ask for the next page.
   useEffect(() => {
     const el = sentinel.current
     if (!el) return
     const io = new IntersectionObserver(entries => {
-      if (entries.some(e => e.isIntersecting)) setVisible(n => Math.min(n + step, result.matches.length))
-    }, { rootMargin: '150px' })
+      if (entries.some(e => e.isIntersecting)) more.current()
+    }, { rootMargin: '100px' })
     io.observe(el)
     return () => io.disconnect()
-  }, [step, result.matches.length, visible])
+  }, [result.hasMore, result.matches.length])
 
   const sections = [
-    { title: '100% — fully verified (photos + ID)', tone: 'text-green-700', items: result.matches.filter(m => m.score >= 100) },
-    { title: 'Strong matches · 80–99%', tone: 'text-emerald-700', items: result.matches.filter(m => m.score >= 80 && m.score < 100) },
-    { title: 'Next best (fewer than 10 strong)', tone: 'text-amber-700', items: result.matches.filter(m => m.score < 80) },
+    { title: '100% — fully verified (photos + ID)', tone: 'text-green-700', count: perfect, items: result.matches.filter(m => m.score >= 100) },
+    { title: 'Strong matches · 80–99%', tone: 'text-emerald-700', count: strong - perfect, items: result.matches.filter(m => m.score >= 80 && m.score < 100) },
+    { title: 'Next best (fewer than 10 strong)', tone: 'text-amber-700', count: total - strong, items: result.matches.filter(m => m.score < 80) },
   ]
-  // Hand out the visible budget section by section, in order.
-  let budget = visible
 
   return (
     <section className="space-y-2">
@@ -350,23 +360,21 @@ function Results({ result }: { result: Result }) {
 
       {result.matches.length === 0 && <p className="text-[11px] text-gray-500 text-center py-4">No matches found.</p>}
 
-      {sections.map(s => {
-        if (!s.items.length || budget <= 0) return null
-        const take = s.items.slice(0, budget)
-        budget -= take.length
-        return (
-          <div key={s.title}>
-            <p className={`text-[10px] font-bold uppercase tracking-wide mb-1.5 ${s.tone}`}>{s.title} · {s.items.length}</p>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {take.map(m => <MatchRow key={m.userId} m={m} />)}
-            </div>
+      {sections.map(s => s.items.length > 0 && (
+        <div key={s.title}>
+          <p className={`text-[10px] font-bold uppercase tracking-wide mb-1.5 ${s.tone}`}>{s.title} · {s.count}</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {s.items.map(m => <MatchRow key={m.userId} m={m} />)}
           </div>
-        )
-      })}
+        </div>
+      ))}
 
-      {visible < result.matches.length && (
-        <div ref={sentinel} className="py-3 flex justify-center">
-          <Loader2 size={14} className="animate-spin text-gray-300" />
+      {result.hasMore && (
+        <div ref={sentinel} className="py-2 flex justify-center">
+          <button onClick={onMore} disabled={loadingMore}
+            className="text-[11px] font-semibold text-violet-600 flex items-center gap-1.5 px-3 py-1.5">
+            {loadingMore ? <><Loader2 size={12} className="animate-spin" /> Loading…</> : `Load more · ${result.matches.length} of ${total}`}
+          </button>
         </div>
       )}
     </section>

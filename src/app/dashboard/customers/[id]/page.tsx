@@ -18,6 +18,7 @@ import { fmtDate, fmtTime, buildWaLink, waDigits, openWaLink, WA, KOKO_SERVICE_C
 import { canTakeDuty } from '@/lib/roles'
 import { formatPhoneDisplay, detectCountryFromPaste } from '@/lib/country-codes'
 import InterestStatsCard from '@/components/shared/InterestStatsCard'
+import MatchFinderCard from '@/components/shared/MatchFinderCard'
 import QuotationCard from '@/components/shared/QuotationCard'
 import WebsiteLinksCard from '@/components/shared/WebsiteLinksCard'
 import { WEBSITE_LINK_RE, websiteLinkLog } from '@/lib/website-links'
@@ -1547,6 +1548,9 @@ export default function CustomerDetailPage() {
               postDate={activeOrder?.planned_post_date ?? null}
             />
           )}
+
+          {/* ── MATCH FINDER (CHECK) ────────────────────────── */}
+          {customer && <MatchFinderCard phone={customer.phone} />}
 
           {/* ── WEBSITE LINKS ───────────────────────────────── */}
           {customer && (

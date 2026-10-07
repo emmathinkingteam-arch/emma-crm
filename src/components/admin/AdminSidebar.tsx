@@ -38,6 +38,7 @@ const SECTIONS: Section[] = [
       { href: '/admin/approvals', icon: ShieldCheck, label: 'Approvals', badge: true },
       { href: '/admin/complaints', icon: AlertOctagon, label: 'Complaints', badge: true },
       { href: '/admin/website-registration', icon: Globe, label: 'Website Registration' },
+      { href: '/admin/match-finder', icon: Sparkles, label: 'Match Finder' },
     ],
   },
   {

@@ -29,7 +29,6 @@ const PUBLIC_PREFIXES = [
   '/api/track',
   '/api/public-media',
   '/api/sms/process-overdue',   // guarded by CRON_SECRET
-  '/api/ucp/sync-cdrs',         // guarded by CRON_SECRET
   '/api/whatsapp/webhook',      // Meta callback
 ]
 

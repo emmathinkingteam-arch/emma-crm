@@ -153,20 +153,24 @@ function feetToCm(ft: number, inch: number): number {
   return Math.round(ft * 30.48 + inch * 2.54)
 }
 
-/** A stored website height in cm, whatever unit it was saved in. */
+/**
+ * A stored website height in cm. The website keeps the number in cm and
+ * height_unit is only how the member likes to SEE it, so a cm-sized number
+ * is cm whatever the unit says. Small numbers are feet ("5.7"), 48–90 inches.
+ */
 export function heightCm(h: number | string | null | undefined, unit?: string | null): number | null {
   if (h == null || h === '') return null
   const v = Number(h)
   if (!isFinite(v) || v <= 0) return null
-  const u = (unit || '').toLowerCase()
-  if (u.startsWith('in') || (!u.startsWith('cm') && v >= 48 && v <= 90)) return Math.round(v * 2.54)
-  if (u.startsWith('f') || v < 10) {
+  if (v >= 120 && v <= 230) return Math.round(v)
+  if (v < 10) {
     const ft = Math.floor(v)
     const frac = v - ft
     const inch = Math.round(frac * 100) === 11 ? 11 : Math.round(frac * 10)
     return feetToCm(ft, inch)
   }
-  return v >= 120 && v <= 230 ? Math.round(v) : null
+  if (v >= 48 && v <= 90 && !(unit || '').toLowerCase().startsWith('cm')) return Math.round(v * 2.54)
+  return null
 }
 
 /** What an agent typed: 170, "170cm", "5'7", "5’7\"", "5 ft 7", "5.7". */

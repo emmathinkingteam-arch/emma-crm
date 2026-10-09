@@ -878,6 +878,7 @@ function MatchCard({ m, details, onOpen, onPick, sendTo, onSend }: {
   const facts = factsOf(m)
   const place = placeOf(m)
   const sent = m.pick === 'proposed'
+  const who = m.name ? firstNameOf(m.name) : 'member'
 
   const toggle = () => { if (!open) onOpen(); setOpen(o => !o) }
   const pickBtn = (s: Pick, icon: React.ReactNode, label: string, on: string) => {
@@ -937,17 +938,31 @@ function MatchCard({ m, details, onOpen, onPick, sendTo, onSend }: {
         {m.interest && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-pink-50 text-pink-600 flex items-center gap-0.5"><Heart size={9} /> {m.interest}</span>}
       </div>
 
-      <div className="flex items-center gap-1 mt-2">
+      {/* Wraps on narrow cards: Send keeps its full label, Shortlist / ✕ drop to a second line. */}
+      <div className="flex items-center gap-1 mt-2 flex-wrap">
         {sendTo && (
           <button onClick={onSend} title={`WhatsApp this profile link to ${sendTo}`}
-            className={`text-[11px] font-bold rounded-lg px-2.5 py-1 flex items-center gap-1 min-w-0 ${sent ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-green-600 text-white'}`}>
-            {sent ? <Check size={11} className="flex-shrink-0" /> : <MessageCircle size={11} className="flex-shrink-0" />}
-            <span className="truncate">{sent ? 'Sent · again' : `Send to ${sendTo}`}</span>
+            className={`text-[11px] font-bold rounded-lg px-2.5 py-1 flex items-center gap-1 flex-shrink-0 whitespace-nowrap ${sent ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-green-600 text-white'}`}>
+            {sent ? <Check size={11} /> : <MessageCircle size={11} />}
+            {sent ? 'Sent · again' : `Send to ${sendTo}`}
           </button>
         )}
         <button onClick={toggle} className="text-[11px] font-semibold text-gray-500 rounded-lg px-1.5 py-1 flex items-center gap-0.5 flex-shrink-0">
           <ChevronDown size={12} className={`transition-transform ${open ? 'rotate-180' : ''}`} /> More
         </button>
+        {/* The match's own number — outlined, so it never looks like Send. */}
+        {m.phone && (
+          <>
+            <a href={`tel:+${digits}`} title={`Call ${who} · ${m.phone}`}
+              className="rounded-lg p-1.5 border border-gray-200 text-gray-600 flex-shrink-0">
+              <Phone size={12} />
+            </a>
+            <a href={`https://wa.me/${digits}`} target="_blank" rel="noreferrer" title={`WhatsApp ${who} · ${m.phone}`}
+              className="rounded-lg p-1.5 border border-gray-200 text-green-600 flex-shrink-0">
+              <MessageCircle size={12} />
+            </a>
+          </>
+        )}
         <div className="ml-auto flex items-center gap-1 flex-shrink-0">
           {pickBtn('shortlisted', <Star size={11} className={m.pick === 'shortlisted' ? 'fill-yellow-400 text-yellow-500' : ''} />, 'Shortlist', 'bg-yellow-50 text-yellow-800 border-yellow-300')}
           {!sendTo && pickBtn('proposed', <Send size={11} />, 'Proposed', 'bg-sky-50 text-sky-700 border-sky-300')}
@@ -979,15 +994,7 @@ function MatchCard({ m, details, onOpen, onPick, sendTo, onSend }: {
                 ].filter(Boolean).join(' · ')}
               </p>
               <div className="flex items-center gap-2 flex-wrap pt-0.5">
-                {m.phone && (
-                  <>
-                    <span className="text-[10px] text-gray-400 uppercase font-semibold">Contact {m.name ? firstNameOf(m.name) : 'member'}:</span>
-                    <a href={`tel:+${digits}`} className="text-[11px] font-semibold text-gray-700 flex items-center gap-0.5"><Phone size={10} /> {m.phone}</a>
-                    <a href={`https://wa.me/${digits}`} target="_blank" rel="noreferrer" className="text-[11px] font-semibold text-gray-500 flex items-center gap-0.5">
-                      <MessageCircle size={10} /> WhatsApp
-                    </a>
-                  </>
-                )}
+                {m.phone && <span className="text-[11px] text-gray-500">{who}&apos;s phone: <b className="text-gray-700">{m.phone}</b></span>}
                 <a href={ADMIN_USER_URL + m.userId} target="_blank" rel="noreferrer" className="ml-auto text-[11px] font-semibold text-violet-600 flex items-center gap-0.5">
                   Admin view <ExternalLink size={10} />
                 </a>

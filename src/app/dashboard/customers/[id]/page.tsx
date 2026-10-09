@@ -1550,7 +1550,16 @@ export default function CustomerDetailPage() {
           )}
 
           {/* ── MATCH FINDER (CHECK) ────────────────────────── */}
-          {customer && <MatchFinderCard phone={customer.phone} />}
+          {customer && (
+            <MatchFinderCard
+              phone={customer.phone}
+              customerName={customer.name}
+              onProfileSent={async line => {
+                await logAction(line, 'message')
+                await fetchAll()
+              }}
+            />
+          )}
 
           {/* ── WEBSITE LINKS ───────────────────────────────── */}
           {customer && (

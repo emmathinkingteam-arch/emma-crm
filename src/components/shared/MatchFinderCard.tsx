@@ -3,26 +3,47 @@
 // ============================================================================
 // Match Finder card — the CHECK button
 // ============================================================================
+// emmathinking.com is VIEW ONLY. The card shows what the website says and
+// never changes it; corrections are saved in the CRM.
+//
 // Nothing loads until CHECK is pressed. Then:
-//   Part 1 — the customer's emmathinking.com profile (every question the
-//            website asks), read-only, with their verification.
-//   Part 2 — agent entry, same questions. Any field filled here is used
-//            instead of part 1 (customer not on the website, or details
-//            changed). Saved in the CRM, so it comes back on the next CHECK.
-// Matches: opposite gender, scored out of 100 (src/lib/match-finder.ts).
-//   Top layer = 100%, which needs photos + approved NIC.
-//   The server sends 10 matches per page; the next 10 are fetched only when
-//   the list is scrolled to the bottom.
+//   Customer          — who we are matching, with their website profile
+//                       (view only, under "Website profile").
+//   Searching for     — the criteria in one line.
+//   CRM corrections   — every question again; whatever the agent types here is
+//                       saved in the CRM (match_criteria) and used for matching
+//                       instead of the website / CRM-brief answer. Shown next
+//                       to each box: what the website or brief says.
+//   Matches           — opposite gender, scored out of 100
+//                       (src/lib/match-finder.ts). The server sends 10 at a
+//                       time; the next 10 load as the list is scrolled.
+//                       Filters and sorting ask the server for a fresh first
+//                       page. ★ Shortlist / Proposed / ✕ Not suitable are
+//                       saved in the CRM (match_picks) per customer.
+//   Send to customer  — opens WhatsApp to the CUSTOMER with the match's public
+//                       profile link (emmathinking.com/view-user/<id>), marks
+//                       the match Proposed and logs it to the customer's
+//                       history. The agent presses send in WhatsApp.
 // ============================================================================
 
 import { useEffect, useRef, useState } from 'react'
 import {
-  Sparkles, Loader2, Search, RotateCcw, ExternalLink, Phone, MessageCircle, Lock, PencilLine,
-  Camera, CreditCard, ScanFace, BadgeCheck, ChevronDown,
+  Sparkles, Loader2, Search, RotateCcw, ExternalLink, Phone, MessageCircle, PencilLine,
+  Camera, CreditCard, ScanFace, BadgeCheck, ChevronDown, Star, Send, X, Copy, Check,
+  MapPin, SlidersHorizontal, RefreshCw, Undo2, Crown, Heart, Info, Lock, Database,
 } from 'lucide-react'
 import { PLACE_SUGGESTIONS } from '@/lib/sl-places'
+import { PART_MAX, RELIGION_LABEL, feetLabel, heightCm, parseHeight } from '@/lib/match-finder'
+import { buildWaLink, openWaLink } from '@/lib/utils'
+import {
+  matchProfileMessage, matchProfilesMessage, matchProfileLog, viewUserUrl, type ProfileShare,
+} from '@/lib/website-links'
 
 const ADMIN_USER_URL = 'https://www.emmathinking.com/admin/users?userId='
+const API = '/api/match-finder'
+const post = (body: any) => fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+
+// ── Questions ───────────────────────────────────────────────────────────────
 
 const OPTIONS: Record<string, string[]> = {
   gender: ['male', 'female'],
@@ -37,52 +58,81 @@ const OPTIONS: Record<string, string[]> = {
   exercise: ['active', 'sometimes', 'rarely', 'never'],
 }
 
-// Every question, in the order the website asks it. `kind` drives part 2.
-type Q = { key: string; label: string; kind: 'select' | 'number' | 'text' | 'place' | 'long'; wide?: boolean }
-const QUESTIONS: Q[] = [
+type Kind = 'select' | 'number' | 'text' | 'place' | 'long'
+type Q = { key: string; label: string; kind: Kind; wide?: boolean; placeholder?: string }
+// Scored questions first, in the order they matter.
+const SCORED: Q[] = [
   { key: 'gender', label: 'Gender', kind: 'select' },
   { key: 'age', label: 'Age', kind: 'number' },
-  { key: 'ageMin', label: 'Partner age min', kind: 'number' },
-  { key: 'ageMax', label: 'Partner age max', kind: 'number' },
-  { key: 'location', label: 'City / district / province', kind: 'place', wide: true },
+  { key: 'ageMin', label: 'Partner age from', kind: 'number' },
+  { key: 'ageMax', label: 'Partner age to', kind: 'number' },
+  { key: 'location', label: 'Lives in', kind: 'place', wide: true, placeholder: 'Town, "Kandy District", province or country' },
+  { key: 'hometown', label: 'Home town in Sri Lanka (if abroad)', kind: 'place', wide: true, placeholder: 'e.g. Matara' },
   { key: 'religion', label: 'Religion', kind: 'select' },
   { key: 'sameReligion', label: 'Same religion only', kind: 'select' },
   { key: 'lookingFor', label: 'Looking for', kind: 'select' },
-  { key: 'status', label: 'Relationship status', kind: 'select' },
-  { key: 'height', label: 'Height (cm)', kind: 'number' },
+  { key: 'status', label: 'Status', kind: 'select' },
+  { key: 'height', label: 'Height', kind: 'text', placeholder: `5'7 or 170` },
   { key: 'education', label: 'Education', kind: 'select' },
-  { key: 'occupation', label: 'Occupation', kind: 'text' },
-  { key: 'zodiac', label: 'Zodiac', kind: 'select' },
   { key: 'smoking', label: 'Smoking', kind: 'select' },
   { key: 'drinking', label: 'Drinking', kind: 'select' },
+]
+const UNSCORED: Q[] = [
+  { key: 'occupation', label: 'Occupation', kind: 'text' },
+  { key: 'zodiac', label: 'Zodiac', kind: 'select' },
   { key: 'exercise', label: 'Exercise', kind: 'select' },
   { key: 'diet', label: 'Diet', kind: 'text' },
   { key: 'pets', label: 'Pets', kind: 'text' },
   { key: 'bio', label: 'Bio', kind: 'long', wide: true },
   { key: 'lookingForText', label: 'Who they want to meet', kind: 'long', wide: true },
 ]
-const NUMERIC = new Set(['age', 'ageMin', 'ageMax', 'height'])
+const ALL_Q = [...SCORED, ...UNSCORED]
+const NUMERIC = new Set(['age', 'ageMin', 'ageMax'])
 
 type Form = Record<string, string>
-const EMPTY: Form = Object.fromEntries(QUESTIONS.map(q => [q.key, '']))
+const EMPTY: Form = Object.fromEntries(ALL_Q.map(q => [q.key, '']))
 
 const pretty = (v: any) => v == null || v === '' ? '—' : String(v).replace(/_/g, ' ')
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+const EDU_SHORT: Record<string, string> = {
+  high_school: 'A/L or below', vocational_training: 'Vocational', diploma: 'Diploma', associate_degree: 'Associate',
+  bachelors_degree: "Bachelor's", masters_degree: "Master's", mba: 'MBA', doctorate_phd: 'PhD', currently_studying: 'Studying',
+}
 
+// ── Types ───────────────────────────────────────────────────────────────────
+
+type Pick = 'shortlisted' | 'proposed' | 'rejected'
 interface Verification { photos: number; nic: string | null; face: boolean }
 interface Match {
   userId: string; name: string | null; phone: string | null; age: number
-  location: string; district: string | null; km: number | null
+  location: string; district: string | null; country: string | null; abroad: boolean; km: number | null
   religion: string | null; status: string | null; lookingFor: string | null
-  height: number | null; education: string | null; occupation: string | null; zodiac: string | null
-  smoking: string | null; drinking: string | null; bio: string | null; lookingForText: string | null
-  ageMin: number | null; ageMax: number | null
+  heightCm: number | null; education: string | null; occupation: string | null
+  smoking: string | null; drinking: string | null; ageMin: number | null; ageMax: number | null
+  joinedAt: string | null
   verification: Verification; verified: boolean
-  score: number; notes: string[]; sharedInterests: number; interest: string | null
+  score: number; parts: Record<string, number>; good: string[]; bad: string[]
+  sharedInterests: number; interest: string | null; member: string | null; isNew: boolean; pick: Pick | null
 }
+interface Details { bio: string | null; lookingForText: string | null; zodiac: string | null; exercise: string | null; diet: string | null; pets: string | null }
+interface Criteria {
+  gender: 'male' | 'female'; age: number | null; ageMin: number; ageMax: number; ageRangeDefaulted: boolean
+  location: string; locationKind: string; country: string | null; district: string | null; province: string | null
+  abroad: boolean; home: string | null; locFromPhone: boolean
+  religion: string | null; sameReligion: boolean; lookingFor: string | null; status: string | null
+  height: number | null; education: string | null; smoking: string | null; drinking: string | null
+}
+type Tiers = { perfect: number; strong: number; good: number; possible: number }
 interface Result {
-  found: boolean; userId: string | null; part1: any | null; overrides: any
-  criteria?: any; candidates?: number; strongCount?: number; perfectCount?: number; total?: number
-  page?: number; hasMore?: boolean
+  found: boolean; userId: string | null; part1: any | null
+  brief: { text: string; values: Record<string, any> } | null; crmName: string | null
+  overrides: any; lastCheckedAt: string | null
+  criteria?: Criteria; candidates?: number; strongCount?: number; perfectCount?: number
+  listedCount?: number; rejectedCount?: number; floor?: number
+  excluded?: { blocked: number; declined: number; duplicates: number }
+  filterCounts?: Record<string, number>; tiers?: Tiers; total?: number; hasMore?: boolean
+  shortlist?: Match[]
+  poolAgeSec?: number; tookMs?: number
   matches: Match[]; error?: string
 }
 
@@ -97,37 +147,49 @@ function toPayload(f: Form) {
   return out
 }
 
-/** Part 1 value for a question key. */
-function part1Value(p: any, key: string): any {
-  if (key === 'ageMin' || key === 'ageMax') return p[key]
-  if (key === 'sameReligion') return p.sameReligion == null ? null : p.sameReligion ? 'yes' : 'no'
-  if (key === 'age') return p.age != null ? `${p.age}${p.dob ? ` (${p.dob})` : ''}` : null
-  return p[key]
+/** What the website (else the CRM brief) says for a question. */
+function sourceValue(r: Result | null, key: string): { value: string; source: 'website' | 'brief' } | null {
+  const p = r?.part1, b = r?.brief?.values
+  let w: any = null
+  if (p) {
+    w = key === 'location' ? (p.city ? p.location : null)
+      : key === 'sameReligion' ? (p.sameReligion == null ? null : p.sameReligion ? 'yes' : 'no')
+      : key === 'height' ? feetLabel(heightCm(p.height, p.heightUnit))
+      : key === 'hometown' ? null
+      : p[key]
+  }
+  if (w != null && w !== '' && !(Array.isArray(w) && !w.length)) return { value: String(w), source: 'website' }
+  const bv = b?.[key]
+  if (bv != null && bv !== '') return { value: key === 'height' ? feetLabel(Number(bv))! : String(bv), source: 'brief' }
+  return null
 }
 
-export default function MatchFinderCard({ phone }: { phone: string }) {
+// ── The card ────────────────────────────────────────────────────────────────
+
+export default function MatchFinderCard({ phone, customerName, autoCheck = false, onProfileSent }: {
+  phone: string; customerName?: string | null; autoCheck?: boolean
+  /** A match was WhatsApp'd to the customer — the line to write to their history. */
+  onProfileSent?: (historyLine: string) => void
+}) {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<Result | null>(null)
   const [error, setError] = useState('')
   const [form, setForm] = useState<Form>(EMPTY)
-  const [showPart2, setShowPart2] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [checkNo, setCheckNo] = useState(0)
 
-  async function run(overrides: any | null) {
-    setLoading(true); setError('')
+  async function run(overrides: any | null, fresh = false) {
+    setOpen(true); setLoading(true); setError('')
     try {
-      const res = await fetch('/api/match-finder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, overrides }),
-      })
+      const res = await post({ phone, overrides, fresh })
       const d = await res.json()
-      if (!res.ok && !d.part1) throw new Error(d.error || 'Check failed')
+      if (!res.ok && !d.part1 && !d.brief) throw new Error(d.error || 'Check failed')
       setResult(d)
-      const f = toForm(d.overrides)
-      setForm(f)
-      // Open part 2 when it has something in it, or when there is no part 1.
-      if (!d.part1 || Object.values(f).some(v => v !== '')) setShowPart2(true)
+      setCheckNo(n => n + 1)
+      setForm(toForm(d.overrides))
+      // Nothing to go on → straight into the CRM corrections.
+      if (d.error || (!d.part1 && !d.brief)) setEditing(true)
       if (d.error) setError(d.error)
     } catch (e: any) {
       setError(e.message || 'Check failed')
@@ -136,43 +198,26 @@ export default function MatchFinderCard({ phone }: { phone: string }) {
     }
   }
 
-  // Next page of the ranking CHECK stored — only fetched on scroll.
-  const [loadingMore, setLoadingMore] = useState(false)
-  async function loadMore() {
-    if (!result?.hasMore || loadingMore) return
-    setLoadingMore(true)
-    try {
-      const page = (result.page ?? 0) + 1
-      const res = await fetch('/api/match-finder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, page }),
-      })
-      const d = await res.json()
-      if (!res.ok) throw new Error(d.error || 'Could not load more')
-      setResult(r => r && { ...r, page, hasMore: d.hasMore, matches: [...r.matches, ...d.matches] })
-    } catch (e: any) {
-      setError(e.message || 'Could not load more')
-      setResult(r => r && { ...r, hasMore: false })
-    } finally {
-      setLoadingMore(false)
-    }
+  useEffect(() => { if (autoCheck) run(null) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function search(next: Form) {
+    setForm(next)
+    run(toPayload(next))
+    setEditing(false)
   }
 
-  const check = () => { setOpen(true); run(null) }
-  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
-    setForm(f => ({ ...f, [k]: e.target.value }))
   const typedCount = Object.values(form).filter(v => v !== '').length
+  const who = result?.part1?.name || result?.crmName || customerName || null
 
   return (
     <div className="bg-white border border-violet-100 rounded-2xl overflow-hidden">
-      <div className="bg-violet-50 px-3 py-2 flex items-center gap-2">
-        <Sparkles size={12} className="text-violet-500" />
-        <p className="text-[10px] font-bold text-violet-700 uppercase tracking-wide flex-1">Match Finder</p>
+      <div className="bg-gradient-to-r from-violet-50 to-fuchsia-50 px-3 py-2 flex items-center gap-2">
+        <Sparkles size={13} className="text-violet-500" />
+        <p className="text-[11px] font-bold text-violet-700 uppercase tracking-wide flex-1">Match Finder</p>
         <button
-          onClick={check}
+          onClick={() => run(null)}
           disabled={loading}
-          className="text-[11px] font-extrabold tracking-wide px-4 py-1.5 rounded-full bg-violet-600 text-white active:scale-95 disabled:opacity-60 flex items-center gap-1.5"
+          className="text-[11px] font-extrabold tracking-wide px-4 py-1.5 rounded-full bg-violet-600 text-white shadow-sm shadow-violet-200 active:scale-95 disabled:opacity-60 flex items-center gap-1.5"
         >
           {loading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
           CHECK
@@ -181,269 +226,792 @@ export default function MatchFinderCard({ phone }: { phone: string }) {
 
       {open && (
         <div className="p-3 space-y-3">
-          {/* ── PART 1 ───────────────────────────────────────── */}
-          <section className="rounded-xl border border-gray-100 bg-gray-50 p-2.5">
-            <div className="text-[9px] font-bold text-gray-500 uppercase tracking-wide mb-1.5 flex items-center gap-1">
-              <Lock size={9} /> 1 · Website profile
-              {result?.userId && (
-                <a href={ADMIN_USER_URL + result.userId} target="_blank" rel="noreferrer" className="ml-auto normal-case text-violet-600 flex items-center gap-0.5">
-                  open <ExternalLink size={9} />
-                </a>
+          {loading && !result && <Skeleton />}
+
+          {result && (
+            <>
+              <CustomerStrip result={result} who={who} />
+              <CriteriaBar result={result} typedCount={typedCount} editing={editing} onEdit={() => setEditing(e => !e)} />
+              {editing && (
+                <Corrections result={result} form={form} loading={loading} onSearch={search} onClear={() => search(EMPTY)} />
               )}
-            </div>
-            {loading && !result ? (
-              <p className="text-[11px] text-gray-400">Looking up…</p>
-            ) : result?.part1 ? (
-              <>
-                <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-                  <p className="text-[12px] font-bold text-gray-800">{result.part1.name || 'No name'}</p>
-                  <span className="text-[10px] text-gray-500">{result.part1.phone}</span>
-                  <VerifyBadges v={result.part1.verification} />
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-1.5">
-                  {QUESTIONS.filter(q => q.kind !== 'long').map(q => (
-                    <div key={q.key} className={`min-w-0 ${q.wide ? 'col-span-2' : ''}`}>
-                      <p className="text-[8px] uppercase text-gray-400 font-semibold">{q.label}</p>
-                      <p className="text-[11px] font-semibold text-gray-700 truncate capitalize">
-                        {pretty(q.key === 'location' ? result.part1.location : part1Value(result.part1, q.key))}
-                      </p>
-                    </div>
-                  ))}
-                  <div className="min-w-0 col-span-2">
-                    <p className="text-[8px] uppercase text-gray-400 font-semibold">Interests</p>
-                    <p className="text-[11px] font-semibold text-gray-700">{result.part1.interests?.length ? `${result.part1.interests.length} chosen` : '—'}</p>
-                  </div>
-                </div>
-                {(result.part1.bio || result.part1.lookingForText) && (
-                  <div className="mt-2 space-y-1">
-                    {result.part1.bio && <p className="text-[11px] text-gray-600"><b className="text-gray-400 text-[9px] uppercase">Bio </b>{result.part1.bio}</p>}
-                    {result.part1.lookingForText && <p className="text-[11px] text-gray-600"><b className="text-gray-400 text-[9px] uppercase">Wants </b>{result.part1.lookingForText}</p>}
-                  </div>
-                )}
-              </>
-            ) : result ? (
-              <p className="text-[11px] text-gray-500">Not registered on emmathinking.com — fill part 2.</p>
-            ) : null}
-          </section>
+            </>
+          )}
 
-          {/* ── PART 2 ───────────────────────────────────────── */}
-          <section className="rounded-xl border border-violet-100 p-2.5">
-            <button
-              onClick={() => setShowPart2(s => !s)}
-              className="w-full text-[9px] font-bold text-violet-600 uppercase tracking-wide flex items-center gap-1"
-            >
-              <PencilLine size={9} /> 2 · Agent entry
-              <span className="normal-case font-medium text-gray-400">— filled fields replace part 1</span>
-              {typedCount > 0 && <span className="normal-case text-violet-600">({typedCount} filled)</span>}
-              <ChevronDown size={12} className={`ml-auto transition-transform ${showPart2 ? 'rotate-180' : ''}`} />
-            </button>
-            {showPart2 && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2">
-                {QUESTIONS.map(q => (
-                  <label key={q.key} className={`block min-w-0 ${q.wide ? 'col-span-2' : ''}`}>
-                    <span className="block text-[8px] uppercase text-gray-400 font-semibold mb-0.5">{q.label}</span>
-                    {q.kind === 'select' ? (
-                      <select value={form[q.key]} onChange={set(q.key)} className={inputCls(form[q.key])}>
-                        <option value="">—</option>
-                        {OPTIONS[q.key].map(o => <option key={o} value={o}>{o === 'any' ? 'Any religion' : pretty(o)}</option>)}
-                      </select>
-                    ) : q.kind === 'long' ? (
-                      <textarea value={form[q.key]} onChange={set(q.key)} rows={2} className={inputCls(form[q.key]) + ' normal-case'} />
-                    ) : (
-                      <>
-                        <input
-                          type={q.kind === 'number' ? 'number' : 'text'}
-                          inputMode={q.kind === 'number' ? 'numeric' : undefined}
-                          list={q.kind === 'place' ? 'mf-places' : undefined}
-                          value={form[q.key]}
-                          onChange={set(q.key)}
-                          placeholder={q.kind === 'place' ? 'e.g. Kottawa, Kandy District, Western' : '—'}
-                          className={inputCls(form[q.key]) + ' normal-case'}
-                        />
-                        {q.kind === 'place' && <datalist id="mf-places">{PLACE_SUGGESTIONS.map(p => <option key={p} value={p} />)}</datalist>}
-                      </>
-                    )}
-                  </label>
-                ))}
-              </div>
-            )}
-            <div className="flex gap-2 mt-2.5">
-              <button
-                onClick={() => run(toPayload(form))}
-                disabled={loading}
-                className="flex-1 text-[11px] font-bold py-2 rounded-xl bg-violet-600 text-white disabled:opacity-60 flex items-center justify-center gap-1.5"
-              >
-                {loading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
-                Find matches {typedCount > 0 && `(${typedCount} typed)`}
-              </button>
-              {typedCount > 0 && (
-                <button
-                  onClick={() => { setForm(EMPTY); run(toPayload(EMPTY)) }}
-                  disabled={loading}
-                  className="text-[11px] font-bold px-3 py-2 rounded-xl bg-gray-100 text-gray-600 flex items-center gap-1"
-                >
-                  <RotateCcw size={11} /> Clear
-                </button>
-              )}
-            </div>
-          </section>
+          {error && (
+            <p className="text-[12px] font-semibold text-red-600 bg-red-50 rounded-xl px-3 py-2 flex items-start gap-1.5">
+              <Info size={13} className="mt-0.5 flex-shrink-0" /> {error}
+            </p>
+          )}
 
-          {error && <p className="text-[11px] font-semibold text-red-600 bg-red-50 rounded-xl px-3 py-2">{error}</p>}
-
-          {result?.criteria && <Results result={result} loadingMore={loadingMore} onMore={loadMore} />}
+          {result?.criteria && (
+            <Results
+              key={checkNo}
+              phone={phone}
+              result={result}
+              loading={loading}
+              who={who}
+              customerName={customerName || who}
+              onProfileSent={onProfileSent}
+              onError={setError}
+              onTune={patch => search({ ...form, ...patch } as Form)}
+              onRefresh={() => run(toPayload(form), true)}
+            />
+          )}
         </div>
       )}
     </div>
   )
 }
 
-const inputCls = (v: string) =>
-  `w-full text-[16px] sm:text-[12px] rounded-lg border px-2 py-1.5 bg-white capitalize ${v ? 'border-violet-400 ring-1 ring-violet-200' : 'border-gray-200'}`
+function Skeleton() {
+  return (
+    <div className="space-y-2 animate-pulse">
+      <div className="h-10 rounded-xl bg-gray-100" />
+      <div className="h-8 rounded-xl bg-violet-50" />
+      {[0, 1, 2].map(i => <div key={i} className="h-24 rounded-xl bg-gray-50 border border-gray-100" />)}
+      <p className="text-[11px] text-gray-400 text-center">Ranking every website profile…</p>
+    </div>
+  )
+}
+
+// ── Customer, website profile (view only), criteria ─────────────────────────
+
+const VIEW_ROWS: [string, string][] = [
+  ['gender', 'Gender'], ['age', 'Age'], ['partner', 'Partner age'], ['location', 'Lives in'],
+  ['religion', 'Religion'], ['sameReligion', 'Same religion only'], ['lookingFor', 'Looking for'], ['status', 'Status'],
+  ['height', 'Height'], ['education', 'Education'], ['occupation', 'Occupation'], ['zodiac', 'Zodiac'],
+  ['smoking', 'Smoking'], ['drinking', 'Drinking'], ['exercise', 'Exercise'], ['diet', 'Diet'],
+]
+
+function websiteValue(p: any, key: string): string {
+  if (key === 'age') return p.age != null ? `${p.age}${p.dob ? ` (${p.dob})` : ''}` : '—'
+  if (key === 'partner') return p.ageMin != null || p.ageMax != null ? `${p.ageMin ?? '?'}–${p.ageMax ?? '?'}` : '—'
+  if (key === 'sameReligion') return p.sameReligion == null ? '—' : p.sameReligion ? 'Yes' : 'No'
+  if (key === 'height') return feetLabel(heightCm(p.height, p.heightUnit)) ?? '—'
+  if (key === 'location') return p.city ? p.location : '—'
+  return pretty(p[key])
+}
+
+function CustomerStrip({ result, who }: { result: Result; who: string | null }) {
+  const p = result.part1
+  const [show, setShow] = useState(false)
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2.5">
+        <div className="w-9 h-9 rounded-full bg-violet-100 text-violet-700 font-bold text-[14px] flex items-center justify-center flex-shrink-0">
+          {(who || '?').trim().charAt(0).toUpperCase()}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <p className="text-[13px] font-bold text-gray-800 truncate">{who || 'Customer'}</p>
+            {p && <VerifyBadges v={p.verification} />}
+          </div>
+          <p className="text-[11px] text-gray-500 truncate">
+            {p ? <>On emmathinking.com{p.phone ? ` · ${p.phone}` : ''}</>
+              : result.brief ? 'Not on emmathinking.com — using the CRM profile brief'
+              : 'Not on emmathinking.com and no CRM brief — add details under CRM corrections'}
+          </p>
+        </div>
+        {p && (
+          <button onClick={() => setShow(s => !s)}
+            className="text-[11px] font-semibold text-gray-600 bg-gray-50 rounded-lg px-2 py-1 flex items-center gap-1 flex-shrink-0">
+            <Lock size={10} /> Website profile <ChevronDown size={11} className={`transition-transform ${show ? 'rotate-180' : ''}`} />
+          </button>
+        )}
+      </div>
+
+      {p && show && (
+        <section className="rounded-xl border border-gray-100 bg-gray-50 p-2.5">
+          <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1">
+            <Lock size={10} /> emmathinking.com · view only
+            {result.userId && (
+              <a href={ADMIN_USER_URL + result.userId} target="_blank" rel="noreferrer" className="ml-auto normal-case text-violet-600 flex items-center gap-0.5">
+                open <ExternalLink size={10} />
+              </a>
+            )}
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-1.5">
+            {VIEW_ROWS.map(([k, label]) => (
+              <div key={k} className={`min-w-0 ${k === 'location' ? 'col-span-2' : ''}`}>
+                <p className="text-[9px] uppercase text-gray-400 font-semibold">{label}</p>
+                <p className="text-[12px] font-semibold text-gray-700 truncate capitalize">{websiteValue(p, k)}</p>
+              </div>
+            ))}
+          </div>
+          {(p.bio || p.lookingForText) && (
+            <div className="mt-2 space-y-1">
+              {p.bio && <p className="text-[12px] text-gray-600"><b className="text-gray-400 text-[10px] uppercase">Bio </b>{p.bio}</p>}
+              {p.lookingForText && <p className="text-[12px] text-gray-600"><b className="text-gray-400 text-[10px] uppercase">Wants </b>{p.lookingForText}</p>}
+            </div>
+          )}
+        </section>
+      )}
+    </div>
+  )
+}
+
+function CriteriaBar({ result, typedCount, editing, onEdit }: {
+  result: Result; typedCount: number; editing: boolean; onEdit: () => void
+}) {
+  const c = result.criteria
+  const chips: string[] = []
+  if (c) {
+    chips.push(`${c.gender === 'male' ? 'Women' : 'Men'} ${c.ageMin}–${c.ageMax}${c.ageRangeDefaulted ? '*' : ''}`)
+    if (c.locationKind !== 'unknown') chips.push(c.abroad ? `In ${c.country ?? c.location}${c.locFromPhone ? ' (from phone)' : ''}` : `Near ${c.location}`)
+    if (c.home) chips.push(`Home ${c.home}`)
+    chips.push(c.religion ? `${RELIGION_LABEL[c.religion] ?? c.religion} ${c.sameReligion ? 'only' : 'preferred'}` : 'Any religion')
+    if (c.lookingFor) chips.push(cap(pretty(c.lookingFor)))
+    if (c.status) chips.push(cap(pretty(c.status)))
+    if (c.height) chips.push(feetLabel(c.height)!)
+    if (c.education) chips.push(EDU_SHORT[c.education] ?? pretty(c.education))
+    if (c.smoking === 'never') chips.push('Non-smoker')
+    if (c.drinking === 'never') chips.push('Non-drinker')
+  }
+  return (
+    <div className="rounded-xl bg-violet-50 border border-violet-100 px-2.5 py-2">
+      <div className="flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] font-bold text-violet-500 uppercase tracking-wide mb-1">Searching for</p>
+          {c ? (
+            <div className="flex flex-wrap gap-1">
+              {chips.map(t => (
+                <span key={t} className="text-[11px] font-semibold text-violet-900 bg-violet-100 rounded-full px-2 py-0.5">{t}</span>
+              ))}
+            </div>
+          ) : <p className="text-[12px] text-violet-800">Not enough to search on yet.</p>}
+          {c?.ageRangeDefaulted && <p className="text-[10px] text-violet-500 mt-1">* age range guessed from their age</p>}
+        </div>
+        <button onClick={onEdit}
+          className={`text-[11px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 flex-shrink-0 ${editing ? 'bg-violet-600 text-white' : 'bg-violet-100 text-violet-700'}`}>
+          <PencilLine size={11} /> CRM corrections{typedCount > 0 && ` · ${typedCount}`}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function Corrections({ result, form: initial, loading, onSearch, onClear }: {
+  result: Result; form: Form; loading: boolean; onSearch: (f: Form) => void; onClear: () => void
+}) {
+  const [form, setForm] = useState(initial)
+  const [more, setMore] = useState(UNSCORED.some(q => initial[q.key]))
+  useEffect(() => setForm(initial), [initial])
+  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+  const typed = Object.values(form).filter(v => v !== '').length
+  const heightTyped = form.height && parseHeight(form.height)
+
+  const field = (q: Q) => {
+    const src = sourceValue(result, q.key)
+    const v = form[q.key]
+    const cls = `w-full text-[16px] sm:text-[12px] rounded-lg border px-2 py-1.5 bg-white ${v ? 'border-violet-400 ring-1 ring-violet-200 text-gray-800' : 'border-gray-200 text-gray-700'}`
+    return (
+      <label key={q.key} className={`block min-w-0 ${q.wide ? 'col-span-2' : ''}`}>
+        <span className="flex items-center gap-1 text-[10px] font-semibold text-gray-500">
+          <span className="truncate">{q.label}</span>
+          {v && (
+            <button type="button" onClick={() => set(q.key, '')} title="Remove this correction"
+              className="ml-auto text-violet-500 flex items-center gap-0.5 font-bold"><Undo2 size={10} /> remove</button>
+          )}
+        </span>
+        <span className={`block text-[10px] truncate mb-0.5 ${src ? (src.source === 'website' ? 'text-sky-600' : 'text-amber-600') : 'text-gray-300'}`}>
+          {src ? <>{src.source === 'website' ? '🔒 Website' : 'CRM brief'}: <span className="capitalize">{pretty(src.value)}</span></> : 'Not given'}
+        </span>
+        {q.kind === 'select' ? (
+          <select value={v} onChange={e => set(q.key, e.target.value)} className={cls + ' capitalize'}>
+            <option value="">{src ? 'No correction' : '—'}</option>
+            {OPTIONS[q.key].map(o => <option key={o} value={o}>{o === 'any' ? 'Any religion' : pretty(o)}</option>)}
+          </select>
+        ) : q.kind === 'long' ? (
+          <textarea value={v} onChange={e => set(q.key, e.target.value)} rows={2} placeholder={src ? 'No correction' : '—'} className={cls} />
+        ) : (
+          <input
+            type={q.kind === 'number' ? 'number' : 'text'}
+            inputMode={q.kind === 'number' ? 'numeric' : undefined}
+            list={q.kind === 'place' ? 'mf-places' : undefined}
+            value={v}
+            onChange={e => set(q.key, e.target.value)}
+            placeholder={src ? 'No correction' : q.placeholder ?? '—'}
+            className={cls}
+          />
+        )}
+        {q.key === 'height' && heightTyped && <span className="text-[10px] text-violet-500">= {heightTyped} cm · {feetLabel(heightTyped)}</span>}
+      </label>
+    )
+  }
+
+  return (
+    <form onSubmit={e => { e.preventDefault(); onSearch(form) }} className="rounded-xl border border-violet-100 p-2.5 space-y-2.5">
+      <div className="flex items-start gap-1.5 text-[11px] text-gray-600">
+        <Database size={13} className="text-violet-500 mt-0.5 flex-shrink-0" />
+        <p>
+          <b className="text-gray-800">Saved in Emma CRM only.</b> emmathinking.com is view only and is never changed.
+          Fill a box only when the website (or CRM brief) is wrong or missing — the CRM answer is then used for this customer&apos;s matching.
+        </p>
+      </div>
+      {result.brief && (
+        <details className="text-[11px] text-amber-900 bg-amber-50 rounded-lg px-2 py-1.5">
+          <summary className="cursor-pointer font-semibold text-amber-700">CRM profile brief</summary>
+          <p className="whitespace-pre-line mt-1">{result.brief.text}</p>
+        </details>
+      )}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">{SCORED.map(field)}</div>
+      <datalist id="mf-places">{PLACE_SUGGESTIONS.map(p => <option key={p} value={p} />)}</datalist>
+      <button type="button" onClick={() => setMore(m => !m)} className="text-[11px] font-semibold text-gray-500 flex items-center gap-1">
+        <ChevronDown size={12} className={`transition-transform ${more ? 'rotate-180' : ''}`} /> More details (not scored)
+      </button>
+      {more && <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">{UNSCORED.map(field)}</div>}
+      <div className="flex gap-2">
+        <button type="submit" disabled={loading}
+          className="flex-1 text-[12px] font-bold py-2 rounded-xl bg-violet-600 text-white disabled:opacity-60 flex items-center justify-center gap-1.5">
+          {loading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+          Save in CRM &amp; find matches{typed > 0 && ` · ${typed}`}
+        </button>
+        {typed > 0 && (
+          <button type="button" onClick={onClear} disabled={loading}
+            className="text-[12px] font-bold px-3 py-2 rounded-xl bg-gray-100 text-gray-600 flex items-center gap-1">
+            <RotateCcw size={12} /> Clear all
+          </button>
+        )}
+      </div>
+    </form>
+  )
+}
 
 function VerifyBadges({ v }: { v: Verification }) {
   const chip = (ok: boolean, icon: React.ReactNode, label: string) => (
-    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5 ${ok ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-400 line-through'}`}>
+    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5 ${ok ? 'bg-green-50 text-green-700' : 'bg-gray-50 text-gray-300'}`}>
       {icon}{label}
     </span>
   )
   return (
     <span className="flex items-center gap-1">
-      {chip(v.photos > 0, <Camera size={9} />, v.photos > 0 ? `${v.photos} photo${v.photos > 1 ? 's' : ''}` : 'photos')}
-      {chip(v.nic === 'approved', <CreditCard size={9} />, 'ID')}
-      {chip(v.face, <ScanFace size={9} />, 'face')}
+      {chip(v.photos > 0, <Camera size={10} />, v.photos > 0 ? String(v.photos) : '0')}
+      {chip(v.nic === 'approved', <CreditCard size={10} />, 'ID')}
+      {chip(v.face, <ScanFace size={10} />, 'Face')}
     </span>
   )
 }
 
-// ── Results: 10 per page, next page fetched on scroll ──────────────────────────────────────────────────────────
+// ── Results: 10 at a time from the server ───────────────────────────────────
 
-function Results({ result, loadingMore, onMore }: { result: Result; loadingMore: boolean; onMore: () => void }) {
-  const c = result.criteria
-  const strong = result.strongCount ?? 0
-  const perfect = result.perfectCount ?? 0
-  const total = result.total ?? result.matches.length
-  const lookingFor = c.gender === 'male' ? 'women' : 'men'
+type FilterKey = 'verified' | 'photos' | 'near' | 'religion' | 'single' | 'member' | 'new' | 'interest'
+type SortKey = 'best' | 'nearest' | 'youngest' | 'oldest' | 'newest'
+
+function Results({ phone, result, loading, who, customerName, onProfileSent, onError, onTune, onRefresh }: {
+  phone: string; result: Result; loading: boolean; who: string | null; customerName: string | null
+  onProfileSent?: (historyLine: string) => void
+  onError: (e: string) => void
+  onTune: (patch: Partial<Form>) => void
+  onRefresh: () => void
+}) {
+  const c = result.criteria!
+  const [items, setItems] = useState<Match[]>(result.matches)
+  const [total, setTotal] = useState(result.total ?? result.matches.length)
+  const [tiers, setTiers] = useState<Tiers | null>(result.tiers ?? null)
+  const [hasMore, setHasMore] = useState(!!result.hasMore)
+  const [busy, setBusy] = useState(false)
+  const [shortlist, setShortlist] = useState<Match[]>(result.shortlist ?? [])
+  const [rejectedCount, setRejectedCount] = useState(result.rejectedCount ?? 0)
+  const [rejected, setRejected] = useState<Match[] | null>(null)
+  const [filters, setFilters] = useState<Set<FilterKey>>(new Set())
+  const [sort, setSort] = useState<SortKey>('best')
+  const [details, setDetails] = useState<Record<string, Details | 'loading'>>({})
+  const [copied, setCopied] = useState(false)
+  const req = useRef(0)
+  const firstRun = useRef(true)
+
+  // Ask the server for a page of the saved ranking. offset = how many
+  // undecided matches are already on screen (picked ones left the server's list).
+  async function fetchPage(replace: boolean) {
+    const id = ++req.current
+    setBusy(true)
+    try {
+      const offset = replace ? 0 : items.filter(m => !m.pick).length
+      const res = await post({ action: 'page', phone, offset, filters: Array.from(filters), sort, view: 'main' })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error || 'Could not load matches')
+      if (id !== req.current) return
+      setItems(prev => {
+        if (replace) return d.matches
+        const seen = new Set(prev.map(m => m.userId))
+        return [...prev, ...d.matches.filter((m: Match) => !seen.has(m.userId))]
+      })
+      setTotal(d.total); setTiers(d.tiers); setHasMore(d.hasMore)
+    } catch (e: any) {
+      if (id === req.current) { onError(e.message); setHasMore(false) }
+    } finally {
+      if (id === req.current) setBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    if (firstRun.current) { firstRun.current = false; return }
+    fetchPage(true)
+  }, [filters, sort]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Next page when the bottom of the list comes into view.
   const sentinel = useRef<HTMLDivElement>(null)
-  const more = useRef(onMore)
-  more.current = onMore
-
-  // When the bottom of the list comes into view, ask for the next page.
+  const more = useRef(() => {})
+  more.current = () => { if (hasMore && !busy) fetchPage(false) }
   useEffect(() => {
     const el = sentinel.current
     if (!el) return
-    const io = new IntersectionObserver(entries => {
-      if (entries.some(e => e.isIntersecting)) more.current()
-    }, { rootMargin: '100px' })
+    const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) more.current() }, { rootMargin: '150px' })
     io.observe(el)
     return () => io.disconnect()
-  }, [result.hasMore, result.matches.length])
+  }, [hasMore, items.length])
 
-  const sections = [
-    { title: '100% — fully verified (photos + ID)', tone: 'text-green-700', count: perfect, items: result.matches.filter(m => m.score >= 100) },
-    { title: 'Strong matches · 80–99%', tone: 'text-emerald-700', count: strong - perfect, items: result.matches.filter(m => m.score >= 80 && m.score < 100) },
-    { title: 'Next best (fewer than 10 strong)', tone: 'text-amber-700', count: total - strong, items: result.matches.filter(m => m.score < 80) },
-  ]
+  async function loadRejected() {
+    if (rejected) { setRejected(null); return }
+    try {
+      const res = await post({ action: 'page', phone, offset: 0, view: 'rejected' })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error || 'Could not load')
+      setRejected(d.matches)
+    } catch (e: any) { onError(e.message) }
+  }
+
+  // Shortlist / proposed / not suitable — on screen at once, saved in the CRM.
+  async function pick(m: Match, status: Pick | null) {
+    const before = { items, shortlist, rejected, rejectedCount }
+    const next = { ...m, pick: status }
+    const wasRejected = m.pick === 'rejected'
+    if (status === 'shortlisted' || status === 'proposed') {
+      setItems(xs => xs.filter(x => x.userId !== m.userId))
+      setRejected(xs => xs && xs.filter(x => x.userId !== m.userId))
+      setShortlist(xs => xs.some(x => x.userId === m.userId) ? xs.map(x => x.userId === m.userId ? next : x) : [...xs, next])
+      if (wasRejected) setRejectedCount(n => n - 1)
+    } else if (status === 'rejected') {
+      setItems(xs => xs.map(x => x.userId === m.userId ? next : x))
+      setShortlist(xs => xs.filter(x => x.userId !== m.userId))
+      if (!wasRejected) setRejectedCount(n => n + 1)
+    } else {
+      setItems(xs => xs.map(x => x.userId === m.userId ? next : x))
+      setShortlist(xs => xs.filter(x => x.userId !== m.userId))
+      setRejected(xs => xs && xs.filter(x => x.userId !== m.userId))
+      if (wasRejected) setRejectedCount(n => n - 1)
+    }
+    try {
+      const res = await post({ action: 'pick', phone, candidateId: m.userId, status })
+      if (!res.ok) throw new Error((await res.json()).error || 'Could not save')
+    } catch (e: any) {
+      onError(e.message || 'Could not save')
+      setItems(before.items); setShortlist(before.shortlist); setRejected(before.rejected); setRejectedCount(before.rejectedCount)
+    }
+  }
+
+  async function loadDetails(id: string) {
+    if (details[id]) return
+    setDetails(d => ({ ...d, [id]: 'loading' }))
+    try {
+      const res = await post({ action: 'details', ids: [id] })
+      const d = await res.json()
+      setDetails(x => ({ ...x, [id]: d.details?.[id] ?? { bio: null, lookingForText: null, zodiac: null, exercise: null, diet: null, pets: null } }))
+    } catch {
+      setDetails(x => { const n = { ...x }; delete n[id]; return n })
+    }
+  }
+
+  // ── Sending profiles to the customer ─────────────────────────────────────
+  // WhatsApp opens on the CUSTOMER's number with the match's view-user link.
+  // openWaLink must run before any await or mobile browsers block the tab.
+  const canSend = phone.replace(/\D/g, '').length >= 9
+  const hello = (customerName || 'there').trim()
+  const pronoun: ProfileShare['pronoun'] = c.gender === 'male' ? 'her' : 'his'
+  const share = (m: Match): ProfileShare => ({
+    userId: m.userId,
+    name: m.name,
+    age: m.age,
+    place: placeOf(m),
+    facts: factsOf(m).join(' · '),
+    pronoun,
+  })
+
+  function send(m: Match) {
+    if (!canSend) return
+    const p = share(m)
+    openWaLink(buildWaLink(phone, matchProfileMessage(hello, p)))
+    if (m.pick !== 'proposed') pick(m, 'proposed')
+    onProfileSent?.(matchProfileLog(p))
+  }
+
+  function sendShortlist() {
+    if (!canSend || !shortlist.length) return
+    openWaLink(buildWaLink(phone, matchProfilesMessage(hello, shortlist.map(share))))
+    for (const m of shortlist) {
+      if (m.pick !== 'proposed') pick(m, 'proposed')
+      onProfileSent?.(matchProfileLog(share(m)))
+    }
+  }
+
+  async function copyShortlist() {
+    try {
+      await navigator.clipboard.writeText(matchProfilesMessage(hello, shortlist.map(share)))
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch { /* clipboard blocked */ }
+  }
+
+  const toggle = (k: FilterKey) => setFilters(f => { const n = new Set(f); n.has(k) ? n.delete(k) : n.add(k); return n })
+  const fc = result.filterCounts ?? {}
+  const chips: { key: FilterKey; label: string }[] = ([
+    { key: 'verified', label: 'Verified' },
+    { key: 'photos', label: 'Has photos' },
+    { key: 'near', label: c.abroad ? 'Same country / near' : 'Within 25 km' },
+    { key: 'religion', label: `${c.religion ? RELIGION_LABEL[c.religion] ?? c.religion : ''} only` },
+    { key: 'single', label: 'Never married' },
+    { key: 'member', label: 'Emma members' },
+    { key: 'new', label: 'New since last check' },
+    { key: 'interest', label: 'Has interest' },
+  ] as { key: FilterKey; label: string }[]).filter(f =>
+    (fc[f.key] ?? 0) > 0 && (f.key !== 'religion' || !!c.religion) && (f.key !== 'single' || c.status === 'single'))
+
+  const strong = result.strongCount ?? 0
+  const perfect = result.perfectCount ?? 0
+  const ex = result.excluded
+  const exText = ex && [ex.duplicates && `${ex.duplicates} duplicate accounts`, ex.blocked && `${ex.blocked} blocked`, ex.declined && `${ex.declined} declined`].filter(Boolean).join(' · ')
+
+  // Ways to get more when the list is thin.
+  const tunes: { label: string; patch: Partial<Form> }[] = []
+  if (strong < 10) {
+    tunes.push({ label: `Age ${c.ageMin - 2}–${c.ageMax + 2}`, patch: { ageMin: String(c.ageMin - 2), ageMax: String(c.ageMax + 2) } })
+    if (c.locationKind === 'point' && c.district && !c.abroad) tunes.push({ label: `Whole ${c.district} District`, patch: { location: `${c.district} District` } })
+    else if (c.locationKind === 'district' && c.province) tunes.push({ label: `Whole ${c.province} Province`, patch: { location: `${c.province} Province` } })
+    if (c.religion && c.sameReligion) tunes.push({ label: 'Other religions too', patch: { sameReligion: 'no' } })
+  }
+
+  const tierOf = (s: number) => s >= 100 ? 'perfect' : s >= 80 ? 'strong' : s >= 70 ? 'good' : 'possible'
+  const TIER_TITLE: Record<string, [string, string]> = {
+    perfect: ['Perfect · fully verified', 'text-emerald-700'],
+    strong: ['Strong · 80–99%', 'text-green-700'],
+    good: ['Good · 70–79%', 'text-amber-700'],
+    possible: ['Possible · under 70%', 'text-orange-700'],
+  }
+  const groups: { key: string; items: Match[] }[] = []
+  for (const m of items) {
+    const k = sort === 'best' ? tierOf(m.score) : 'all'
+    if (!groups.length || groups[groups.length - 1].key !== k) groups.push({ key: k, items: [] })
+    groups[groups.length - 1].items.push(m)
+  }
+  const card = (m: Match) => (
+    <MatchCard key={m.userId} m={m} details={details[m.userId]} onOpen={() => loadDetails(m.userId)} onPick={s => pick(m, s)}
+      sendTo={canSend ? hello.split(/\s+/)[0] : null} onSend={() => send(m)} />
+  )
 
   return (
-    <section className="space-y-2">
-      <div className="rounded-xl bg-violet-50 px-3 py-2">
-        <p className="text-[11px] text-violet-900">
-          Searching <b>{lookingFor}</b> aged <b>{c.ageMin}–{c.ageMax}</b>
-          {c.ageRangeDefaulted && <span className="text-violet-500"> (range guessed from age)</span>}
-          {' '}near <b>{c.location}</b>
-          {c.religion && <>, <b className="capitalize">{c.religion}</b>{c.sameReligion ? ' only' : ' preferred'}</>}
-        </p>
-        <p className="text-[10px] text-violet-600 mt-0.5">
-          <b>{perfect}</b> perfect · <b>{strong}</b> at 80%+ · {result.candidates} {lookingFor} in the age window
-        </p>
+    <section className={`space-y-2.5 ${loading ? 'opacity-60 pointer-events-none' : ''}`}>
+      {/* Summary */}
+      <div className="grid grid-cols-3 gap-1.5">
+        <Stat value={perfect} label="Perfect" tone="text-emerald-600" />
+        <Stat value={strong} label="Strong 80%+" tone="text-green-600" />
+        <Stat value={result.listedCount ?? total} label="Listed" tone="text-violet-600" />
       </div>
+      <p className="text-[10px] text-gray-400 flex items-center gap-1 flex-wrap">
+        {result.candidates} {c.gender === 'male' ? 'women' : 'men'} in the age window{exText ? ` · left out: ${exText}` : ''}
+        {result.tookMs != null && <> · {(result.tookMs / 1000).toFixed(1)}s</>}
+        <button onClick={onRefresh} title="Read the website again now" className="ml-auto text-violet-500 flex items-center gap-0.5 font-semibold">
+          <RefreshCw size={10} /> {result.poolAgeSec && result.poolAgeSec > 30 ? `website data ${Math.round(result.poolAgeSec / 60)}m old` : 'refresh'}
+        </button>
+      </p>
 
-      {result.matches.length === 0 && <p className="text-[11px] text-gray-500 text-center py-4">No matches found.</p>}
-
-      {sections.map(s => s.items.length > 0 && (
-        <div key={s.title}>
-          <p className={`text-[10px] font-bold uppercase tracking-wide mb-1.5 ${s.tone}`}>{s.title} · {s.count}</p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {s.items.map(m => <MatchRow key={m.userId} m={m} />)}
+      {tunes.length > 0 && (
+        <div className="rounded-xl bg-amber-50 border border-amber-100 px-2.5 py-2">
+          <p className="text-[11px] text-amber-800 font-semibold mb-1.5">Only {strong} strong match{strong === 1 ? '' : 'es'} — widen the search (saved as a CRM correction):</p>
+          <div className="flex flex-wrap gap-1.5">
+            {tunes.map(t => (
+              <button key={t.label} onClick={() => onTune(t.patch)}
+                className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-100 border border-amber-200 text-amber-800 active:scale-95">
+                + {t.label}
+              </button>
+            ))}
           </div>
         </div>
-      ))}
+      )}
 
-      {result.hasMore && (
-        <div ref={sentinel} className="py-2 flex justify-center">
-          <button onClick={onMore} disabled={loadingMore}
-            className="text-[11px] font-semibold text-violet-600 flex items-center gap-1.5 px-3 py-1.5">
-            {loadingMore ? <><Loader2 size={12} className="animate-spin" /> Loading…</> : `Load more · ${result.matches.length} of ${total}`}
+      {/* Shortlist */}
+      {shortlist.length > 0 && (
+        <div className="rounded-xl border border-yellow-200 bg-yellow-50 p-2">
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <Star size={12} className="text-yellow-500 fill-yellow-400" />
+            <p className="text-[11px] font-bold text-yellow-800 uppercase tracking-wide flex-1">Shortlist &amp; sent · {shortlist.length}</p>
+            {canSend && (
+              <button onClick={sendShortlist} title="WhatsApp every shortlisted profile link to the customer"
+                className="text-[11px] font-bold text-white bg-green-600 rounded-lg px-2 py-0.5 flex items-center gap-1">
+                <MessageCircle size={11} /> Send all
+              </button>
+            )}
+            <button onClick={copyShortlist} title="Copy the message with every profile link"
+              className="text-[11px] font-bold text-yellow-800 bg-yellow-100 border border-yellow-200 rounded-lg px-2 py-0.5 flex items-center gap-1">
+              {copied ? <><Check size={11} /> Copied</> : <><Copy size={11} /> Copy</>}
+            </button>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">{shortlist.map(card)}</div>
+        </div>
+      )}
+
+      {/* Filters + sort */}
+      <div className="flex items-center gap-1.5 overflow-x-auto -mx-3 px-3 pb-0.5">
+        <SlidersHorizontal size={13} className="text-gray-400 flex-shrink-0" />
+        <select value={sort} onChange={e => setSort(e.target.value as SortKey)}
+          className="text-[11px] font-semibold rounded-full border border-gray-200 bg-white px-2 py-1 flex-shrink-0">
+          <option value="best">Best match</option>
+          <option value="nearest">Nearest</option>
+          <option value="youngest">Youngest</option>
+          <option value="oldest">Oldest</option>
+          <option value="newest">Newest profiles</option>
+        </select>
+        {chips.map(f => (
+          <button key={f.key} onClick={() => toggle(f.key)}
+            className={`text-[11px] font-semibold rounded-full px-2.5 py-1 border flex-shrink-0 whitespace-nowrap ${filters.has(f.key) ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-gray-600 border-gray-200'}`}>
+            {f.label} <span className={filters.has(f.key) ? 'text-violet-200' : 'text-gray-400'}>{fc[f.key]}</span>
           </button>
+        ))}
+        {busy && <Loader2 size={13} className="animate-spin text-violet-500 flex-shrink-0" />}
+      </div>
+
+      {items.length === 0 && !busy && (
+        <p className="text-[12px] text-gray-500 text-center py-6">
+          {filters.size ? 'No matches with these filters.' : 'No matches found.'}
+        </p>
+      )}
+
+      <div className={busy && items.length && !hasMore ? 'opacity-60' : ''}>
+        {groups.map((g, i) => (
+          <div key={`${g.key}-${i}`} className="mb-2.5">
+            {g.key !== 'all' && tiers && (
+              <p className={`text-[11px] font-bold uppercase tracking-wide mb-1.5 ${TIER_TITLE[g.key][1]}`}>
+                {TIER_TITLE[g.key][0]} · {tiers[g.key as keyof Tiers]}
+              </p>
+            )}
+            <div className="grid gap-2 sm:grid-cols-2">{g.items.map(card)}</div>
+          </div>
+        ))}
+      </div>
+
+      {hasMore && (
+        <div ref={sentinel} className="py-2 flex justify-center">
+          <button onClick={() => more.current()} disabled={busy}
+            className="text-[11px] font-semibold text-violet-600 flex items-center gap-1.5 px-3 py-1.5">
+            {busy ? <><Loader2 size={12} className="animate-spin" /> Loading…</> : `Load more · ${items.filter(m => !m.pick).length} of ${total}`}
+          </button>
+        </div>
+      )}
+
+      {rejectedCount > 0 && (
+        <div className="space-y-2">
+          <button onClick={loadRejected} className="w-full text-[11px] font-semibold text-gray-400 py-1">
+            {rejected ? 'Hide' : 'Show'} {rejectedCount} marked not suitable
+          </button>
+          {rejected && <div className="grid gap-2 sm:grid-cols-2">{rejected.map(card)}</div>}
         </div>
       )}
     </section>
   )
 }
 
-function MatchRow({ m }: { m: Match }) {
-  const [more, setMore] = useState(false)
-  const tone = m.score >= 100 ? 'bg-green-600' : m.score >= 90 ? 'bg-green-500' : m.score >= 80 ? 'bg-emerald-500' : m.score >= 70 ? 'bg-amber-500' : 'bg-orange-400'
-  const digits = (m.phone || '').replace(/\D/g, '')
-  const facts = [
-    m.religion, m.status, m.lookingFor, m.height ? `${m.height}cm` : null, m.education, m.occupation,
-  ].filter(Boolean).map(pretty)
-  const extra = [
-    m.zodiac && `zodiac: ${m.zodiac}`, m.smoking && `smoking: ${pretty(m.smoking)}`, m.drinking && `drinking: ${pretty(m.drinking)}`,
-    m.sharedInterests ? `${m.sharedInterests} shared interest${m.sharedInterests > 1 ? 's' : ''}` : null,
-    m.ageMin != null && `wants ${m.ageMin}–${m.ageMax}`,
+function Stat({ value, label, tone }: { value: number; label: string; tone: string }) {
+  return (
+    <div className="rounded-xl bg-gray-50 px-2 py-1.5 text-center">
+      <p className={`text-[17px] font-extrabold leading-none ${tone}`}>{value}</p>
+      <p className="text-[9px] font-semibold text-gray-400 uppercase mt-0.5">{label}</p>
+    </div>
+  )
+}
+
+// ── One match ───────────────────────────────────────────────────────────────
+
+function ScoreRing({ score }: { score: number }) {
+  const r = 19, len = 2 * Math.PI * r
+  const color = score >= 100 ? '#059669' : score >= 90 ? '#16a34a' : score >= 80 ? '#22c55e' : score >= 70 ? '#f59e0b' : '#fb923c'
+  return (
+    <div className="relative w-12 h-12 flex-shrink-0">
+      <svg viewBox="0 0 48 48" className="w-12 h-12 -rotate-90">
+        <circle cx="24" cy="24" r={r} fill="none" stroke="#9ca3af" strokeOpacity="0.2" strokeWidth="5" />
+        <circle cx="24" cy="24" r={r} fill="none" stroke={color} strokeWidth="5" strokeLinecap="round"
+          strokeDasharray={`${(Math.min(score, 100) / 100) * len} ${len}`} />
+      </svg>
+      <span className="absolute inset-0 flex items-center justify-center text-[13px] font-extrabold text-gray-800">{score}</span>
+    </div>
+  )
+}
+
+const PART_LABEL: Record<string, string> = {
+  location: 'Location', age: 'Age in range', mutual: 'Fits their range', religion: 'Religion',
+  lookingFor: 'Looking for', status: 'Status', lifestyle: 'Smoke / drink', height: 'Height',
+  education: 'Education', interests: 'Interests', photos: 'Photos', nic: 'ID verified',
+}
+
+const firstNameOf = (s: string) => s.trim().split(/\s+/)[0]
+
+function daysAgo(iso: string | null): number | null {
+  if (!iso) return null
+  const d = (Date.now() - Date.parse(iso)) / 86_400_000
+  return isFinite(d) ? Math.floor(d) : null
+}
+
+function factsOf(m: Match): string[] {
+  return [
+    m.religion && (RELIGION_LABEL[m.religion] ?? m.religion),
+    m.status && cap(pretty(m.status)),
+    feetLabel(m.heightCm),
+    m.education && (EDU_SHORT[m.education] ?? pretty(m.education)),
+    m.occupation,
   ].filter(Boolean) as string[]
+}
+
+function placeOf(m: Match): string {
+  return m.abroad
+    ? `${m.location}${m.country && !m.location.toLowerCase().includes(m.country.toLowerCase()) ? `, ${m.country}` : ''}`
+    : `${m.location}${m.district && m.district !== m.location ? `, ${m.district}` : ''}`
+}
+
+function MatchCard({ m, details, onOpen, onPick, sendTo, onSend }: {
+  m: Match; details: Details | 'loading' | undefined; onOpen: () => void; onPick: (s: Pick | null) => void
+  /** Customer's first name when their WhatsApp is known; null hides Send. */
+  sendTo: string | null
+  onSend: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const digits = (m.phone || '').replace(/\D/g, '')
+  const joined = daysAgo(m.joinedAt)
+  const facts = factsOf(m)
+  const place = placeOf(m)
+  const sent = m.pick === 'proposed'
+
+  const toggle = () => { if (!open) onOpen(); setOpen(o => !o) }
+  const pickBtn = (s: Pick, icon: React.ReactNode, label: string, on: string) => {
+    const active = m.pick === s
+    return (
+      <button onClick={() => onPick(active ? null : s)} title={label}
+        className={`text-[11px] font-bold rounded-lg px-2 py-1 flex items-center gap-1 border ${active ? on : 'bg-white text-gray-500 border-gray-200'}`}>
+        {icon}<span className="hidden min-[380px]:inline">{label}</span>
+      </button>
+    )
+  }
+
+  if (m.pick === 'rejected') {
+    return (
+      <div className="border border-dashed border-gray-200 rounded-xl px-3 py-2 flex items-center gap-2 bg-gray-50">
+        <p className="text-[12px] text-gray-400 flex-1 truncate">{m.name || 'No name'}, {m.age} · not suitable</p>
+        <button onClick={() => onPick(null)} className="text-[11px] font-bold text-violet-600 flex items-center gap-1"><Undo2 size={11} /> Undo</button>
+      </div>
+    )
+  }
 
   return (
-    <div className={`border rounded-xl p-2.5 flex gap-2.5 ${m.verified ? 'border-green-200' : 'border-gray-100'}`}>
-      <div className={`${tone} text-white rounded-lg w-12 h-12 flex-shrink-0 flex flex-col items-center justify-center`}>
-        <span className="text-[15px] font-extrabold leading-none">{m.score}%</span>
-        <span className="text-[7px] font-semibold uppercase mt-0.5">match</span>
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          {m.verified && <BadgeCheck size={13} className="text-green-600 flex-shrink-0" />}
-          <p className="text-[12px] font-bold text-gray-800 truncate">{m.name || 'No name'}</p>
-          <span className="text-[11px] text-gray-500 flex-shrink-0">{m.age}</span>
-          <a href={ADMIN_USER_URL + m.userId} target="_blank" rel="noreferrer"
-             className="ml-auto text-[10px] font-semibold text-violet-600 flex items-center gap-0.5 flex-shrink-0">
-            View <ExternalLink size={9} />
-          </a>
-        </div>
-        <p className="text-[10px] text-gray-600 truncate font-medium">
-          {m.location}{m.district && m.district !== m.location ? ` · ${m.district}` : ''}{m.km != null ? ` · ${m.km} km` : ''}
-        </p>
-        <p className="text-[10px] text-gray-500 truncate capitalize">{facts.join(' · ')}</p>
-        <div className="flex items-center gap-2 mt-1 flex-wrap">
-          <VerifyBadges v={m.verification} />
-          {m.interest && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-pink-50 text-pink-600">Interest {m.interest}</span>}
-        </div>
-        <div className="flex items-center gap-2.5 mt-1 flex-wrap">
-          {m.phone && (
-            <>
-              <a href={`tel:+${digits}`} className="text-[10px] font-semibold text-gray-700 flex items-center gap-0.5">
-                <Phone size={9} /> {m.phone}
-              </a>
-              <a href={`https://wa.me/${digits}`} target="_blank" rel="noreferrer" className="text-[10px] font-semibold text-green-600 flex items-center gap-0.5">
-                <MessageCircle size={9} /> WhatsApp
-              </a>
-            </>
-          )}
-          {(extra.length > 0 || m.bio || m.lookingForText) && (
-            <button onClick={() => setMore(x => !x)} className="text-[10px] font-semibold text-violet-600 ml-auto">
-              {more ? 'less' : 'more'}
-            </button>
-          )}
-        </div>
-        {more && (
-          <div className="mt-1 space-y-0.5">
-            {extra.length > 0 && <p className="text-[10px] text-gray-500 capitalize">{extra.join(' · ')}</p>}
-            {m.bio && <p className="text-[10px] text-gray-600"><b className="text-gray-400">Bio: </b>{m.bio}</p>}
-            {m.lookingForText && <p className="text-[10px] text-gray-600"><b className="text-gray-400">Wants: </b>{m.lookingForText}</p>}
+    <div className={`rounded-xl border p-2.5 bg-white ${m.pick ? 'border-yellow-300 shadow-sm shadow-yellow-100' : m.verified ? 'border-green-200' : 'border-gray-100'}`}>
+      <div className="flex gap-2.5">
+        <ScoreRing score={m.score} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            {m.verified && <BadgeCheck size={14} className="text-green-600 flex-shrink-0" />}
+            <p className="text-[13px] font-bold text-gray-800 truncate">{m.name || 'No name'}</p>
+            <span className="text-[12px] font-semibold text-gray-500 flex-shrink-0">{m.age}</span>
+            <a href={viewUserUrl(m.userId)} target="_blank" rel="noreferrer" title="The profile the customer will see"
+               className="ml-auto text-[11px] font-semibold text-violet-600 flex items-center gap-0.5 flex-shrink-0">
+              Profile <ExternalLink size={10} />
+            </a>
           </div>
-        )}
-        {m.notes.length > 0 && <p className="text-[9px] text-amber-600 mt-0.5 truncate">{m.notes.join(' · ')}</p>}
+          <p className="text-[11px] text-gray-700 font-medium truncate flex items-center gap-1">
+            <MapPin size={10} className="text-gray-400 flex-shrink-0" />
+            <span className="truncate">{place}</span>
+            {m.km != null && <span className="text-gray-400 flex-shrink-0">· {m.km} km</span>}
+          </p>
+          {facts.length > 0 && <p className="text-[11px] text-gray-500 truncate">{facts.join(' · ')}</p>}
+        </div>
       </div>
+
+      {(m.good.length > 0 || m.bad.length > 0) && (
+        <div className="flex flex-wrap gap-1 mt-1.5">
+          {m.good.slice(0, 3).map(g => <span key={g} className="text-[10px] font-semibold text-green-700 bg-green-50 rounded px-1.5 py-0.5">✓ {g}</span>)}
+          {m.bad.slice(0, 3).map(b => <span key={b} className="text-[10px] font-semibold text-amber-700 bg-amber-50 rounded px-1.5 py-0.5">{b}</span>)}
+        </div>
+      )}
+
+      <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+        <VerifyBadges v={m.verification} />
+        {m.isNew && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-100 text-sky-700">NEW</span>}
+        {!m.isNew && joined != null && joined <= 14 && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sky-50 text-sky-600">Joined {joined === 0 ? 'today' : `${joined}d ago`}</span>}
+        {m.member && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 flex items-center gap-0.5"><Crown size={9} /> {m.member}</span>}
+        {m.interest && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-pink-50 text-pink-600 flex items-center gap-0.5"><Heart size={9} /> {m.interest}</span>}
+      </div>
+
+      <div className="flex items-center gap-1 mt-2">
+        {sendTo && (
+          <button onClick={onSend} title={`WhatsApp this profile link to ${sendTo}`}
+            className={`text-[11px] font-bold rounded-lg px-2.5 py-1 flex items-center gap-1 min-w-0 ${sent ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-green-600 text-white'}`}>
+            {sent ? <Check size={11} className="flex-shrink-0" /> : <MessageCircle size={11} className="flex-shrink-0" />}
+            <span className="truncate">{sent ? 'Sent · again' : `Send to ${sendTo}`}</span>
+          </button>
+        )}
+        <button onClick={toggle} className="text-[11px] font-semibold text-gray-500 rounded-lg px-1.5 py-1 flex items-center gap-0.5 flex-shrink-0">
+          <ChevronDown size={12} className={`transition-transform ${open ? 'rotate-180' : ''}`} /> More
+        </button>
+        <div className="ml-auto flex items-center gap-1 flex-shrink-0">
+          {pickBtn('shortlisted', <Star size={11} className={m.pick === 'shortlisted' ? 'fill-yellow-400 text-yellow-500' : ''} />, 'Shortlist', 'bg-yellow-50 text-yellow-800 border-yellow-300')}
+          {!sendTo && pickBtn('proposed', <Send size={11} />, 'Proposed', 'bg-sky-50 text-sky-700 border-sky-300')}
+          <button onClick={() => onPick('rejected')} title="Not suitable — hide for this customer"
+            className="text-[11px] rounded-lg p-1 border border-gray-200 text-gray-400 hover:text-red-500">
+            <X size={13} />
+          </button>
+        </div>
+      </div>
+
+      {open && (
+        <div className="mt-2 pt-2 border-t border-gray-100 space-y-2">
+          {details === 'loading' || !details ? (
+            <p className="text-[11px] text-gray-400 flex items-center gap-1"><Loader2 size={11} className="animate-spin" /> Loading…</p>
+          ) : (
+            <div className="space-y-1">
+              {details.bio && <p className="text-[12px] text-gray-700"><b className="text-gray-400 text-[10px] uppercase">Bio </b>{details.bio}</p>}
+              {details.lookingForText && <p className="text-[12px] text-gray-700"><b className="text-gray-400 text-[10px] uppercase">Wants </b>{details.lookingForText}</p>}
+              <p className="text-[11px] text-gray-500 capitalize">
+                {[
+                  m.ageMin != null && `wants age ${m.ageMin}–${m.ageMax}`,
+                  m.lookingFor && `looking for ${pretty(m.lookingFor)}`,
+                  m.smoking && `smoking: ${pretty(m.smoking)}`,
+                  m.drinking && `drinking: ${pretty(m.drinking)}`,
+                  details.zodiac && `zodiac: ${details.zodiac}`,
+                  details.exercise && `exercise: ${pretty(details.exercise)}`,
+                  details.diet && `diet: ${pretty(details.diet)}`,
+                  m.sharedInterests > 0 && `${m.sharedInterests} shared interests`,
+                ].filter(Boolean).join(' · ')}
+              </p>
+              <div className="flex items-center gap-2 flex-wrap pt-0.5">
+                {m.phone && (
+                  <>
+                    <span className="text-[10px] text-gray-400 uppercase font-semibold">Contact {m.name ? firstNameOf(m.name) : 'member'}:</span>
+                    <a href={`tel:+${digits}`} className="text-[11px] font-semibold text-gray-700 flex items-center gap-0.5"><Phone size={10} /> {m.phone}</a>
+                    <a href={`https://wa.me/${digits}`} target="_blank" rel="noreferrer" className="text-[11px] font-semibold text-gray-500 flex items-center gap-0.5">
+                      <MessageCircle size={10} /> WhatsApp
+                    </a>
+                  </>
+                )}
+                <a href={ADMIN_USER_URL + m.userId} target="_blank" rel="noreferrer" className="ml-auto text-[11px] font-semibold text-violet-600 flex items-center gap-0.5">
+                  Admin view <ExternalLink size={10} />
+                </a>
+              </div>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+            {Object.entries(PART_MAX).map(([k, max]) => {
+              const v = m.parts[k] ?? 0
+              const pct = Math.max(0, Math.min(1, v / max))
+              return (
+                <div key={k} className="min-w-0">
+                  <div className="flex justify-between text-[10px] text-gray-500">
+                    <span className="truncate">{PART_LABEL[k] ?? k}</span><span className="font-semibold">{v}/{max}</span>
+                  </div>
+                  <div className="h-1 rounded-full bg-gray-100 overflow-hidden">
+                    <div className={`h-full rounded-full ${pct >= 1 ? 'bg-green-500' : pct >= 0.5 ? 'bg-amber-400' : 'bg-red-400'}`} style={{ width: `${pct * 100}%` }} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -41,3 +41,38 @@ export function websiteLinkLog(link: WebsiteLink): string {
 
 // Captures the label from a history line.
 export const WEBSITE_LINK_RE = /^🔗 Website link sent — (.+?) \| /
+
+// ── Match profiles (Match Finder) ────────────────────────────────────────────
+// When an agent decides a Match Finder suggestion suits the customer, the
+// customer gets her / his public emmathinking.com profile on WhatsApp. The
+// message carries no phone number — the website decides when contact details
+// are shared. Plain text only: some phones show emoji in wa.me drafts as �.
+
+export const VIEW_USER_URL = 'https://www.emmathinking.com/view-user/'
+export const viewUserUrl = (websiteUserId: string) => VIEW_USER_URL + websiteUserId
+
+export interface ProfileShare {
+  userId: string        // website user id
+  name: string | null
+  age: number | null
+  place: string         // "Maharagama, Colombo"
+  facts: string         // "Buddhist · Single · 5'4\" · Teacher"
+  pronoun: 'her' | 'his'
+}
+
+const firstName = (s: string | null) => (s || '').trim().split(/\s+/)[0] || 'A member'
+const shareLine = (p: ProfileShare) => `${firstName(p.name)}${p.age ? `, ${p.age}` : ''} — ${p.place}`
+
+export function matchProfileMessage(customerName: string, p: ProfileShare): string {
+  return `Hi ${customerName},\n\nWe found a profile that suits what you are looking for:\n\n${shareLine(p)}${p.facts ? `\n${p.facts}` : ''}\n\nView ${p.pronoun} profile here:\n${viewUserUrl(p.userId)}\n\nIf you like this profile, reply to this message and we will help you with the next step.\n\nEmma Thinking (Pvt) Ltd`
+}
+
+export function matchProfilesMessage(customerName: string, list: ProfileShare[]): string {
+  const items = list.map((p, i) => `${i + 1}) ${shareLine(p)}${p.facts ? `\n${p.facts}` : ''}\n${viewUserUrl(p.userId)}`)
+  return `Hi ${customerName},\n\nHere are some profiles we picked for you:\n\n${items.join('\n\n')}\n\nTell us which profile you would like to know more about.\n\nEmma Thinking (Pvt) Ltd`
+}
+
+// History line written when a profile is sent to the customer.
+export function matchProfileLog(p: ProfileShare): string {
+  return `💞 Match profile sent — ${p.name || 'Member'}${p.age ? `, ${p.age}` : ''} | ${viewUserUrl(p.userId)}`
+}

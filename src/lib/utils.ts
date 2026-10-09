@@ -45,6 +45,8 @@ export function normalisePhone(phone: string, countryCode = '94'): string {
 export function waDigits(phone: string): string {
   let digits = phone.replace(/\D/g, '')
   if (digits.startsWith('00')) digits = digits.slice(2)
+  // "0771234567" as typed in Sri Lanka — the leading 0 is the trunk prefix.
+  if (/^0\d{9}$/.test(digits)) digits = '94' + digits.slice(1)
   if (digits.length < 10) digits = '94' + digits.replace(/^0+/, '')
   return digits
 }

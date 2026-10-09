@@ -441,15 +441,102 @@ const PROVINCE_ALIASES: Record<Province, string[]> = {
   Sabaragamuwa: ['Sabaragamuwa', 'Sabaragamuwa Province', 'සබරගමුව'],
 }
 
-// Words that say "outside Sri Lanka" when a profile has no coordinates.
-const ABROAD_WORDS = [
-  'dubai', 'uae', 'emirates', 'abu dhabi', 'sharjah', 'ajman', 'qatar', 'doha', 'oman', 'muscat',
-  'saudi', 'riyadh', 'jeddah', 'kuwait', 'bahrain', 'manama', 'japan', 'tokyo', 'osaka', 'korea',
-  'seoul', 'italy', 'milan', 'milano', 'rome', 'roma', 'napoli', 'uk', 'united kingdom', 'london',
-  'england', 'australia', 'melbourne', 'sydney', 'perth', 'brisbane', 'new zealand', 'auckland',
-  'canada', 'toronto', 'usa', 'america', 'singapore', 'maldives', 'israel', 'cyprus', 'france',
-  'paris', 'germany', 'romania', 'poland', 'belarus', 'india',
+// Sinhala names for towns, as counsellor briefs write them ("කඩුවෙල ප්‍රදේශයේ
+// පදිංචි"). District names are in DISTRICT_ALIASES.
+const TOWN_SINHALA: Record<string, string[]> = {
+  'Dehiwala-Mount Lavinia': ['දෙහිවල', 'ගල්කිස්ස'], Moratuwa: ['මොරටුව'], Maharagama: ['මහරගම'],
+  Kottawa: ['කොට්ටාව'], Homagama: ['හෝමාගම'], Piliyandala: ['පිළියන්දල'], Battaramulla: ['බත්තරමුල්ල'],
+  Malabe: ['මාලඹේ'], Kaduwela: ['කඩුවෙල'], Athurugiriya: ['අතුරුගිරිය'], Avissawella: ['අවිස්සාවේල්ල'],
+  Padukka: ['පාදුක්ක'], Hanwella: ['හංවැල්ල'], Ratmalana: ['රත්මලාන'], Kolonnawa: ['කොලොන්නාව'],
+  Negombo: ['මීගමුව'], 'Ja-Ela': ['ජාඇල'], Wattala: ['වත්තල'], Kelaniya: ['කැලණිය'],
+  Kiribathgoda: ['කිරිබත්ගොඩ'], Kadawatha: ['කඩවත'], Ragama: ['රාගම'], Kandana: ['කඳාන'],
+  Minuwangoda: ['මිනුවන්ගොඩ'], Nittambuwa: ['නිට්ටඹුව'], Veyangoda: ['වේයන්ගොඩ'], Mirigama: ['මීරිගම'],
+  Divulapitiya: ['දිවුලපිටිය'], Ganemulla: ['ගණේමුල්ල'], Yakkala: ['යක්කල'], Seeduwa: ['සීදුව'],
+  Panadura: ['පානදුර'], Horana: ['හොරණ'], Beruwala: ['බේරුවල'], Aluthgama: ['අළුත්ගම'],
+  Matugama: ['මතුගම'], Bandaragama: ['බණ්ඩාරගම'], Wadduwa: ['වාද්දුව'],
+  Ambalangoda: ['අම්බලන්ගොඩ'], Hikkaduwa: ['හික්කඩුව'], Elpitiya: ['ඇල්පිටිය'], Bentota: ['බෙන්තොට'],
+  Baddegama: ['බද්දේගම'], Karapitiya: ['කරාපිටිය'], Weligama: ['වැලිගම'], Akuressa: ['අකුරැස්ස'],
+  Dikwella: ['දික්වැල්ල'], Deniyaya: ['දෙනියාය'], Tangalle: ['තංගල්ල'], Ambalantota: ['අම්බලන්තොට'],
+  Tissamaharama: ['තිස්සමහාරාමය'], Gampola: ['ගම්පොළ'], Peradeniya: ['පේරාදෙණිය'],
+  Katugastota: ['කටුගස්තොට'], Akurana: ['අකුරණ'], Dambulla: ['දඹුල්ල'], Hatton: ['හැටන්'],
+  Nawalapitiya: ['නාවලපිටිය'], Kuliyapitiya: ['කුලියාපිටිය'], Narammala: ['නාරම්මල'],
+  Pannala: ['පන්නල'], Nikaweratiya: ['නිකවැරටිය'], Chilaw: ['හලාවත'], Wennappuwa: ['වෙන්නප්පුව'],
+  Marawila: ['මාරවිල'], Kekirawa: ['කැකිරාව'], Hingurakgoda: ['හිඟුරක්ගොඩ'],
+  Bandarawela: ['බණ්ඩාරවෙල'], Welimada: ['වැලිමඩ'], Haputale: ['හපුතලේ'],
+  Mahiyanganaya: ['මහියංගනය'], Wellawaya: ['වැල්ලවාය'], Balangoda: ['බලංගොඩ'],
+  Embilipitiya: ['ඇඹිලිපිටිය'], Pelmadulla: ['පැල්මඩුල්ල'], Eheliyagoda: ['ඇහැලියගොඩ'],
+  Kuruwita: ['කුරුවිට'], Mawanella: ['මාවනැල්ල'], Warakapola: ['වරකාපොල'], Rambukkana: ['රඹුක්කන'],
+}
+
+// ── Countries: where "abroad" is ────────────────────────────────────────────
+// Most customers outside Sri Lanka are in the Gulf, Korea, Japan, Italy, the
+// UK, Australia… Two of them are only a match on location when they live in
+// the SAME country, so "abroad" has to say which one. A country is read from
+// typed words, the website's country column (ISO code or name), a lat/lng box,
+// or — last resort, for a customer with no location at all — the phone's
+// dialling code.
+interface Country {
+  name: string
+  iso: string
+  dial: string | null
+  box: [number, number, number, number] | null   // latMin, latMax, lngMin, lngMax
+  words: string[]
+}
+
+// Small countries first: lat/lng boxes overlap and the first hit wins.
+const COUNTRIES: Country[] = [
+  { name: 'Bahrain', iso: 'BH', dial: '973', box: [25.5, 26.4, 50.3, 50.9], words: ['bahrain', 'manama'] },
+  { name: 'Qatar', iso: 'QA', dial: '974', box: [24.4, 26.3, 50.7, 51.7], words: ['qatar', 'doha'] },
+  { name: 'Singapore', iso: 'SG', dial: '65', box: [1.15, 1.48, 103.6, 104.1], words: ['singapore'] },
+  { name: 'Hong Kong', iso: 'HK', dial: '852', box: [22.1, 22.6, 113.8, 114.5], words: ['hong kong'] },
+  { name: 'Cyprus', iso: 'CY', dial: '357', box: [34.5, 35.8, 32.2, 34.6], words: ['cyprus', 'nicosia', 'limassol', 'larnaca', 'paphos'] },
+  { name: 'Lebanon', iso: 'LB', dial: '961', box: [33, 34.7, 35.1, 36.6], words: ['lebanon', 'beirut'] },
+  { name: 'Israel', iso: 'IL', dial: '972', box: [29.4, 33.4, 34.2, 35.9], words: ['israel', 'tel aviv', 'jerusalem', 'haifa'] },
+  { name: 'Kuwait', iso: 'KW', dial: '965', box: [28.5, 30.2, 46.5, 48.5], words: ['kuwait'] },
+  { name: 'Malta', iso: 'MT', dial: '356', box: [35.7, 36.1, 14.1, 14.6], words: ['malta'] },
+  { name: 'Maldives', iso: 'MV', dial: '960', box: [-0.8, 7.2, 72.5, 73.8], words: ['maldives'] },
+  { name: 'Seychelles', iso: 'SC', dial: '248', box: [-10, -3.5, 46, 56.5], words: ['seychelles'] },
+  { name: 'United Arab Emirates', iso: 'AE', dial: '971', box: [22.5, 26.5, 51, 56.5],
+    words: ['uae', 'u a e', 'united arab emirates', 'emirates', 'dubai', 'abu dhabi', 'abudhabi', 'sharjah', 'ajman', 'al ain', 'ras al khaimah', 'fujairah'] },
+  { name: 'Jordan', iso: 'JO', dial: '962', box: [29.2, 33.4, 34.9, 39.3], words: ['jordan', 'amman'] },
+  { name: 'Switzerland', iso: 'CH', dial: '41', box: [45.8, 47.8, 5.9, 10.5], words: ['switzerland', 'zurich', 'geneva'] },
+  { name: 'Netherlands', iso: 'NL', dial: '31', box: [50.7, 53.6, 3.3, 7.3], words: ['netherlands', 'holland', 'amsterdam'] },
+  { name: 'Belgium', iso: 'BE', dial: '32', box: [49.5, 51.5, 2.5, 6.4], words: ['belgium', 'brussels'] },
+  { name: 'Ireland', iso: 'IE', dial: '353', box: [51.4, 55.4, -10.5, -6], words: ['ireland', 'dublin'] },
+  { name: 'Austria', iso: 'AT', dial: '43', box: [46.4, 49, 9.5, 17.2], words: ['austria', 'vienna'] },
+  { name: 'Oman', iso: 'OM', dial: '968', box: [16.6, 26.5, 51.8, 59.9], words: ['oman', 'muscat', 'salalah'] },
+  { name: 'South Korea', iso: 'KR', dial: '82', box: [33, 38.7, 124.5, 131], words: ['korea', 'south korea', 'seoul', 'busan', 'incheon', 'daegu', 'gimhae', 'ansan'] },
+  { name: 'Greece', iso: 'GR', dial: '30', box: [34.8, 41.8, 19.3, 28.3], words: ['greece', 'athens'] },
+  { name: 'Portugal', iso: 'PT', dial: '351', box: [36.9, 42.2, -9.6, -6.2], words: ['portugal', 'lisbon'] },
+  { name: 'Italy', iso: 'IT', dial: '39', box: [36.6, 47.1, 6.6, 18.6],
+    words: ['italy', 'italia', 'milan', 'milano', 'rome', 'roma', 'napoli', 'naples', 'florence', 'firenze', 'bologna', 'genoa', 'genova', 'palermo', 'verona', 'torino', 'turin', 'catania', 'messina'] },
+  { name: 'United Kingdom', iso: 'GB', dial: '44', box: [49.8, 60.9, -8.7, 1.8],
+    words: ['uk', 'u k', 'united kingdom', 'england', 'britain', 'great britain', 'scotland', 'wales', 'london', 'manchester', 'birmingham', 'leicester', 'leeds'] },
+  { name: 'Germany', iso: 'DE', dial: '49', box: [47.2, 55.1, 5.8, 15.1], words: ['germany', 'berlin', 'munich', 'frankfurt', 'hamburg'] },
+  { name: 'France', iso: 'FR', dial: '33', box: [41.3, 51.1, -5.2, 9.6], words: ['france', 'paris'] },
+  { name: 'Spain', iso: 'ES', dial: '34', box: [36, 43.8, -9.3, 3.3], words: ['spain', 'madrid', 'barcelona'] },
+  { name: 'Romania', iso: 'RO', dial: '40', box: [43.6, 48.3, 20.2, 29.7], words: ['romania', 'bucharest'] },
+  { name: 'Poland', iso: 'PL', dial: '48', box: [49, 54.9, 14.1, 24.2], words: ['poland', 'warsaw'] },
+  { name: 'Belarus', iso: 'BY', dial: '375', box: [51.2, 56.2, 23.2, 32.8], words: ['belarus', 'minsk'] },
+  { name: 'Norway', iso: 'NO', dial: '47', box: [57.9, 71.2, 4.6, 31.1], words: ['norway', 'oslo'] },
+  { name: 'Sweden', iso: 'SE', dial: '46', box: [55.3, 69.1, 11, 24.2], words: ['sweden', 'stockholm'] },
+  { name: 'Denmark', iso: 'DK', dial: '45', box: [54.5, 57.8, 8, 12.7], words: ['denmark', 'copenhagen'] },
+  { name: 'Finland', iso: 'FI', dial: '358', box: [59.8, 70.1, 20.5, 31.6], words: ['finland', 'helsinki'] },
+  { name: 'Saudi Arabia', iso: 'SA', dial: '966', box: [16, 32.5, 34.5, 55.7], words: ['saudi', 'saudi arabia', 'ksa', 'riyadh', 'jeddah', 'dammam', 'makkah', 'mecca', 'medina'] },
+  { name: 'Japan', iso: 'JP', dial: '81', box: [24, 45.6, 122.9, 146], words: ['japan', 'tokyo', 'osaka', 'nagoya', 'yokohama', 'saitama', 'chiba'] },
+  { name: 'Malaysia', iso: 'MY', dial: '60', box: [0.8, 7.4, 99.6, 119.3], words: ['malaysia', 'kuala lumpur'] },
+  { name: 'Thailand', iso: 'TH', dial: '66', box: [5.6, 20.5, 97.3, 105.7], words: ['thailand', 'bangkok'] },
+  { name: 'New Zealand', iso: 'NZ', dial: '64', box: [-47.5, -34, 166, 179], words: ['new zealand', 'nz', 'auckland', 'wellington', 'christchurch'] },
+  { name: 'Australia', iso: 'AU', dial: '61', box: [-44, -10, 112, 154], words: ['australia', 'melbourne', 'sydney', 'perth', 'brisbane', 'adelaide', 'canberra'] },
+  { name: 'India', iso: 'IN', dial: '91', box: [6.5, 35.7, 68, 97.5], words: ['india', 'chennai', 'bangalore', 'bengaluru', 'mumbai', 'delhi', 'kerala', 'tamil nadu'] },
+  { name: 'China', iso: 'CN', dial: '86', box: [18, 53.6, 73.5, 134.8], words: ['china', 'beijing', 'shanghai'] },
+  { name: 'Russia', iso: 'RU', dial: null, box: null, words: ['russia', 'moscow'] },
+  { name: 'Canada', iso: 'CA', dial: null, box: [41.7, 83, -141, -52.6], words: ['canada', 'toronto', 'montreal', 'vancouver', 'calgary', 'ottawa'] },
+  { name: 'USA', iso: 'US', dial: null, box: [24.5, 49.4, -125, -66.9], words: ['usa', 'u s a', 'united states', 'america', 'new york', 'california', 'texas', 'los angeles', 'new jersey'] },
 ]
+
+const COUNTRY_BY_ISO = new Map(COUNTRIES.map(c => [c.iso, c]))
+const COUNTRY_BY_NAME = new Map(COUNTRIES.map(c => [c.name.toLowerCase(), c]))
 
 // ── Normalising names so spellings meet ─────────────────────────────────────
 // "Rathnapura" / "Ratnapura", "Avissawelle" / "Awissawella", "Kolombo" /
@@ -509,7 +596,7 @@ for (const d of DISTRICTS) {
 }
 for (const [name, district, lat, lng, ...aliases] of TOWNS) {
   const d = DISTRICT_BY_NAME.get(district)!
-  add([name, ...aliases], { kind: 'town', name, district, province: d.province, lat, lng })
+  add([name, ...aliases, ...(TOWN_SINHALA[name] ?? [])], { kind: 'town', name, district, province: d.province, lat, lng })
 }
 const PROVINCE_CENTRE = (p: Province) => {
   const ds = DISTRICTS.filter(d => d.province === p)
@@ -548,9 +635,20 @@ const NOISE = /\b(district|city|town|province|sri\s*lanka|srilanka|lk|area|near|
  * comma/slash part, then single words and word pairs, and keeps the most
  * specific hit ("District -Matara, City-Weligama" → Weligama, a Matara town).
  */
+// The ranking pass resolves thousands of profile cities, mostly the same few
+// hundred spellings — remember each answer (the fuzzy fallback is the slow part).
+const RESOLVED = new Map<string, Place | null>()
 export function resolvePlace(text: string | null | undefined): Place | null {
   const raw = (text || '').trim()
   if (!raw) return null
+  if (RESOLVED.has(raw)) return RESOLVED.get(raw)!
+  const place = resolveUncached(raw)
+  if (RESOLVED.size > 20_000) RESOLVED.clear()
+  RESOLVED.set(raw, place)
+  return place
+}
+
+function resolveUncached(raw: string): Place | null {
   const whole = lookup(raw)
   if (whole) return whole
 
@@ -573,9 +671,49 @@ export function resolvePlace(text: string | null | undefined): Place | null {
   return best
 }
 
+/** The country a piece of text names: "Dubai", "Abu Dhabi, UAE", "AE", "Italy". */
+export function countryOf(text: string | null | undefined): string | null {
+  const raw = (text || '').trim()
+  if (!raw) return null
+  if (/^[A-Za-z]{2}$/.test(raw)) {
+    const iso = COUNTRY_BY_ISO.get(raw.toUpperCase())
+    if (iso) return iso.name
+  }
+  const byName = COUNTRY_BY_NAME.get(raw.toLowerCase())
+  if (byName) return byName.name
+  const t = ` ${raw.toLowerCase().replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ')} `
+  return COUNTRIES.find(c => c.words.some(w => t.includes(` ${w} `)))?.name ?? null
+}
+
 export function looksAbroad(text: string | null | undefined): boolean {
-  const t = ` ${(text || '').toLowerCase().replace(/[^a-z ]/g, ' ')} `
-  return ABROAD_WORDS.some(w => t.includes(` ${w} `))
+  return countryOf(text) != null
+}
+
+/** "LK", "Sri Lanka", "srilanka" — the website's country column for home. */
+export function isSriLankaCountry(text: string | null | undefined): boolean {
+  return /^\s*(lk|lka|sri\s*lanka)\s*$/i.test(text || '')
+}
+
+export function countryOfPoint(lat: number, lng: number): string | null {
+  if (inSriLanka(lat, lng)) return null
+  return COUNTRIES.find(c => c.box && lat >= c.box[0] && lat <= c.box[1] && lng >= c.box[2] && lng <= c.box[3])?.name ?? null
+}
+
+/**
+ * Country from an international phone number (971… → UAE). Sri Lankan
+ * numbers (94…, 07…, 7XXXXXXXX) give null. Only a hint — a family member's
+ * number can be anywhere — so it is used only when nothing else says where
+ * the customer lives.
+ */
+export function countryOfPhone(phone: string | null | undefined): string | null {
+  let d = (phone || '').replace(/\D/g, '')
+  if (d.startsWith('00')) d = d.slice(2)
+  if (d.length < 10 || d.startsWith('94') || d.startsWith('0')) return null
+  for (const len of [3, 2]) {
+    const hit = COUNTRIES.find(c => c.dial && c.dial.length === len && d.startsWith(c.dial))
+    if (hit) return hit.name
+  }
+  return null
 }
 
 export function inSriLanka(lat: number, lng: number): boolean {
@@ -594,13 +732,17 @@ export function distanceKm(a: { lat: number; lng: number }, b: { lat: number; ln
 // Every named point, for "which district is this lat/lng in?" — nearest
 // named place wins. Approximate on district borders, which is fine for a
 // "same district" bonus on top of the distance score.
+// Squared flat-earth distance is plenty for "which is nearest" inside one
+// small island, and ~20× cheaper than haversine across every profile.
 const POINTS = ENTRIES.filter(e => e.place.kind !== 'province').map(e => e.place)
+const LNG_SCALE = Math.cos((7.8 * Math.PI) / 180) ** 2
 export function districtOfPoint(lat: number, lng: number): District | null {
   if (!inSriLanka(lat, lng)) return null
   let best: Place | null = null
   let bestD = Infinity
   for (const p of POINTS) {
-    const d = distanceKm({ lat, lng }, p)
+    const dLat = p.lat - lat, dLng = p.lng - lng
+    const d = dLat * dLat + dLng * dLng * LNG_SCALE
     if (d < bestD) { bestD = d; best = p }
   }
   return best?.district ? DISTRICT_BY_NAME.get(best.district) ?? null : null
@@ -615,4 +757,5 @@ export const PLACE_SUGGESTIONS: string[] = [
   ...(Object.keys(PROVINCE_ALIASES) as Province[]).map(p => `${p} Province`),
   ...DISTRICTS.map(d => `${d.name} District`),
   ...TOWNS.map(t => t[0]),
+  ...COUNTRIES.map(c => c.name),
 ]

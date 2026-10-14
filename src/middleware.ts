@@ -29,6 +29,7 @@ const PUBLIC_PREFIXES = [
   '/api/track',
   '/api/public-media',
   '/api/sms/process-overdue',   // guarded by CRON_SECRET
+  '/api/signup-alerts/run',     // CRON_SECRET, or an admin session checked in the route
   '/api/whatsapp/webhook',      // Meta callback
 ]
 

@@ -29,10 +29,11 @@ interface Row {
     gender: string | null
     city: string | null
     registered_at: string
-    state: 'waiting' | 'sending' | 'sent' | 'failed' | 'paid' | 'no_agent'
+    state: 'waiting' | 'sending' | 'sent' | 'failed' | 'paid' | 'in_crm' | 'no_agent'
     kind: 'completed' | 'not_completed' | null
     assigned_to: string | null
     agent_name: string | null
+    crm_owner_name: string | null
     sms_error: string | null
     sent_at: string | null
     entry_at: string | null
@@ -56,6 +57,7 @@ const STATE_LABEL: Record<Row['state'], { text: string; cls: string }> = {
     sent: { text: 'Sent', cls: 'bg-green-50 text-green-700' },
     failed: { text: 'SMS failed', cls: 'bg-red-50 text-red-600' },
     paid: { text: 'Already paid', cls: 'bg-blue-50 text-blue-700' },
+    in_crm: { text: 'Already in CRM', cls: 'bg-blue-50 text-blue-700' },
     no_agent: { text: 'No agent ticked', cls: 'bg-gray-100 text-gray-500' },
 }
 
@@ -119,7 +121,7 @@ export default function SignupAlertsPage() {
         const json = await res.json()
         setRunning(false)
         setRunNote(json.skipped ? `Skipped — ${json.skipped}` : json.ok
-            ? `${json.newSignups} new · ${json.sent} sent · ${json.failed} failed · ${json.paid} already paid · ${json.waiting} waiting`
+            ? `${json.newSignups} new · ${json.sent} sent · ${json.failed} failed · ${json.paid} already paid · ${json.inCrm ?? 0} already in CRM · ${json.waiting} waiting`
             : `Error — ${json.error}`)
         load(month)
     }
@@ -144,7 +146,7 @@ export default function SignupAlertsPage() {
             if (filter === 'no_entry' && !(r.state === 'sent' && !r.entry_at)) return false
             if (filter === 'other' && r.state === 'sent') return false
             if (!needle) return true
-            return [r.phone, r.name, r.agent_name, r.city].some((v) => (v || '').toLowerCase().includes(needle))
+            return [r.phone, r.name, r.agent_name, r.crm_owner_name, r.city].some((v) => (v || '').toLowerCase().includes(needle))
         })
     }, [rows, q, filter])
 
@@ -184,8 +186,8 @@ export default function SignupAlertsPage() {
                         <p className="text-[11px] text-gray-400 mt-1 max-w-xl leading-relaxed">
                             Every 10 minutes, 8:00 am – 5:00 pm, new emmathinking.com registrations are texted to the
                             ticked agents in turn. <b>Completed</b> (onboarding done): number, name, age, gender, city.{' '}
-                            <b>Not completed</b> after 10 minutes: number only. Numbers that already have an order are
-                            not sent. Sign-ups from 5 pm to the next morning go out together at 7:50 am.
+                            <b>Not completed</b> after 10 minutes: number only. Numbers already in the CRM (an order or
+                            any agent&apos;s entry) are not sent. Sign-ups from 5 pm to the next morning go out together at 7:50 am.
                         </p>
                         <p className="text-[10px] text-gray-400 mt-2">
                             Last run: <span className="font-semibold text-gray-600">{fmt(settings?.last_run_at ?? null)}</span>
@@ -344,7 +346,7 @@ export default function SignupAlertsPage() {
                             <option value="not_completed">Sent · not completed</option>
                             <option value="no_entry">Sent · no entry yet</option>
                             <option value="order">Turned into order</option>
-                            <option value="other">Not sent (paid / waiting / failed)</option>
+                            <option value="other">Not sent (paid / in CRM / waiting / failed)</option>
                         </select>
                         <div className="relative">
                             <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-300" />
@@ -389,7 +391,9 @@ export default function SignupAlertsPage() {
                                                 </span>
                                             )}
                                             {r.state !== 'sent' && (
-                                                <span title={r.sms_error ?? undefined} className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${st.cls}`}>{st.text}</span>
+                                                <span title={r.sms_error ?? undefined} className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${st.cls}`}>
+                                                    {st.text}{r.state === 'in_crm' && r.crm_owner_name ? ` · ${r.crm_owner_name}` : ''}
+                                                </span>
                                             )}
                                         </td>
                                         <td className="px-4 py-2.5 font-semibold text-gray-700 whitespace-nowrap">{r.agent_name ?? '—'}</td>

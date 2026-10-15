@@ -66,6 +66,7 @@ export async function GET(req: NextRequest) {
         return {
             ...r,
             agent_name: r.assigned_to ? nameOf.get(r.assigned_to) ?? '—' : null,
+            crm_owner_name: r.crm_owner ? nameOf.get(r.crm_owner) ?? null : null,
             entry_at: entry?.at ?? null,
             entry_by: entry?.by ? nameOf.get(entry.by) ?? null : null,
             order_at: order?.created_at ?? null,

@@ -10,7 +10,10 @@
 //      number, name, age, gender, city.
 //      Still not done when a later run looks again → "not completed" SMS:
 //      the number only.
-//   3. A number that already has an order in the CRM is never sent ('paid').
+//   3. A number the CRM already knows is never sent: an order ('paid'), or
+//      just a customer entry / interaction by any agent ('in_crm', with that
+//      agent saved in crm_owner). Texting it to someone else would put two
+//      agents on one customer.
 //   4. Each SMS goes to the next ticked agent in turn (Text.lk, sms_log too).
 //
 // Between 17:00 and 07:50 nothing runs. The 07:50 run is the catch-up: every
@@ -147,6 +150,7 @@ export interface RunSummary {
   sent: number
   failed: number
   paid: number
+  inCrm: number
   waiting: number
   noAgent: number
 }
@@ -154,7 +158,7 @@ export interface RunSummary {
 export async function runSignupAlerts(opts: { force?: boolean; now?: Date } = {}): Promise<RunSummary> {
   const now = opts.now ?? new Date()
   let mode = runMode(now)
-  const summary: RunSummary = { mode, newSignups: 0, sent: 0, failed: 0, paid: 0, waiting: 0, noAgent: 0 }
+  const summary: RunSummary = { mode, newSignups: 0, sent: 0, failed: 0, paid: 0, inCrm: 0, waiting: 0, noAgent: 0 }
 
   if (mode === 'closed') {
     if (!opts.force) return { ...summary, skipped: 'outside 07:50–17:00 Colombo' }
@@ -214,8 +218,8 @@ export async function runSignupAlerts(opts: { force?: boolean; now?: Date } = {}
     for (const p of (data ?? []) as WebProfile[]) profiles.set(p.user_id, p)
   }
 
-  // 3. Paying customers are left out.
-  const trails = await crmTrails(admin, waiting.map(w => w.phone_suffix ?? ''))
+  // 3. Numbers already in the CRM (order or any entry) are left out.
+  const trails = await crmTrails(admin, waiting.map(w => w.phone_suffix ?? ''), true)
 
   // 4. Agents, in turn.
   const recipientIds: string[] = settings.recipient_ids ?? []
@@ -249,9 +253,20 @@ export async function runSignupAlerts(opts: { force?: boolean; now?: Date } = {}
     }
     const base = { kind, name: facts.name, age: facts.age, gender: facts.gender, city: facts.city }
 
-    if ((trails.get(w.phone_suffix ?? '')?.orders.length ?? 0) > 0) {
+    const trail = trails.get(w.phone_suffix ?? '')
+    if (trail?.orders.length) {
       await admin.from('website_signups').update({ ...base, state: 'paid' }).eq('id', w.id)
       summary.paid++
+      continue
+    }
+    if (trail?.customerIds.length) {
+      // Whoever touched it last is the agent working it.
+      const owner = [...trail.entries].reverse().find(e => e.by)?.by ?? null
+      const { error } = await admin.from('website_signups')
+        .update({ ...base, state: 'in_crm', crm_owner: owner }).eq('id', w.id)
+      // Before migration 0032 'in_crm' / crm_owner don't exist — still never send it.
+      if (error) await admin.from('website_signups').update({ ...base, state: 'paid' }).eq('id', w.id)
+      summary.inCrm++
       continue
     }
     if (!agents.length) {
@@ -281,7 +296,7 @@ export async function runSignupAlerts(opts: { force?: boolean; now?: Date } = {}
 }
 
 async function finish(admin: Admin, now: Date, s: RunSummary): Promise<RunSummary> {
-  const note = `${s.mode}: ${s.newSignups} new · ${s.sent} sent · ${s.failed} failed · ${s.paid} paid · ${s.waiting} waiting` +
+  const note = `${s.mode}: ${s.newSignups} new · ${s.sent} sent · ${s.failed} failed · ${s.paid} paid · ${s.inCrm} already in CRM · ${s.waiting} waiting` +
     (s.noAgent ? ` · ${s.noAgent} no agent` : '')
   await admin.from('signup_alert_settings').update({ last_run_at: now.toISOString(), last_run_note: note }).eq('id', 1)
   return s

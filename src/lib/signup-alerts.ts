@@ -2,7 +2,7 @@
 // Website sign-up alerts — SERVER-ONLY
 // ============================================================================
 // A member registers on emmathinking.com with phone + OTP and gets a website
-// `user` row. Every 10 minutes, 08:00–17:00 Colombo, runSignupAlerts():
+// `user` row. Every 10 minutes, 08:00–20:00 Colombo, runSignupAlerts():
 //
 //   1. Reads the website (VIEW ONLY) for members who registered in the last
 //      24 hours and notes each new one in website_signups ('waiting').
@@ -14,9 +14,12 @@
 //      just a customer entry / interaction by any agent ('in_crm', with that
 //      agent saved in crm_owner). Texting it to someone else would put two
 //      agents on one customer.
-//   4. Each SMS goes to the next ticked agent in turn (Text.lk, sms_log too).
+//   4. Genders switched off on the tab (settings.genders) are not sent
+//      ('gender_off'). A sign-up with no gender on the website yet is sent.
+//   5. Each SMS goes to the next ticked agent in turn — A, B, C, A, B… — also
+//      across the 07:50 batch (Text.lk, sms_log too).
 //
-// Between 17:00 and 07:50 nothing runs. The 07:50 run is the catch-up: every
+// Between 20:00 and 07:50 nothing runs. The 07:50 run is the catch-up: every
 // overnight sign-up is decided on the spot (they have had all night) and sent
 // before the agents start.
 // ============================================================================
@@ -35,7 +38,7 @@ export const suffixOf = (phone: string | null | undefined) => (phone || '').repl
 
 const MORNING = 7 * 60 + 50   // 07:50 catch-up
 const OPEN = 8 * 60           // 08:00
-const CLOSE = 17 * 60 + 5     // 17:00 run, with a few minutes' slack for cron lag
+const CLOSE = 20 * 60 + 5     // 20:00 run, with a few minutes' slack for cron lag
 
 /** Minutes since midnight in Colombo. */
 export function colomboMinutes(now = new Date()): number {
@@ -151,6 +154,7 @@ export interface RunSummary {
   failed: number
   paid: number
   inCrm: number
+  genderOff: number
   waiting: number
   noAgent: number
 }
@@ -158,10 +162,10 @@ export interface RunSummary {
 export async function runSignupAlerts(opts: { force?: boolean; now?: Date } = {}): Promise<RunSummary> {
   const now = opts.now ?? new Date()
   let mode = runMode(now)
-  const summary: RunSummary = { mode, newSignups: 0, sent: 0, failed: 0, paid: 0, inCrm: 0, waiting: 0, noAgent: 0 }
+  const summary: RunSummary = { mode, newSignups: 0, sent: 0, failed: 0, paid: 0, inCrm: 0, genderOff: 0, waiting: 0, noAgent: 0 }
 
   if (mode === 'closed') {
-    if (!opts.force) return { ...summary, skipped: 'outside 07:50–17:00 Colombo' }
+    if (!opts.force) return { ...summary, skipped: 'outside 07:50–20:00 Colombo' }
     mode = summary.mode = 'day'
   }
   if (!websiteSupabase) return { ...summary, skipped: 'website DB not configured' }
@@ -230,6 +234,8 @@ export async function runSignupAlerts(opts: { force?: boolean; now?: Date } = {}
     .map(id => (agentRows ?? []).find((a: any) => a.id === id))
     .filter((a: any) => a && a.is_active && a.sms_enabled !== false && a.phone_number) as { id: string; phone_number: string }[]
   let cursor: number = settings.rr_cursor ?? 0
+  // Before migration 0033 there is no genders column: send both.
+  const genders = new Set<string>(Array.isArray(settings.genders) ? settings.genders : ['male', 'female'])
 
   for (const w of waiting) {
     const u = webUsers.get(w.website_user_id)
@@ -269,6 +275,12 @@ export async function runSignupAlerts(opts: { force?: boolean; now?: Date } = {}
       summary.inCrm++
       continue
     }
+    if (facts.gender && !genders.has(facts.gender)) {
+      const { error } = await admin.from('website_signups').update({ ...base, state: 'gender_off' }).eq('id', w.id)
+      if (error) await admin.from('website_signups').update({ ...base, state: 'paid' }).eq('id', w.id)
+      summary.genderOff++
+      continue
+    }
     if (!agents.length) {
       await admin.from('website_signups').update({ ...base, state: 'no_agent' }).eq('id', w.id)
       summary.noAgent++
@@ -296,7 +308,7 @@ export async function runSignupAlerts(opts: { force?: boolean; now?: Date } = {}
 }
 
 async function finish(admin: Admin, now: Date, s: RunSummary): Promise<RunSummary> {
-  const note = `${s.mode}: ${s.newSignups} new · ${s.sent} sent · ${s.failed} failed · ${s.paid} paid · ${s.inCrm} already in CRM · ${s.waiting} waiting` +
+  const note = `${s.mode}: ${s.newSignups} new · ${s.sent} sent · ${s.failed} failed · ${s.paid} paid · ${s.inCrm} already in CRM · ${s.genderOff} gender off · ${s.waiting} waiting` +
     (s.noAgent ? ` · ${s.noAgent} no agent` : '')
   await admin.from('signup_alert_settings').update({ last_run_at: now.toISOString(), last_run_note: note }).eq('id', 1)
   return s

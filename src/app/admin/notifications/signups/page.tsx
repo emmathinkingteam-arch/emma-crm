@@ -4,7 +4,7 @@
 // /admin/notifications/signups — website sign-up alerts
 // ============================================================================
 // New emmathinking.com registrations are texted to the ticked CRM agents
-// (src/lib/signup-alerts.ts runs every 10 min, 08:00–17:00, 07:50 catch-up).
+// (src/lib/signup-alerts.ts runs every 10 min, 08:00–20:00, 07:50 catch-up).
 // This tab: switch it on/off, tick who gets the SMS, the month's ratio per
 // CRM (orders ÷ numbers sent), and the full history — who got each number,
 // when, when they made an entry, and whether it turned into an order.
@@ -17,6 +17,7 @@ import { ROLE_LABELS } from '@/lib/utils'
 interface Settings {
     is_enabled: boolean
     recipient_ids: string[]
+    genders?: string[]
     last_run_at: string | null
     last_run_note: string | null
 }
@@ -29,7 +30,7 @@ interface Row {
     gender: string | null
     city: string | null
     registered_at: string
-    state: 'waiting' | 'sending' | 'sent' | 'failed' | 'paid' | 'in_crm' | 'no_agent'
+    state: 'waiting' | 'sending' | 'sent' | 'failed' | 'paid' | 'in_crm' | 'gender_off' | 'no_agent'
     kind: 'completed' | 'not_completed' | null
     assigned_to: string | null
     agent_name: string | null
@@ -58,6 +59,7 @@ const STATE_LABEL: Record<Row['state'], { text: string; cls: string }> = {
     failed: { text: 'SMS failed', cls: 'bg-red-50 text-red-600' },
     paid: { text: 'Already paid', cls: 'bg-blue-50 text-blue-700' },
     in_crm: { text: 'Already in CRM', cls: 'bg-blue-50 text-blue-700' },
+    gender_off: { text: 'Gender off', cls: 'bg-gray-100 text-gray-500' },
     no_agent: { text: 'No agent ticked', cls: 'bg-gray-100 text-gray-500' },
 }
 
@@ -100,7 +102,7 @@ export default function SignupAlertsPage() {
 
     useEffect(() => { load(month) }, [month, load])
 
-    async function save(patch: Partial<Pick<Settings, 'is_enabled' | 'recipient_ids'>>) {
+    async function save(patch: Partial<Pick<Settings, 'is_enabled' | 'recipient_ids' | 'genders'>>) {
         setSaving(true)
         const res = await fetch('/api/signup-alerts', {
             method: 'POST',
@@ -121,7 +123,7 @@ export default function SignupAlertsPage() {
         const json = await res.json()
         setRunning(false)
         setRunNote(json.skipped ? `Skipped — ${json.skipped}` : json.ok
-            ? `${json.newSignups} new · ${json.sent} sent · ${json.failed} failed · ${json.paid} already paid · ${json.inCrm ?? 0} already in CRM · ${json.waiting} waiting`
+            ? `${json.newSignups} new · ${json.sent} sent · ${json.failed} failed · ${json.paid} already paid · ${json.inCrm ?? 0} already in CRM · ${json.genderOff ?? 0} gender off · ${json.waiting} waiting`
             : `Error — ${json.error}`)
         load(month)
     }
@@ -184,16 +186,44 @@ export default function SignupAlertsPage() {
                     <div>
                         <h2 className="text-sm font-bold text-gray-800">Website sign-up alerts</h2>
                         <p className="text-[11px] text-gray-400 mt-1 max-w-xl leading-relaxed">
-                            Every 10 minutes, 8:00 am – 5:00 pm, new emmathinking.com registrations are texted to the
-                            ticked agents in turn. <b>Completed</b> (onboarding done): number, name, age, gender, city.{' '}
+                            Runs by itself every day from 7:50 am to 8:00 pm, every 10 minutes: new emmathinking.com
+                            registrations are texted to the ticked agents in turn (A, B, C, A, B…). <b>Completed</b> (onboarding done): number, name, age, gender, city.{' '}
                             <b>Not completed</b> after 10 minutes: number only. Numbers already in the CRM (an order or
-                            any agent&apos;s entry) are not sent. Sign-ups from 5 pm to the next morning go out together at 7:50 am.
+                            any agent&apos;s entry) are not sent. Sign-ups from 8 pm to the next morning go out at 7:50 am, shared out the same way.
                         </p>
                         <p className="text-[10px] text-gray-400 mt-2">
                             Last run: <span className="font-semibold text-gray-600">{fmt(settings?.last_run_at ?? null)}</span>
                             {settings?.last_run_note && <> · {settings.last_run_note}</>}
                         </p>
                         {runNote && <p className="text-[10px] text-pink-600 font-semibold mt-1">{runNote}</p>}
+                        <div className="flex items-center gap-2 mt-3">
+                            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Send</span>
+                            {(['male', 'female'] as const).map((g) => {
+                                const on = (settings?.genders ?? ['male', 'female']).includes(g)
+                                return (
+                                    <button
+                                        key={g}
+                                        disabled={saving}
+                                        onClick={() => {
+                                            const cur = settings?.genders ?? ['male', 'female']
+                                            save({ genders: on ? cur.filter((x) => x !== g) : [...cur, g] })
+                                        }}
+                                        className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border flex items-center gap-1.5 ${on
+                                            ? 'border-pink-300 bg-pink-50 text-pink-700'
+                                            : 'border-gray-200 text-gray-400'
+                                            }`}
+                                    >
+                                        <span className={`w-3.5 h-3.5 rounded flex items-center justify-center ${on ? 'bg-pink-600' : 'border border-gray-300'}`}>
+                                            {on && <Check size={9} className="text-white" />}
+                                        </span>
+                                        {g === 'male' ? 'Male' : 'Female'}
+                                    </button>
+                                )
+                            })}
+                            {settings && !settings.genders && (
+                                <span className="text-[10px] text-red-500">Run migration 0033 to save this.</span>
+                            )}
+                        </div>
                     </div>
                     <div className="flex items-center gap-2">
                         <button
@@ -204,7 +234,7 @@ export default function SignupAlertsPage() {
                                 : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                                 }`}
                         >
-                            <Power size={12} /> {settings?.is_enabled ? 'On' : 'Off'}
+                            <Power size={12} /> {settings?.is_enabled ? 'On · 7:50 am – 8 pm' : 'Off'}
                         </button>
                         <button
                             onClick={runNow}

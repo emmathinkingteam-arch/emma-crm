@@ -4,7 +4,7 @@
 // GET  ?month=YYYY-MM   → settings, agents, the month's sign-ups with the
 //                         agent's first CRM entry + first order after the SMS,
 //                         and per-agent totals (orders ÷ numbers sent)
-// POST { is_enabled?, recipient_ids? } → save settings
+// POST { is_enabled?, recipient_ids?, genders? } → save settings
 //
 // "Entry" = the first customer row or interaction on that number created at
 // or after the SMS. "Order" = the first order on that number created at or
@@ -103,6 +103,7 @@ export async function POST(req: NextRequest) {
     const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
     if (typeof body.is_enabled === 'boolean') patch.is_enabled = body.is_enabled
     if (Array.isArray(body.recipient_ids)) patch.recipient_ids = body.recipient_ids.filter((x: unknown) => typeof x === 'string')
+    if (Array.isArray(body.genders)) patch.genders = body.genders.filter((x: unknown) => x === 'male' || x === 'female')
     const { data, error } = await supabaseAdmin().from('signup_alert_settings').update(patch).eq('id', 1).select('*').single()
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json({ settings: data })

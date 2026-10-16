@@ -11,11 +11,10 @@
 //      Still not done when a later run looks again → "not completed" SMS:
 //      the number only.
 //   3. A number the CRM already knows is never sent: an order ('paid'), or
-//      just a customer entry / interaction by any agent ('in_crm', with that
-//      agent saved in crm_owner). Texting it to someone else would put two
-//      agents on one customer.
-//   4. Genders switched off on the tab (settings.genders) are not sent
-//      ('gender_off'). A sign-up with no gender on the website yet is sent.
+//      just a customer entry / interaction by any agent (texting it to someone
+//      else would put two agents on one customer).
+//   4. Genders switched off on the tab are not sent. A sign-up with no
+//      gender on the website yet (no user_profile row) is sent.
 //   5. Each SMS goes to the next ticked agent in turn — A, B, C, A, B… — also
 //      across the 07:50 batch (Text.lk, sms_log too).
 //
@@ -57,6 +56,40 @@ export function runMode(now = new Date()): RunMode {
   if (t >= MORNING && t < OPEN) return 'morning'
   if (t >= OPEN && t <= CLOSE) return 'day'
   return 'closed'
+}
+
+// ── Stored without new columns ──────────────────────────────────────────────
+// Everything below lives in the 0031 tables, so no further SQL is needed:
+//   • A skipped sign-up keeps state 'paid' and says why in sms_error:
+//     'in_crm:<user id of the agent who has it>' or 'gender_off'.
+//   • The Male / Female switches are one reserved website_signups row
+//     (registered 1970, state 'paid', so no list or run ever picks it up)
+//     whose gender column holds the ticked genders, e.g. 'male,female'.
+
+export const GENDERS_ROW = '__settings_genders__'
+const ALL_GENDERS = ['male', 'female']
+
+export async function readGenders(admin: Admin): Promise<string[]> {
+  const { data } = await admin.from('website_signups').select('gender').eq('website_user_id', GENDERS_ROW).maybeSingle()
+  return data ? (data.gender || '').split(',').filter(Boolean) : ALL_GENDERS
+}
+
+export async function writeGenders(admin: Admin, genders: string[]): Promise<string[]> {
+  const list = ALL_GENDERS.filter(g => genders.includes(g))
+  const { error } = await admin.from('website_signups').upsert({
+    website_user_id: GENDERS_ROW, gender: list.join(','), state: 'paid',
+    registered_at: '1970-01-01T00:00:00Z', first_seen_at: '1970-01-01T00:00:00Z',
+  }, { onConflict: 'website_user_id' })
+  if (error) throw new Error(error.message)
+  return list
+}
+
+/** What the tab shows for a row: 'paid' rows may really be skipped for another reason. */
+export function skipInfo(row: { state: string; sms_error: string | null }): { state: string; ownerId: string | null } {
+  if (row.state !== 'paid' || !row.sms_error) return { state: row.state, ownerId: null }
+  if (row.sms_error.startsWith('in_crm')) return { state: 'in_crm', ownerId: row.sms_error.split(':')[1] || null }
+  if (row.sms_error === 'gender_off') return { state: 'gender_off', ownerId: null }
+  return { state: row.state, ownerId: null }
 }
 
 // ── CRM lookups by phone ────────────────────────────────────────────────────
@@ -234,8 +267,7 @@ export async function runSignupAlerts(opts: { force?: boolean; now?: Date } = {}
     .map(id => (agentRows ?? []).find((a: any) => a.id === id))
     .filter((a: any) => a && a.is_active && a.sms_enabled !== false && a.phone_number) as { id: string; phone_number: string }[]
   let cursor: number = settings.rr_cursor ?? 0
-  // Before migration 0033 there is no genders column: send both.
-  const genders = new Set<string>(Array.isArray(settings.genders) ? settings.genders : ['male', 'female'])
+  const genders = new Set<string>(await readGenders(admin))
 
   for (const w of waiting) {
     const u = webUsers.get(w.website_user_id)
@@ -268,16 +300,13 @@ export async function runSignupAlerts(opts: { force?: boolean; now?: Date } = {}
     if (trail?.customerIds.length) {
       // Whoever touched it last is the agent working it.
       const owner = [...trail.entries].reverse().find(e => e.by)?.by ?? null
-      const { error } = await admin.from('website_signups')
-        .update({ ...base, state: 'in_crm', crm_owner: owner }).eq('id', w.id)
-      // Before migration 0032 'in_crm' / crm_owner don't exist — still never send it.
-      if (error) await admin.from('website_signups').update({ ...base, state: 'paid' }).eq('id', w.id)
+      await admin.from('website_signups')
+        .update({ ...base, state: 'paid', sms_error: `in_crm:${owner ?? ''}` }).eq('id', w.id)
       summary.inCrm++
       continue
     }
     if (facts.gender && !genders.has(facts.gender)) {
-      const { error } = await admin.from('website_signups').update({ ...base, state: 'gender_off' }).eq('id', w.id)
-      if (error) await admin.from('website_signups').update({ ...base, state: 'paid' }).eq('id', w.id)
+      await admin.from('website_signups').update({ ...base, state: 'paid', sms_error: 'gender_off' }).eq('id', w.id)
       summary.genderOff++
       continue
     }

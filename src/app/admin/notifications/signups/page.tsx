@@ -220,9 +220,6 @@ export default function SignupAlertsPage() {
                                     </button>
                                 )
                             })}
-                            {settings && !settings.genders && (
-                                <span className="text-[10px] text-red-500">Run migration 0033 to save this.</span>
-                            )}
                         </div>
                     </div>
                     <div className="flex items-center gap-2">

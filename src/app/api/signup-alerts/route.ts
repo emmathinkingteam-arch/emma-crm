@@ -14,7 +14,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { currentProfile, isAdminRole } from '@/lib/api-auth'
-import { crmTrails } from '@/lib/signup-alerts'
+import { crmTrails, readGenders, writeGenders, skipInfo, GENDERS_ROW } from '@/lib/signup-alerts'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,11 +39,12 @@ export async function GET(req: NextRequest) {
         : new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 7)
     const { start, end } = monthRange(month)
 
-    const [settingsRes, usersRes, rowsRes] = await Promise.all([
+    const [settingsRes, usersRes, rowsRes, genders] = await Promise.all([
         admin.from('signup_alert_settings').select('*').eq('id', 1).single(),
         admin.from('users').select('id, full_name, role, phone_number, sms_enabled').eq('is_active', true).order('full_name'),
         admin.from('website_signups').select('*').gte('registered_at', start).lt('registered_at', end)
-            .order('registered_at', { ascending: false }),
+            .neq('website_user_id', GENDERS_ROW).order('registered_at', { ascending: false }),
+        readGenders(admin),
     ])
     if (settingsRes.error) return NextResponse.json({ error: settingsRes.error.message, needsMigration: true }, { status: 500 })
     if (rowsRes.error) return NextResponse.json({ error: rowsRes.error.message }, { status: 500 })
@@ -63,10 +64,12 @@ export async function GET(req: NextRequest) {
         const t = r.sent_at ? trails.get(r.phone_suffix) : undefined
         const entry = t?.entries.find(e => e.at >= r.sent_at)
         const order = t?.orders.find(o => o.created_at >= r.sent_at)
+        const skip = skipInfo(r)
         return {
             ...r,
+            state: skip.state,
             agent_name: r.assigned_to ? nameOf.get(r.assigned_to) ?? '—' : null,
-            crm_owner_name: r.crm_owner ? nameOf.get(r.crm_owner) ?? null : null,
+            crm_owner_name: skip.ownerId ? nameOf.get(skip.ownerId) ?? null : null,
             entry_at: entry?.at ?? null,
             entry_by: entry?.by ? nameOf.get(entry.by) ?? null : null,
             order_at: order?.created_at ?? null,
@@ -90,7 +93,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
         month,
-        settings: settingsRes.data,
+        settings: { ...settingsRes.data, genders },
         users,
         rows: out,
         stats: Array.from(stats.values()).sort((a, b) => b.sent - a.sent),
@@ -103,8 +106,15 @@ export async function POST(req: NextRequest) {
     const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
     if (typeof body.is_enabled === 'boolean') patch.is_enabled = body.is_enabled
     if (Array.isArray(body.recipient_ids)) patch.recipient_ids = body.recipient_ids.filter((x: unknown) => typeof x === 'string')
-    if (Array.isArray(body.genders)) patch.genders = body.genders.filter((x: unknown) => x === 'male' || x === 'female')
-    const { data, error } = await supabaseAdmin().from('signup_alert_settings').update(patch).eq('id', 1).select('*').single()
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    return NextResponse.json({ settings: data })
+    const admin = supabaseAdmin()
+    try {
+        const genders = Array.isArray(body.genders)
+            ? await writeGenders(admin, body.genders.filter((x: unknown): x is string => typeof x === 'string'))
+            : await readGenders(admin)
+        const { data, error } = await admin.from('signup_alert_settings').update(patch).eq('id', 1).select('*').single()
+        if (error) throw new Error(error.message)
+        return NextResponse.json({ settings: { ...data, genders } })
+    } catch (err) {
+        return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
+    }
 }

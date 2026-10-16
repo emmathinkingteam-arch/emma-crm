@@ -213,6 +213,11 @@ export default function CustomerDetailPage() {
     return () => clearInterval(t)
   }, [])
 
+  // fetchAll only fills the brief when the step has one (so it never wipes a
+  // counselor's half-typed brief), so clear it when moving to another customer —
+  // otherwise one customer's brief could be handed on with the next one's order.
+  useEffect(() => { setBrief(''); setBriefEn(''); setEditingBrief(false) }, [id])
+
   // Re-run when role hydrates so the back-office / admin post-boosting data
   // (per-order briefs + slots) loads even if role wasn't ready on first mount.
   useEffect(() => { fetchAll() }, [id, role])
@@ -2260,13 +2265,18 @@ export default function CustomerDetailPage() {
                                   setSavingBriefEdit(true)
                                   // Persist the manager's edit to the current step row
                                   // so the designer (next step) sees the latest version.
-                                  await supabase
+                                  const { error: saveErr } = await supabase
                                     .from('order_steps')
                                     .update({
                                       description: brief,
                                       brief_version: ((activeStep as any).brief_version || 1) + 1,
                                     })
                                     .eq('id', activeStep.id)
+                                  if (saveErr) {
+                                    setSavingBriefEdit(false)
+                                    alert('Could not save the edit: ' + saveErr.message)
+                                    return
+                                  }
                                   await logAction('Manager edited the brief')
                                   setEditingBrief(false)
                                   setSavingBriefEdit(false)
@@ -2323,18 +2333,32 @@ export default function CustomerDetailPage() {
                           {workers.filter(w => canTakeDuty(w.role, 'designer')).map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
                         </select>
                       </div>
-                      <button onClick={() => {
+                      <button onClick={async () => {
                         const name = workers.find(w => w.id === selectedAssignee)?.full_name || 'designer'
                         // Pass the possibly-edited brief — manager edits flow forward to designer.
-                        const finalBrief = brief || activeStep.description || ''
+                        // An edit still open in the textarea counts: this button used to be
+                        // disabled while editing, and the only way out was a small "Save edit"
+                        // link scrolled off the top of a phone screen — so after editing,
+                        // "send to designer" simply looked broken.
+                        const finalBrief = brief.trim() ? brief : (activeStep.description || '')
+                        const edited = finalBrief !== (activeStep.description || '')
                         // The English brief is deliberately NOT shown in this panel —
                         // pass the stored value straight through, untouched.
                         const finalBriefEn = activeStep.description_en || ''
                         const lockNote = isInstallmentPending ? ' — post locked pending 2nd installment' : ''
-                        doComplete(6, { description: finalBrief }, selectedAssignee, `Manager approved — assigned to designer: ${name}${lockNote}`, finalBrief, finalBriefEn)
-                      }} disabled={!selectedAssignee || actionLoading || editingBrief}
+                        if (edited) await logAction('Manager edited the brief')
+                        setEditingBrief(false)
+                        doComplete(6, {
+                          description: finalBrief,
+                          ...(edited ? { brief_version: ((activeStep as any).brief_version || 1) + 1 } : {}),
+                        }, selectedAssignee, `Manager approved — assigned to designer: ${name}${lockNote}`, finalBrief, finalBriefEn)
+                      }} disabled={!selectedAssignee || actionLoading || savingBriefEdit}
                         className="w-full bg-pink-600 text-white rounded-xl px-4 py-3 text-xs font-bold disabled:opacity-40">
-                        {actionLoading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Approve and assign to designer'}
+                        {actionLoading
+                          ? <Loader2 size={14} className="animate-spin mx-auto" />
+                          : brief.trim() && brief !== (activeStep.description || '')
+                            ? 'Approve edited brief and assign to designer'
+                            : 'Approve and assign to designer'}
                       </button>
 
                       <div className="border-t border-gray-100 pt-2">
@@ -2356,7 +2380,11 @@ export default function CustomerDetailPage() {
                             </div>
                             <button onClick={() => {
                               const name = workers.find(w => w.id === rejectAssignee)?.full_name || 'counselor'
-                              const briefWithFeedback = `${activeStep.description || ''}\n\n---\nManager feedback: ${rejectReason}`
+                              // Send back the manager's edited version if there is one, so the
+                              // counselor sees what the manager changed.
+                              const baseBrief = brief.trim() ? brief : (activeStep.description || '')
+                              setEditingBrief(false)
+                              const briefWithFeedback = `${baseBrief}\n\n---\nManager feedback: ${rejectReason}`
                               // Hand the English brief back to the counsellor too, so a
                               // rejection doesn't wipe the work they already did on it.
                               doComplete(4, {}, rejectAssignee, `Brief rejected by manager — returned to ${name}: "${rejectReason}"`, briefWithFeedback, activeStep.description_en || '')
